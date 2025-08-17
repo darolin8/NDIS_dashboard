@@ -90,36 +90,7 @@ st.markdown("""
 
 st.title("🏥 Advanced NDIS Incident Analytics Dashboard")
 
-@st.cache_data
-def load_data():
-    """Load and preprocess NDIS incidents data with enhanced features"""
-    
-    # Add file upload option for web deployment
-    st.sidebar.subheader("📁 Data Source")
-    data_source = st.sidebar.radio("Choose data source:", ["Upload CSV", "Use Demo Data"])
-    
-    if data_source == "Upload CSV":
-        uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
-        if uploaded_file is not None:
-            try:
-                df = pd.read_csv(uploaded_file)
-                st.sidebar.success("✅ File uploaded successfully!")
-            except Exception as e:
-                st.sidebar.error(f"Error reading file: {str(e)}")
-                return create_demo_data()
-        else:
-            st.sidebar.info("Please upload a CSV file to continue")
-            return create_demo_data()
-    else:
-        # Try to load local file first, fallback to demo data
-        try:
-            df = pd.read_csv("/Users/darolinvinisha/PycharmProjects/MD651/Using Ollama/ndis_incidents_synthetic.csv")
-        except FileNotFoundError:
-            df = create_demo_data()
-    
-    # Process the data
-    return process_data(df)
-
+# Data loading functions (without cache and widgets)
 def create_demo_data():
     """Create demo data for testing"""
     np.random.seed(42)
@@ -140,6 +111,7 @@ def create_demo_data():
     
     return pd.DataFrame(data)
 
+@st.cache_data
 def process_data(df):
     """Process and enhance the loaded data"""
     try:
@@ -189,6 +161,26 @@ def process_data(df):
     except Exception as e:
         st.error(f"❌ Error processing data: {str(e)}")
         return create_demo_data()
+
+def load_data_from_file(uploaded_file):
+    """Load data from uploaded file"""
+    try:
+        df = pd.read_csv(uploaded_file)
+        return process_data(df)
+    except Exception as e:
+        st.error(f"Error reading file: {str(e)}")
+        return None
+
+def load_local_data():
+    """Try to load local data file"""
+    try:
+        df = pd.read_csv("/Users/darolinvinisha/PycharmProjects/MD651/Using Ollama/ndis_incidents_synthetic.csv")
+        return process_data(df)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        st.error(f"Error loading local file: {str(e)}")
+        return None
 
 def calculate_correlations(df):
     """Calculate key correlations for analysis"""
@@ -294,28 +286,36 @@ def generate_insights(df):
     
     return insights
 
-# Load data with better error handling
+# Data loading UI (moved outside cached functions)
+st.sidebar.subheader("📁 Data Source")
+data_source = st.sidebar.radio("Choose data source:", ["Use Demo Data", "Upload CSV"])
+
+# Load data based on user selection
 df = None
-try:
-    df = load_data()
-    if df is not None and len(df) > 0:
-        corr_matrix, numeric_df = calculate_correlations(df)
-        insights = generate_insights(df)
-        
-        st.success(f"✅ Successfully loaded {len(df)} incidents from {df['incident_date'].min().strftime('%B %Y')} to {df['incident_date'].max().strftime('%B %Y')}")
+if data_source == "Upload CSV":
+    uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+    if uploaded_file is not None:
+        df = load_data_from_file(uploaded_file)
+        if df is not None:
+            st.sidebar.success("✅ File uploaded successfully!")
     else:
-        st.warning("⚠️ No data loaded. Please upload a CSV file or use demo data.")
-        df = create_demo_data()
-        df = process_data(df)
-        corr_matrix, numeric_df = calculate_correlations(df)
-        insights = generate_insights(df)
-except Exception as e:
-    st.error(f"❌ Error loading data: {str(e)}")
-    st.info("📁 Please use the file upload option in the sidebar or try demo data.")
-    df = create_demo_data()
-    df = process_data(df)
+        st.sidebar.info("Please upload a CSV file to continue")
+        df = process_data(create_demo_data())
+else:
+    # Try local file first, then demo data
+    df = load_local_data()
+    if df is None:
+        df = process_data(create_demo_data())
+
+# Load data with better error handling
+if df is not None and len(df) > 0:
     corr_matrix, numeric_df = calculate_correlations(df)
-    insights = ["📊 Using demo data for analysis"]
+    insights = generate_insights(df)
+    
+    st.success(f"✅ Successfully loaded {len(df)} incidents from {df['incident_date'].min().strftime('%B %Y')} to {df['incident_date'].max().strftime('%B %Y')}")
+else:
+    st.error("❌ Failed to load data")
+    st.stop()
 
 # Enhanced Sidebar with Analysis Mode
 st.sidebar.header("🎛️ Advanced Controls")
@@ -416,10 +416,14 @@ if analysis_mode == "Executive Overview":
         st.metric("🚨 Critical", critical_count, delta=f"{critical_count/total_incidents*100:.1f}%" if total_incidents > 0 else "0%")
     
     with col3:
-        avg_delay = df_filtered['notification_delay'].mean()
-        target_delay = 1.0  # Target: 1 day
-        delay_status = "🟢" if avg_delay <= target_delay else "🔴"
-        st.metric("⏱️ Avg Delay", f"{avg_delay:.1f}d", delta=f"{delay_status}")
+        # Check if notification_delay column exists
+        if 'notification_delay' in df_filtered.columns:
+            avg_delay = df_filtered['notification_delay'].mean()
+            target_delay = 1.0  # Target: 1 day
+            delay_status = "🟢" if avg_delay <= target_delay else "🔴"
+            st.metric("⏱️ Avg Delay", f"{avg_delay:.1f}d", delta=f"{delay_status}")
+        else:
+            st.metric("⏱️ Avg Delay", "N/A", delta="No data")
     
     with col4:
         repeat_participants = df_filtered['participant_name'].value_counts()
@@ -427,8 +431,12 @@ if analysis_mode == "Executive Overview":
         st.metric("🔄 Repeat Participants", repeat_count)
     
     with col5:
-        compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100
-        st.metric("✅ Compliance Rate", f"{compliance_rate:.1f}%")
+        # Check if notification_delay column exists for compliance calculation
+        if 'notification_delay' in df_filtered.columns:
+            compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100
+            st.metric("✅ Compliance Rate", f"{compliance_rate:.1f}%")
+        else:
+            st.metric("✅ Compliance Rate", "N/A", delta="No data")
     
     # Interactive Incident Heatmap
     st.subheader("🔥 Incident Heatmap: Location vs Time")
