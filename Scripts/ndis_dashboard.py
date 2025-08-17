@@ -90,136 +90,155 @@ st.markdown("""
 
 st.title("🏥 Advanced NDIS Incident Analytics Dashboard")
 
-
 @st.cache_data
 def load_data():
     """Load and preprocess NDIS incidents data with enhanced features"""
+    
+    # Add file upload option for web deployment
+    st.sidebar.subheader("📁 Data Source")
+    data_source = st.sidebar.radio("Choose data source:", ["Upload CSV", "Use Demo Data"])
+    
+    if data_source == "Upload CSV":
+        uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+        if uploaded_file is not None:
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.sidebar.success("✅ File uploaded successfully!")
+            except Exception as e:
+                st.sidebar.error(f"Error reading file: {str(e)}")
+                return create_demo_data()
+        else:
+            st.sidebar.info("Please upload a CSV file to continue")
+            return create_demo_data()
+    else:
+        # Try to load local file first, fallback to demo data
+        try:
+            df = pd.read_csv("/Users/darolinvinisha/PycharmProjects/MD651/Using Ollama/ndis_incidents_synthetic.csv")
+        except FileNotFoundError:
+            df = create_demo_data()
+    
+    # Process the data
+    return process_data(df)
+
+def create_demo_data():
+    """Create demo data for testing"""
+    np.random.seed(42)
+    n_records = 100
+    
+    data = {
+        'incident_id': [f'INC{i:06d}' for i in range(1, n_records + 1)],
+        'participant_name': [f'Participant_{i:03d}' for i in np.random.randint(1, 50, n_records)],
+        'incident_date': pd.date_range('2024-01-01', '2024-12-31', periods=n_records),
+        'incident_time': [f"{h:02d}:{m:02d}" for h, m in zip(np.random.randint(0, 24, n_records), np.random.randint(0, 60, n_records))],
+        'incident_type': np.random.choice(['Medication Error', 'Fall', 'Behavioral Incident'], n_records),
+        'severity': np.random.choice(['Low', 'Medium', 'High', 'Critical'], n_records),
+        'location': np.random.choice(['Main Office', 'Community Center', 'Residential Care'], n_records),
+        'reportable': np.random.choice(['Yes', 'No'], n_records),
+        'description': [f'Demo incident {i}' for i in range(n_records)],
+        'immediate_action': [f'Demo action {i}' for i in range(n_records)]
+    }
+    
+    return pd.DataFrame(data)
+
+def process_data(df):
+    """Process and enhance the loaded data"""
     try:
-        # Try to load your actual data file
-        df = pd.read_csv("/Users/darolinvinisha/PycharmProjects/MD651/Using Ollama/ndis_incidents_synthetic.csv")
-
         # Convert date columns
-        df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
-        df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
-
+        if 'incident_date' in df.columns:
+            df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+            if df['incident_date'].isna().all():
+                df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+        
+        if 'notification_date' in df.columns:
+            df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+            if df['notification_date'].isna().all():
+                df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
+        else:
+            # Create notification dates with some delay
+            df['notification_date'] = df['incident_date'] + pd.to_timedelta(np.random.randint(0, 3, len(df)), unit='days')
+        
         # Calculate notification delay
         df['notification_delay'] = (df['notification_date'] - df['incident_date']).dt.days
-
+        
         # Add time-based columns
         df['month'] = df['incident_date'].dt.month_name()
         df['day_of_week'] = df['incident_date'].dt.day_name()
-        df['hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
+        
+        if 'incident_time' in df.columns:
+            df['hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
+        else:
+            df['hour'] = np.random.randint(0, 24, len(df))
+            
         df['quarter'] = df['incident_date'].dt.quarter
         df['is_weekend'] = df['incident_date'].dt.dayofweek >= 5
-
+        
         # Risk scoring
         severity_weights = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
         df['severity_score'] = df['severity'].map(severity_weights)
-
+        
         # Create age groups if age column exists
         if 'age' in df.columns:
-            df['age_group'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 65, 100],
-                                     labels=['18-25', '26-35', '36-50', '51-65', '65+'])
+            df['age_group'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 65, 100], labels=['18-25', '26-35', '36-50', '51-65', '65+'])
         else:
             # Create a dummy age column and age groups
             df['age'] = np.random.normal(35, 15, len(df)).astype(int).clip(18, 85)
-            df['age_group'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 65, 100],
-                                     labels=['18-25', '26-35', '36-50', '51-65', '65+'])
-
+            df['age_group'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 65, 100], labels=['18-25', '26-35', '36-50', '51-65', '65+'])
+        
         return df
-
-    except FileNotFoundError:
-        st.error("❌ Could not find the data file: ndis_incidents_synthetic.csv")
-        st.info("Please make sure the file exists in the correct directory.")
-
-        # Create minimal demo data as fallback
-        np.random.seed(42)
-        n_records = 100
-
-        data = {
-            'incident_id': [f'INC{i:06d}' for i in range(1, n_records + 1)],
-            'participant_name': [f'Participant_{i:03d}' for i in np.random.randint(1, 50, n_records)],
-            'incident_date': pd.date_range('2024-01-01', '2024-12-31', periods=n_records),
-            'incident_time': [f"{h:02d}:{m:02d}" for h, m in
-                              zip(np.random.randint(0, 24, n_records), np.random.randint(0, 60, n_records))],
-            'incident_type': np.random.choice(['Medication Error', 'Fall', 'Behavioral Incident'], n_records),
-            'severity': np.random.choice(['Low', 'Medium', 'High', 'Critical'], n_records),
-            'location': np.random.choice(['Main Office', 'Community Center', 'Residential Care'], n_records),
-            'reportable': np.random.choice(['Yes', 'No'], n_records),
-            'description': [f'Demo incident {i}' for i in range(n_records)],
-            'immediate_action': [f'Demo action {i}' for i in range(n_records)]
-        }
-
-        df = pd.DataFrame(data)
-        df['notification_date'] = df['incident_date'] + pd.to_timedelta(np.random.randint(0, 3, n_records), unit='days')
-        df['notification_delay'] = (df['notification_date'] - df['incident_date']).dt.days
-        df['month'] = df['incident_date'].dt.month_name()
-        df['day_of_week'] = df['incident_date'].dt.day_name()
-        df['hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
-        df['quarter'] = df['incident_date'].dt.quarter
-        df['is_weekend'] = df['incident_date'].dt.dayofweek >= 5
-        df['severity_score'] = df['severity'].map({'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4})
-        df['age'] = np.random.normal(35, 15, len(df)).astype(int).clip(18, 85)
-        df['age_group'] = pd.cut(df['age'], bins=[0, 25, 35, 50, 65, 100],
-                                 labels=['18-25', '26-35', '36-50', '51-65', '65+'])
-
-        return df
-
+        
     except Exception as e:
-        st.error(f"❌ Error loading data: {str(e)}")
-        st.stop()
-
+        st.error(f"❌ Error processing data: {str(e)}")
+        return create_demo_data()
 
 def calculate_correlations(df):
     """Calculate key correlations for analysis"""
     numeric_df = df.copy()
-
+    
     # Convert categorical to numeric (only if columns exist)
     if 'severity' in df.columns:
         numeric_df['severity_numeric'] = numeric_df['severity'].map({'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4})
     else:
         numeric_df['severity_numeric'] = 1
-
+        
     if 'reportable' in df.columns:
         numeric_df['reportable_numeric'] = numeric_df['reportable'].map({'No': 0, 'Yes': 1})
     else:
         numeric_df['reportable_numeric'] = 0
-
+        
     if 'medical_attention' in df.columns:
         numeric_df['medical_attention_numeric'] = numeric_df['medical_attention'].map({'No': 0, 'Yes': 1})
     else:
         numeric_df['medical_attention_numeric'] = 0
-
+        
     if 'is_weekend' in df.columns:
         numeric_df['is_weekend_numeric'] = numeric_df['is_weekend'].astype(int)
     else:
         numeric_df['is_weekend_numeric'] = 0
-
+    
     # Select only available columns for correlation
     correlation_vars = []
-    possible_vars = ['age', 'severity_numeric', 'notification_delay', 'reportable_numeric',
-                     'medical_attention_numeric', 'is_weekend_numeric', 'hour']
-
+    possible_vars = ['age', 'severity_numeric', 'notification_delay', 'reportable_numeric', 
+                    'medical_attention_numeric', 'is_weekend_numeric', 'hour']
+    
     for var in possible_vars:
         if var in numeric_df.columns:
             correlation_vars.append(var)
-
+    
     if len(correlation_vars) < 2:
         # Create minimal correlation matrix if not enough variables
         correlation_vars = ['severity_numeric', 'notification_delay']
         for var in correlation_vars:
             if var not in numeric_df.columns:
                 numeric_df[var] = 1
-
+    
     corr_matrix = numeric_df[correlation_vars].corr()
-
+    
     return corr_matrix, numeric_df
-
 
 def generate_insights(df):
     """Generate automated insights from the data"""
     insights = []
-
+    
     try:
         # Age-related insights
         if 'age_group' in df.columns and 'severity_score' in df.columns:
@@ -227,16 +246,15 @@ def generate_insights(df):
             if len(age_severity) > 0:
                 high_risk_age = age_severity.idxmax()
                 insights.append(f"🎯 Age group '{high_risk_age}' has the highest average incident severity")
-
+        
         # Temporal insights
         if 'is_weekend' in df.columns and 'severity_score' in df.columns:
             weekend_incidents = df[df['is_weekend']]['severity_score'].mean()
             weekday_incidents = df[~df['is_weekend']]['severity_score'].mean()
             if pd.notna(weekend_incidents) and pd.notna(weekday_incidents) and weekday_incidents > 0:
                 if weekend_incidents > weekday_incidents:
-                    insights.append(
-                        f"⏰ Weekend incidents are {((weekend_incidents / weekday_incidents - 1) * 100):.1f}% more severe on average")
-
+                    insights.append(f"⏰ Weekend incidents are {((weekend_incidents/weekday_incidents - 1) * 100):.1f}% more severe on average")
+        
         # Location insights
         if 'location' in df.columns and 'severity_score' in df.columns:
             location_risk = df.groupby('location').agg({
@@ -246,7 +264,7 @@ def generate_insights(df):
             if len(location_risk[location_risk['incident_id'] > 50]) > 0:
                 high_risk_location = location_risk.loc[location_risk['incident_id'] > 50, 'severity_score'].idxmax()
                 insights.append(f"🏢 '{high_risk_location}' shows highest severity among high-volume locations")
-
+        
         # Reporter insights
         if 'reporter_type' in df.columns and 'notification_delay' in df.columns:
             reporter_performance = df.groupby('reporter_type').agg({
@@ -256,14 +274,13 @@ def generate_insights(df):
             if len(reporter_performance) > 0:
                 fastest_reporters = reporter_performance['notification_delay'].idxmin()
                 insights.append(f"📞 {fastest_reporters} are the fastest at reporting incidents")
-
+        
         # Medical attention patterns
         if 'severity' in df.columns and 'medical_attention' in df.columns:
             medical_by_severity = df.groupby('severity')['medical_attention'].apply(lambda x: (x == 'Yes').mean())
             if 'Critical' in medical_by_severity.index:
-                insights.append(
-                    f"🏥 {medical_by_severity['Critical'] * 100:.1f}% of critical incidents require medical attention")
-
+                insights.append(f"🏥 {medical_by_severity['Critical']*100:.1f}% of critical incidents require medical attention")
+        
         # Default insights if no data available
         if len(insights) == 0:
             insights = [
@@ -271,27 +288,34 @@ def generate_insights(df):
                 "🔍 Exploring incident patterns",
                 "📈 Building risk assessments"
             ]
-
+            
     except Exception as e:
         insights = [f"⚠️ Analysis temporarily unavailable: {str(e)[:50]}..."]
-
+    
     return insights
 
-
-# Load data
+# Load data with better error handling
+df = None
 try:
     df = load_data()
-    corr_matrix, numeric_df = calculate_correlations(df)
-    insights = generate_insights(df)
-
-    st.success(
-        f"✅ Successfully loaded {len(df)} incidents from {df['incident_date'].min().strftime('%B %Y')} to {df['incident_date'].max().strftime('%B %Y')}")
+    if df is not None and len(df) > 0:
+        corr_matrix, numeric_df = calculate_correlations(df)
+        insights = generate_insights(df)
+        
+        st.success(f"✅ Successfully loaded {len(df)} incidents from {df['incident_date'].min().strftime('%B %Y')} to {df['incident_date'].max().strftime('%B %Y')}")
+    else:
+        st.warning("⚠️ No data loaded. Please upload a CSV file or use demo data.")
+        df = create_demo_data()
+        df = process_data(df)
+        corr_matrix, numeric_df = calculate_correlations(df)
+        insights = generate_insights(df)
 except Exception as e:
     st.error(f"❌ Error loading data: {str(e)}")
-    # Create empty defaults to prevent errors
-    df = pd.DataFrame()
-    insights = ["No insights available - data loading failed"]
-    st.stop()
+    st.info("📁 Please use the file upload option in the sidebar or try demo data.")
+    df = create_demo_data()
+    df = process_data(df)
+    corr_matrix, numeric_df = calculate_correlations(df)
+    insights = ["📊 Using demo data for analysis"]
 
 # Enhanced Sidebar with Analysis Mode
 st.sidebar.header("🎛️ Advanced Controls")
@@ -362,7 +386,7 @@ incident_type_filter = st.sidebar.multiselect(
 df_filtered = df_filtered[
     (df_filtered['severity'].isin(severity_filter)) &
     (df_filtered['incident_type'].isin(incident_type_filter))
-    ]
+]
 
 # Real-time Insights Panel
 with st.sidebar:
@@ -378,47 +402,46 @@ with st.sidebar:
 if analysis_mode == "Executive Overview":
     # Enhanced KPIs with trend indicators
     col1, col2, col3, col4, col5 = st.columns(5)
-
+    
     with col1:
         total_incidents = len(df_filtered)
-        prev_period_data = df[(df['incident_date'] >= df['incident_date'].max() - timedelta(days=60)) &
-                              (df['incident_date'] < df['incident_date'].max() - timedelta(days=30))]
+        prev_period_data = df[(df['incident_date'] >= df['incident_date'].max() - timedelta(days=60)) & 
+                            (df['incident_date'] < df['incident_date'].max() - timedelta(days=30))]
         prev_period = len(prev_period_data)
         trend = ((total_incidents - prev_period) / prev_period * 100) if prev_period > 0 else 0
         st.metric("📊 Total Incidents", total_incidents, delta=f"{trend:+.1f}%")
-
+    
     with col2:
         critical_count = len(df_filtered[df_filtered['severity'] == 'Critical'])
-        st.metric("🚨 Critical", critical_count,
-                  delta=f"{critical_count / total_incidents * 100:.1f}%" if total_incidents > 0 else "0%")
-
+        st.metric("🚨 Critical", critical_count, delta=f"{critical_count/total_incidents*100:.1f}%" if total_incidents > 0 else "0%")
+    
     with col3:
         avg_delay = df_filtered['notification_delay'].mean()
         target_delay = 1.0  # Target: 1 day
         delay_status = "🟢" if avg_delay <= target_delay else "🔴"
         st.metric("⏱️ Avg Delay", f"{avg_delay:.1f}d", delta=f"{delay_status}")
-
+    
     with col4:
         repeat_participants = df_filtered['participant_name'].value_counts()
         repeat_count = len(repeat_participants[repeat_participants > 1])
         st.metric("🔄 Repeat Participants", repeat_count)
-
+    
     with col5:
         compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100
         st.metric("✅ Compliance Rate", f"{compliance_rate:.1f}%")
-
+    
     # Interactive Incident Heatmap
     st.subheader("🔥 Incident Heatmap: Location vs Time")
-
+    
     # Create heatmap data
     heatmap_data = df_filtered.pivot_table(
-        values='incident_id',
-        index='location',
-        columns=df_filtered['incident_date'].dt.hour,
-        aggfunc='count',
+        values='incident_id', 
+        index='location', 
+        columns=df_filtered['incident_date'].dt.hour, 
+        aggfunc='count', 
         fill_value=0
     )
-
+    
     fig_heatmap = px.imshow(
         heatmap_data,
         title="Incident Frequency by Location and Hour of Day",
@@ -426,15 +449,15 @@ if analysis_mode == "Executive Overview":
         color_continuous_scale="Reds"
     )
     st.plotly_chart(fig_heatmap, use_container_width=True)
-
+    
     # Trend Analysis
     col1, col2 = st.columns(2)
-
+    
     with col1:
         # Monthly trends
         monthly_trends = df_filtered.groupby(df_filtered['incident_date'].dt.to_period('M')).size()
         monthly_trends.index = monthly_trends.index.astype(str)
-
+        
         fig_trend = px.line(
             x=monthly_trends.index,
             y=monthly_trends.values,
@@ -443,7 +466,7 @@ if analysis_mode == "Executive Overview":
         )
         fig_trend.update_xaxes(tickangle=45)
         st.plotly_chart(fig_trend, use_container_width=True)
-
+    
     with col2:
         # Severity distribution
         severity_counts = df_filtered['severity'].value_counts()
@@ -460,10 +483,10 @@ if analysis_mode == "Executive Overview":
 
 elif analysis_mode == "Risk Analysis":
     st.subheader("🎯 Advanced Risk Analysis")
-
+    
     # Risk Matrix
     col1, col2 = st.columns(2)
-
+    
     with col1:
         # Severity vs Frequency Risk Matrix
         risk_data = []
@@ -471,19 +494,19 @@ elif analysis_mode == "Risk Analysis":
             location_data = df_filtered[df_filtered['location'] == location]
             total_incidents = len(location_data)
             avg_severity = location_data['severity_score'].mean()
-
+            
             risk_data.append({
                 'location': location,
                 'total_incidents': total_incidents,
                 'avg_severity': avg_severity,
                 'risk_score': total_incidents * avg_severity
             })
-
+        
         risk_df = pd.DataFrame(risk_data)
-
+        
         fig_risk = px.scatter(
-            risk_df,
-            x='total_incidents',
+            risk_df, 
+            x='total_incidents', 
             y='avg_severity',
             size='risk_score',
             color='risk_score',
@@ -492,21 +515,21 @@ elif analysis_mode == "Risk Analysis":
             labels={'total_incidents': 'Incident Volume', 'avg_severity': 'Average Severity Score'},
             color_continuous_scale="Reds"
         )
-
+        
         # Add quadrant lines
         median_volume = risk_df['total_incidents'].median()
         median_severity = risk_df['avg_severity'].median()
-
+        
         fig_risk.add_hline(y=median_severity, line_dash="dash", line_color="gray", opacity=0.5)
         fig_risk.add_vline(x=median_volume, line_dash="dash", line_color="gray", opacity=0.5)
-
+        
         st.plotly_chart(fig_risk, use_container_width=True)
-
+    
     with col2:
         # Age vs Incident Type Risk Analysis
         age_incident_matrix = pd.crosstab(df_filtered['age_group'], df_filtered['incident_type'])
         age_incident_pct = age_incident_matrix.div(age_incident_matrix.sum(axis=1), axis=0) * 100
-
+        
         fig_age_risk = px.imshow(
             age_incident_pct,
             title="Incident Type Risk by Age Group (%)",
@@ -515,38 +538,37 @@ elif analysis_mode == "Risk Analysis":
         )
         fig_age_risk.update_xaxes(tickangle=45)
         st.plotly_chart(fig_age_risk, use_container_width=True)
-
+    
     # Risk Factors Analysis
     st.subheader("📊 Risk Factor Analysis")
-
+    
     risk_factors = {}
-
+    
     # Weekend vs weekday risk
     if len(df_filtered[df_filtered['is_weekend']]) > 0:
         risk_factors['Weekend Incidents'] = df_filtered[df_filtered['is_weekend']]['severity_score'].mean()
-
+    
     # Night hours risk
     night_hours = list(range(22, 24)) + list(range(0, 7))
     night_incidents = df_filtered[df_filtered['hour'].isin(night_hours)]
     if len(night_incidents) > 0:
         risk_factors['Night Hours (22-06)'] = night_incidents['severity_score'].mean()
-
+    
     # Repeat participants risk
     repeat_participants = df_filtered['participant_name'].value_counts()
     repeat_names = repeat_participants[repeat_participants > 1].index
     if len(repeat_names) > 0:
-        risk_factors['Repeat Participants'] = df_filtered[df_filtered['participant_name'].isin(repeat_names)][
-            'severity_score'].mean()
-
+        risk_factors['Repeat Participants'] = df_filtered[df_filtered['participant_name'].isin(repeat_names)]['severity_score'].mean()
+    
     # Delayed reporting risk
     delayed_reports = df_filtered[df_filtered['notification_delay'] > 1]
     if len(delayed_reports) > 0:
         risk_factors['Delayed Reporting'] = delayed_reports['severity_score'].mean()
-
+    
     if risk_factors:
         risk_factor_df = pd.DataFrame(list(risk_factors.items()), columns=['Factor', 'Risk Score'])
         risk_factor_df = risk_factor_df.sort_values('Risk Score', ascending=True)
-
+        
         fig_factors = px.bar(
             risk_factor_df,
             x='Risk Score',
@@ -560,10 +582,10 @@ elif analysis_mode == "Risk Analysis":
 
 elif analysis_mode == "Correlation Explorer":
     st.subheader("🔗 Interactive Correlation Analysis")
-
+    
     # Correlation matrix heatmap
     col1, col2 = st.columns([2, 1])
-
+    
     with col1:
         fig_corr = px.imshow(
             corr_matrix,
@@ -573,14 +595,14 @@ elif analysis_mode == "Correlation Explorer":
         )
         fig_corr.update_layout(height=500)
         st.plotly_chart(fig_corr, use_container_width=True)
-
+    
     with col2:
         st.markdown("### 🎯 Key Correlations")
-
+        
         # Find strongest correlations
         corr_pairs = []
         for i in range(len(corr_matrix.columns)):
-            for j in range(i + 1, len(corr_matrix.columns)):
+            for j in range(i+1, len(corr_matrix.columns)):
                 corr_value = corr_matrix.iloc[i, j]
                 if abs(corr_value) > 0.1:  # Only show meaningful correlations
                     corr_pairs.append({
@@ -588,16 +610,15 @@ elif analysis_mode == "Correlation Explorer":
                         'var2': corr_matrix.columns[j],
                         'correlation': corr_value
                     })
-
+        
         if corr_pairs:
             corr_pairs_df = pd.DataFrame(corr_pairs)
             corr_pairs_df = corr_pairs_df.reindex(corr_pairs_df.correlation.abs().sort_values(ascending=False).index)
-
+            
             for _, row in corr_pairs_df.head(5).iterrows():
-                strength = "Strong" if abs(row['correlation']) > 0.5 else "Moderate" if abs(
-                    row['correlation']) > 0.3 else "Weak"
+                strength = "Strong" if abs(row['correlation']) > 0.5 else "Moderate" if abs(row['correlation']) > 0.3 else "Weak"
                 direction = "Positive" if row['correlation'] > 0 else "Negative"
-
+                
                 st.markdown(f"""
                 <div class="correlation-card">
                     <strong>{row['var1']} ↔ {row['var2']}</strong><br>
@@ -605,10 +626,10 @@ elif analysis_mode == "Correlation Explorer":
                     r = {row['correlation']:.3f}
                 </div>
                 """, unsafe_allow_html=True)
-
+    
     # Interactive scatter plots
     st.subheader("🔍 Relationship Explorer")
-
+    
     col1, col2, col3 = st.columns(3)
     with col1:
         x_var = st.selectbox("X-axis Variable", corr_matrix.columns, index=0)
@@ -616,7 +637,7 @@ elif analysis_mode == "Correlation Explorer":
         y_var = st.selectbox("Y-axis Variable", corr_matrix.columns, index=1)
     with col3:
         color_var = st.selectbox("Color by", ['severity', 'location', 'incident_type', 'age_group'])
-
+    
     if x_var != y_var:
         fig_scatter = px.scatter(
             numeric_df,
@@ -628,41 +649,40 @@ elif analysis_mode == "Correlation Explorer":
             hover_data=['participant_name', 'incident_date']
         )
         st.plotly_chart(fig_scatter, use_container_width=True)
-
+        
         # Statistical significance test
         valid_data = numeric_df[[x_var, y_var]].dropna()
         if len(valid_data) > 2:
             correlation, p_value = stats.pearsonr(valid_data[x_var], valid_data[y_var])
             significance = "Significant" if p_value < 0.05 else "Not significant"
-
-            st.info(
-                f"**Statistical Analysis:** Correlation = {correlation:.3f}, p-value = {p_value:.3f} ({significance})")
+            
+            st.info(f"**Statistical Analysis:** Correlation = {correlation:.3f}, p-value = {p_value:.3f} ({significance})")
 
 elif analysis_mode == "Predictive Insights":
     st.subheader("🔮 Predictive Analytics & Forecasting")
-
+    
     # Time series analysis
     monthly_incidents = df_filtered.groupby(df_filtered['incident_date'].dt.to_period('M')).size()
     monthly_incidents.index = monthly_incidents.index.to_timestamp()
-
+    
     if len(monthly_incidents) > 3:
         # Simple trend analysis
         trend_data = pd.DataFrame({
             'month': range(len(monthly_incidents)),
             'incidents': monthly_incidents.values
         })
-
+        
         # Calculate linear trend
         z = np.polyfit(trend_data['month'], trend_data['incidents'], 1)
         trend_line = np.poly1d(z)
-
+        
         # Create forecast
         future_months = range(len(monthly_incidents), len(monthly_incidents) + 6)
         forecast = [trend_line(m) for m in future_months]
-
+        
         # Plot
         fig_forecast = go.Figure()
-
+        
         # Historical data
         fig_forecast.add_trace(go.Scatter(
             x=monthly_incidents.index,
@@ -671,7 +691,7 @@ elif analysis_mode == "Predictive Insights":
             name='Historical',
             line=dict(color='blue')
         ))
-
+        
         # Trend line
         fig_forecast.add_trace(go.Scatter(
             x=monthly_incidents.index,
@@ -680,7 +700,7 @@ elif analysis_mode == "Predictive Insights":
             name='Trend',
             line=dict(color='red', dash='dash')
         ))
-
+        
         # Forecast
         future_dates = pd.date_range(monthly_incidents.index[-1], periods=7, freq='M')[1:]
         fig_forecast.add_trace(go.Scatter(
@@ -690,55 +710,53 @@ elif analysis_mode == "Predictive Insights":
             name='Forecast',
             line=dict(color='orange')
         ))
-
+        
         fig_forecast.update_layout(
             title="Incident Trend Forecast (6 Months Ahead)",
             xaxis_title="Date",
             yaxis_title="Number of Incidents"
         )
-
+        
         st.plotly_chart(fig_forecast, use_container_width=True)
-
+    
     # Risk Prediction Calculator
     st.subheader("⚠️ Risk Prediction Engine")
-
+    
     col1, col2 = st.columns(2)
-
+    
     with col1:
         st.markdown("### 🎯 Scenario Planning")
-
+        
         # Interactive risk calculator
         selected_age = st.slider("Participant Age", 18, 85, 35)
         selected_location = st.selectbox("Location", df['location'].unique())
-        selected_time = st.selectbox("Time of Day",
-                                     ["Morning (6-12)", "Afternoon (12-18)", "Evening (18-22)", "Night (22-6)"])
+        selected_time = st.selectbox("Time of Day", ["Morning (6-12)", "Afternoon (12-18)", "Evening (18-22)", "Night (22-6)"])
         is_weekend_scenario = st.checkbox("Weekend?")
-
+        
         # Calculate risk based on historical data
         time_mapping = {
-            "Morning (6-12)": list(range(6, 12)),
-            "Afternoon (12-18)": list(range(12, 18)),
-            "Evening (18-22)": list(range(18, 22)),
+            "Morning (6-12)": list(range(6, 12)), 
+            "Afternoon (12-18)": list(range(12, 18)), 
+            "Evening (18-22)": list(range(18, 22)), 
             "Night (22-6)": list(range(22, 24)) + list(range(0, 6))
         }
-
+        
         scenario_filter = (
-                (df['age'] >= selected_age - 5) & (df['age'] <= selected_age + 5) &
-                (df['location'] == selected_location) &
-                (df['hour'].isin(time_mapping[selected_time])) &
-                (df['is_weekend'] == is_weekend_scenario)
+            (df['age'] >= selected_age - 5) & (df['age'] <= selected_age + 5) &
+            (df['location'] == selected_location) &
+            (df['hour'].isin(time_mapping[selected_time])) &
+            (df['is_weekend'] == is_weekend_scenario)
         )
-
+        
         scenario_incidents = df[scenario_filter]
-
+        
         if len(scenario_incidents) > 0:
             avg_severity = scenario_incidents['severity_score'].mean()
             incident_probability = len(scenario_incidents) / len(df) * 100
-
+            
             risk_level = "Low" if avg_severity < 1.5 else "Medium" if avg_severity < 2.5 else "High" if avg_severity < 3.5 else "Critical"
-            risk_color = {"Low": "risk-low", "Medium": "risk-medium", "High": "risk-high", "Critical": "risk-critical"}[
-                risk_level]
-
+            risk_color = {"Low": "risk-low", "Medium": "risk-medium", "High": "risk-high", "Critical": "risk-critical"}[risk_level]
+            
             st.markdown(f"""
             <div class="risk-card {risk_color}">
                 <h3>Risk Assessment</h3>
@@ -750,14 +768,14 @@ elif analysis_mode == "Predictive Insights":
             """, unsafe_allow_html=True)
         else:
             st.info("No historical data available for this scenario combination.")
-
+    
     with col2:
         st.markdown("### 📈 Risk Trends")
-
+        
         # Risk trend over time
         risk_over_time = df_filtered.groupby(df_filtered['incident_date'].dt.to_period('M'))['severity_score'].mean()
         risk_over_time.index = risk_over_time.index.astype(str)
-
+        
         fig_risk_trend = px.line(
             x=risk_over_time.index,
             y=risk_over_time.values,
@@ -769,26 +787,26 @@ elif analysis_mode == "Predictive Insights":
 
 elif analysis_mode == "Performance Analytics":
     st.subheader("📊 Performance Analytics Dashboard")
-
+    
     # Check which columns are available
     has_reporter_type = 'reporter_type' in df_filtered.columns
     has_medical_attention = 'medical_attention' in df_filtered.columns
-
+    
     if has_reporter_type:
         # Reporter Performance Analysis
         col1, col2 = st.columns(2)
-
+        
         with col1:
             st.markdown("### 👥 Reporter Performance")
-
+            
             reporter_stats = df_filtered.groupby('reporter_type').agg({
                 'incident_id': 'count',
                 'notification_delay': 'mean',
                 'severity_score': 'mean'
             }).round(2)
-
+            
             reporter_stats.columns = ['Total Reports', 'Avg Delay (days)', 'Avg Severity']
-
+            
             fig_reporter = px.scatter(
                 reporter_stats.reset_index(),
                 x='Avg Delay (days)',
@@ -800,38 +818,38 @@ elif analysis_mode == "Performance Analytics":
                 color_continuous_scale="Viridis"
             )
             st.plotly_chart(fig_reporter, use_container_width=True)
-
+        
         with col2:
             st.markdown("### 🏢 Location Performance")
-
+            
             # Calculate medical rate only if column exists
             agg_dict = {
                 'incident_id': 'count',
                 'notification_delay': 'mean',
                 'severity_score': 'mean'
             }
-
+            
             if has_medical_attention:
                 agg_dict['medical_attention'] = lambda x: (x == 'Yes').mean()
-
+                
             location_stats = df_filtered.groupby('location').agg(agg_dict).round(2)
-
+            
             if has_medical_attention:
                 location_stats.columns = ['Total Incidents', 'Avg Delay', 'Avg Severity', 'Medical Rate']
                 # Performance score (lower is better)
                 location_stats['Performance Score'] = (
-                        location_stats['Avg Delay'] * 0.3 +
-                        location_stats['Avg Severity'] * 0.4 +
-                        location_stats['Medical Rate'] * 0.3
+                    location_stats['Avg Delay'] * 0.3 + 
+                    location_stats['Avg Severity'] * 0.4 + 
+                    location_stats['Medical Rate'] * 0.3
                 )
             else:
                 location_stats.columns = ['Total Incidents', 'Avg Delay', 'Avg Severity']
                 # Performance score without medical rate
                 location_stats['Performance Score'] = (
-                        location_stats['Avg Delay'] * 0.5 +
-                        location_stats['Avg Severity'] * 0.5
+                    location_stats['Avg Delay'] * 0.5 + 
+                    location_stats['Avg Severity'] * 0.5
                 )
-
+            
             fig_location = px.bar(
                 location_stats.reset_index().sort_values('Performance Score'),
                 x='location',
@@ -844,7 +862,7 @@ elif analysis_mode == "Performance Analytics":
             st.plotly_chart(fig_location, use_container_width=True)
     else:
         st.info("👥 Reporter performance analysis requires 'reporter_type' column in your data")
-
+        
         # Show basic location analysis instead
         st.markdown("### 🏢 Location Analysis")
         location_stats = df_filtered.groupby('location').agg({
@@ -852,7 +870,7 @@ elif analysis_mode == "Performance Analytics":
             'severity_score': 'mean'
         }).round(2)
         location_stats.columns = ['Total Incidents', 'Avg Severity']
-
+        
         fig_location = px.bar(
             location_stats.reset_index(),
             x='location',
@@ -863,18 +881,18 @@ elif analysis_mode == "Performance Analytics":
         )
         fig_location.update_xaxes(tickangle=45)
         st.plotly_chart(fig_location, use_container_width=True)
-
+    
     # Compliance Dashboard
     st.subheader("✅ Compliance Monitoring")
-
+    
     col1, col2, col3 = st.columns(3)
-
+    
     with col1:
         # Notification compliance
         compliance_by_severity = df_filtered.groupby('severity').apply(
             lambda x: (x['notification_delay'] <= 1).mean() * 100
         )
-
+        
         fig_compliance = px.bar(
             x=compliance_by_severity.index,
             y=compliance_by_severity.values,
@@ -883,13 +901,13 @@ elif analysis_mode == "Performance Analytics":
             color_continuous_scale="RdYlGn"
         )
         st.plotly_chart(fig_compliance, use_container_width=True)
-
+    
     with col2:
         if has_medical_attention:
             # Medical attention compliance
             medical_compliance = df_filtered[df_filtered['severity'].isin(['High', 'Critical'])]
             medical_rate = (medical_compliance['medical_attention'] == 'Yes').mean() * 100
-
+            
             fig_medical = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=medical_rate,
@@ -913,7 +931,7 @@ elif analysis_mode == "Performance Analytics":
             st.plotly_chart(fig_medical, use_container_width=True)
         else:
             st.info("🏥 Medical attention analysis requires 'medical_attention' column")
-
+    
     with col3:
         # Reportable incident compliance
         if 'reportable' in df_filtered.columns:
@@ -922,7 +940,7 @@ elif analysis_mode == "Performance Analytics":
                 reportable_compliance = (reportable_incidents['notification_delay'] <= 0.5).mean() * 100
             else:
                 reportable_compliance = 0
-
+            
             fig_reportable = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=reportable_compliance,
@@ -981,9 +999,9 @@ if search_term:
 if len(date_range_filter) == 2:
     start_date, end_date = date_range_filter
     display_df = display_df[
-        (display_df['incident_date'].dt.date >= start_date) &
+        (display_df['incident_date'].dt.date >= start_date) & 
         (display_df['incident_date'].dt.date <= end_date)
-        ]
+    ]
 
 # Column selection for display
 available_columns = ['incident_id', 'participant_name', 'age', 'incident_date', 'incident_type',
@@ -1004,7 +1022,7 @@ if display_columns:
         display_df_show = display_df[display_columns].copy()
         if 'incident_date' in display_columns:
             display_df_show = display_df_show.sort_values('incident_date', ascending=False)
-
+    
     # Style the dataframe
     if 'severity' in display_columns:
         def highlight_severity(val):
@@ -1015,8 +1033,7 @@ if display_columns:
             elif val == 'Medium':
                 return 'background-color: #fffde7; color: #f57f17'
             return ''
-
-
+        
         styled_df = display_df_show.style.map(highlight_severity, subset=['severity'])
         st.dataframe(styled_df, use_container_width=True, height=400)
     else:
@@ -1047,17 +1064,16 @@ with col1:
 with col2:
     if st.button("📊 Generate Summary Report"):
         st.subheader("📈 Executive Summary")
-
+        
         summary_stats = {
             "Total Incidents": len(display_df),
             "Critical Incidents": len(display_df[display_df['severity'] == 'Critical']),
             "Average Notification Delay": f"{display_df['notification_delay'].mean():.1f} days",
             "Compliance Rate": f"{(display_df['notification_delay'] <= 1).mean() * 100:.1f}%",
             "Most Common Incident Type": display_df['incident_type'].mode().iloc[0] if len(display_df) > 0 else 'N/A',
-            "Highest Risk Location": display_df.groupby('location')['severity_score'].mean().idxmax() if len(
-                display_df) > 0 else 'N/A'
+            "Highest Risk Location": display_df.groupby('location')['severity_score'].mean().idxmax() if len(display_df) > 0 else 'N/A'
         }
-
+        
         for key, value in summary_stats.items():
             st.metric(key, value)
 
