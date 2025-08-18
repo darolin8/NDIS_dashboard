@@ -193,9 +193,21 @@ def process_data(df):
         if 'dob' in df.columns:
             df['dob'] = pd.to_datetime(df['dob'], errors='coerce', infer_datetime_format=True)
             
-            # Calculate age at incident
-            df['age'] = (df['incident_date'] - df['dob']).dt.days / 365.25
-            df['age'] = df['age'].round().astype('Int64')
+            # Try different formats if parsing failed
+            if df['dob'].isna().any():
+                for fmt in date_formats:
+                    try:
+                        mask = df['dob'].isna()
+                        df.loc[mask, 'dob'] = pd.to_datetime(df.loc[mask, 'dob'], format=fmt, errors='coerce')
+                        if not df['dob'].isna().all():
+                            break
+                    except:
+                        continue
+            
+            # Calculate age at incident - fix the date subtraction issue
+            df['age'] = ((df['incident_date'] - df['dob']).dt.days / 365.25).round().astype('Int64')
+            # Ensure reasonable age values
+            df['age'] = df['age'].clip(lower=0, upper=120)
         
         # Calculate notification delay
         df['notification_delay'] = (df['notification_date'] - df['incident_date']).dt.days
@@ -209,22 +221,37 @@ def process_data(df):
         df['week_of_year'] = df['incident_date'].dt.isocalendar().week
         df['year'] = df['incident_date'].dt.year
         
-        # Enhanced time extraction
+        # Enhanced time extraction with better error handling
         if 'incident_time' in df.columns:
-            # Handle multiple time formats
-            time_formats = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%I:%M:%S %p']
-            df['parsed_time'] = None
+            # Handle multiple time formats more robustly
+            df['hour'] = None
             
-            for fmt in time_formats:
-                try:
-                    mask = df['parsed_time'].isna()
-                    df.loc[mask, 'parsed_time'] = pd.to_datetime(df.loc[mask, 'incident_time'], format=fmt, errors='coerce').dt.time
-                except:
-                    continue
+            # Try different time parsing approaches
+            for index, time_val in df['incident_time'].items():
+                if pd.notna(time_val):
+                    try:
+                        # Convert to string if not already
+                        time_str = str(time_val).strip()
+                        
+                        # Try parsing with pandas
+                        parsed_time = pd.to_datetime(time_str, format='%H:%M', errors='coerce')
+                        if pd.notna(parsed_time):
+                            df.at[index, 'hour'] = parsed_time.hour
+                        else:
+                            # Try alternative formats
+                            for fmt in ['%H:%M:%S', '%I:%M %p', '%I:%M:%S %p']:
+                                try:
+                                    parsed_time = pd.to_datetime(time_str, format=fmt, errors='coerce')
+                                    if pd.notna(parsed_time):
+                                        df.at[index, 'hour'] = parsed_time.hour
+                                        break
+                                except:
+                                    continue
+                    except:
+                        continue
             
-            # Extract hour from parsed time
-            df['hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
-            df['hour'] = df['hour'].fillna(12)  # Default to midday if parsing fails
+            # Fill missing hours with default value
+            df['hour'] = df['hour'].fillna(12).astype(int)
         else:
             df['hour'] = 12  # Default hour if not present
         
@@ -295,11 +322,16 @@ def process_data(df):
         else:
             df['reporter_type'] = 'Staff'
         
-        # Contributing factors analysis
+        # Contributing factors analysis with better error handling
         if 'contributing_factors' in df.columns:
-            # Count number of contributing factors (assuming comma-separated)
-            df['num_contributing_factors'] = df['contributing_factors'].str.count(',') + 1
-            df['num_contributing_factors'] = df['num_contributing_factors'].fillna(0)
+            # Count number of contributing factors (assuming comma or semicolon separated)
+            df['num_contributing_factors'] = 0
+            for index, factors in df['contributing_factors'].items():
+                if pd.notna(factors) and str(factors).strip():
+                    factor_str = str(factors)
+                    # Count commas and semicolons, add 1 for the base factor
+                    count = factor_str.count(',') + factor_str.count(';') + 1
+                    df.at[index, 'num_contributing_factors'] = count
         else:
             df['num_contributing_factors'] = 0
         
@@ -317,13 +349,32 @@ def process_data(df):
             'Night'
         )
         
-        # Incident complexity score (combining multiple factors)
-        df['complexity_score'] = (
-            df['severity_score'] * 0.3 +
-            df['injury_severity_score'] * 0.2 +
-            df['num_contributing_factors'] * 0.2 +
-            df['is_reportable'] * 0.3
-        )
+        # Incident complexity score (combining multiple factors) with safe calculations
+        complexity_components = []
+        
+        # Add severity component
+        if 'severity_score' in df.columns:
+            complexity_components.append(df['severity_score'] * 0.3)
+        
+        # Add injury severity component
+        if 'injury_severity_score' in df.columns:
+            complexity_components.append(df['injury_severity_score'] * 0.2)
+        
+        # Add contributing factors component
+        if 'num_contributing_factors' in df.columns:
+            # Normalize contributing factors (cap at 5 for scoring)
+            normalized_factors = (df['num_contributing_factors'].clip(0, 5) / 5) * 4  # Scale to 0-4
+            complexity_components.append(normalized_factors * 0.2)
+        
+        # Add reportable component
+        if 'is_reportable' in df.columns:
+            complexity_components.append(df['is_reportable'] * 0.3)
+        
+        # Calculate final complexity score
+        if complexity_components:
+            df['complexity_score'] = sum(complexity_components)
+        else:
+            df['complexity_score'] = df.get('severity_score', 1)
         
         return df
         
@@ -332,22 +383,48 @@ def process_data(df):
         return None
 
 def load_data_from_file(uploaded_file):
-    """Enhanced file loading with better error handling for NDIS incident data"""
+    """Enhanced file loading with comprehensive error handling for NDIS incident data"""
     try:
+        # Read the file based on extension
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, encoding='utf-8')
+            # Try different encodings
+            for encoding in ['utf-8', 'latin1', 'cp1252']:
+                try:
+                    df = pd.read_csv(uploaded_file, encoding=encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                st.error("❌ Unable to read CSV file. Please check the file encoding.")
+                return None
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(uploaded_file)
         else:
             st.error("❌ Unsupported file format. Please upload CSV or Excel files.")
             return None
         
-        # Validate core required columns
+        # Basic validation
+        if df.empty:
+            st.error("❌ File is empty. Please upload a file with data.")
+            return None
+        
+        # Display basic file info
+        st.sidebar.info(f"📊 File loaded: {len(df)} rows, {len(df.columns)} columns")
+        
+        # Validate core required columns (case insensitive)
+        df.columns = df.columns.str.strip()  # Remove whitespace
+        column_mapping = {col.lower(): col for col in df.columns}
+        
         required_cols = ['incident_date', 'incident_type', 'severity']
-        missing_cols = [col for col in required_cols if col not in df.columns]
+        missing_cols = []
+        
+        for req_col in required_cols:
+            if req_col.lower() not in column_mapping:
+                missing_cols.append(req_col)
         
         if missing_cols:
-            st.error(f"❌ Missing required columns: {missing_cols}. Please ensure your file contains these columns.")
+            st.error(f"❌ Missing required columns: {missing_cols}")
+            st.error("Available columns: " + ", ".join(df.columns.tolist()))
             return None
         
         # Check for your specific NDIS file structure
@@ -360,10 +437,17 @@ def load_data_from_file(uploaded_file):
         if len(found_ndis_cols) >= 5:  # If most NDIS columns are present
             st.sidebar.success(f"✅ NDIS incident data detected with {len(found_ndis_cols)} standard columns")
         
-        return process_data(df)
+        # Process the data
+        processed_df = process_data(df)
+        
+        if processed_df is not None:
+            st.sidebar.success(f"✅ Data processed successfully: {len(processed_df)} incidents")
+        
+        return processed_df
         
     except Exception as e:
         st.error(f"❌ Error reading file: {str(e)}")
+        st.error("Please ensure your file is properly formatted and not corrupted.")
         return None
 
 @st.cache_data
@@ -777,9 +861,7 @@ if analysis_mode == "executive":
             st.metric("📋 Reportable Incidents", f"{reportable_count} ({reportable_rate:.1f}%)")
         else:
             compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100 if 'notification_delay' in df_filtered.columns else 0
-            st.metric("📋 Compliance Rate", f"{compliance_rate:.1f}%")_name'].value_counts()
-            repeat_count = len(repeat_participants[repeat_participants > 1])
-            st.metric("🔄 Repeat Participants", repeat_count)
+            st.metric("📋 Compliance Rate", f"{compliance_rate:.1f}%")
     
     with col5:
         if 'medical_attention' in df_filtered.columns:
