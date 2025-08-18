@@ -148,31 +148,54 @@ if 'data_loaded' not in st.session_state:
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def process_data(df):
-    """Process and enhance the loaded data with better error handling"""
+    """Process and enhance the NDIS incident data with comprehensive feature engineering"""
     try:
         df = df.copy()
         
-        # Enhanced date processing
-        date_formats = ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y']
+        # Enhanced date processing for multiple date formats
+        date_formats = ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y', '%Y/%m/%d']
         
+        # Process incident_date
         if 'incident_date' in df.columns:
             df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce', infer_datetime_format=True)
             
             # Try different formats if parsing failed
-            if df['incident_date'].isna().all():
+            if df['incident_date'].isna().any():
                 for fmt in date_formats:
                     try:
-                        df['incident_date'] = pd.to_datetime(df['incident_date'], format=fmt, errors='coerce')
+                        mask = df['incident_date'].isna()
+                        df.loc[mask, 'incident_date'] = pd.to_datetime(df.loc[mask, 'incident_date'], format=fmt, errors='coerce')
                         if not df['incident_date'].isna().all():
                             break
                     except:
                         continue
         
-        # Handle notification dates
-        if 'notification_date' not in df.columns:
-            # Create realistic notification delays
+        # Process notification_date if it exists
+        if 'notification_date' in df.columns:
+            df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce', infer_datetime_format=True)
+            
+            # Try different formats if parsing failed
+            if df['notification_date'].isna().any():
+                for fmt in date_formats:
+                    try:
+                        mask = df['notification_date'].isna()
+                        df.loc[mask, 'notification_date'] = pd.to_datetime(df.loc[mask, 'notification_date'], format=fmt, errors='coerce')
+                        if not df['notification_date'].isna().all():
+                            break
+                    except:
+                        continue
+        else:
+            # Create notification dates with realistic delays if not present
             delays = np.random.choice([0, 1, 2, 3], len(df), p=[0.4, 0.35, 0.15, 0.1])
             df['notification_date'] = df['incident_date'] + pd.to_timedelta(delays, unit='days')
+        
+        # Process date of birth if present
+        if 'dob' in df.columns:
+            df['dob'] = pd.to_datetime(df['dob'], errors='coerce', infer_datetime_format=True)
+            
+            # Calculate age at incident
+            df['age'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+            df['age'] = df['age'].round().astype('Int64')
         
         # Calculate notification delay
         df['notification_delay'] = (df['notification_date'] - df['incident_date']).dt.days
@@ -184,49 +207,64 @@ def process_data(df):
         df['quarter'] = df['incident_date'].dt.quarter
         df['is_weekend'] = df['incident_date'].dt.dayofweek >= 5
         df['week_of_year'] = df['incident_date'].dt.isocalendar().week
+        df['year'] = df['incident_date'].dt.year
         
-        # Time extraction with better handling
+        # Enhanced time extraction
         if 'incident_time' in df.columns:
+            # Handle multiple time formats
+            time_formats = ['%H:%M', '%H:%M:%S', '%I:%M %p', '%I:%M:%S %p']
+            df['parsed_time'] = None
+            
+            for fmt in time_formats:
+                try:
+                    mask = df['parsed_time'].isna()
+                    df.loc[mask, 'parsed_time'] = pd.to_datetime(df.loc[mask, 'incident_time'], format=fmt, errors='coerce').dt.time
+                except:
+                    continue
+            
+            # Extract hour from parsed time
             df['hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
+            df['hour'] = df['hour'].fillna(12)  # Default to midday if parsing fails
         else:
-            df['hour'] = np.random.randint(0, 24, len(df))
+            df['hour'] = 12  # Default hour if not present
         
-        # Enhanced risk scoring
+        # Enhanced risk scoring based on severity
         severity_weights = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
         df['severity_score'] = df['severity'].map(severity_weights).fillna(1)
         
-        # Age handling with realistic distribution
-        if 'age' not in df.columns:
-            # Create age groups based on NDIS demographics
-            ages = np.random.choice(
-                range(18, 85), 
-                len(df), 
-                p=np.array([0.1]*10 + [0.15]*10 + [0.25]*20 + [0.3]*20 + [0.2]*7)
-            )
-            df['age'] = ages
-        
-        df['age_group'] = pd.cut(df['age'], 
-                                bins=[0, 25, 35, 50, 65, 100], 
-                                labels=['18-25', '26-35', '36-50', '51-65', '65+'],
-                                include_lowest=True)
+        # Age groups (handle missing age data)
+        if 'age' in df.columns:
+            df['age_group'] = pd.cut(df['age'], 
+                                    bins=[0, 25, 35, 50, 65, 100], 
+                                    labels=['18-25', '26-35', '36-50', '51-65', '65+'],
+                                    include_lowest=True)
+        else:
+            # Create default age groups if no age data
+            df['age'] = 40  # Default age
+            df['age_group'] = '36-50'
         
         # Enhanced participant analysis
-        participant_history = df.groupby('participant_name').agg({
-            'incident_id': 'count',
-            'severity_score': 'mean',
-            'incident_date': ['min', 'max']
-        }).round(2)
-        
-        participant_history.columns = ['incident_count', 'avg_severity', 'first_incident', 'last_incident']
-        df = df.merge(participant_history, left_on='participant_name', right_index=True, how='left')
-        
-        # Risk categorization
-        df['participant_risk_level'] = pd.cut(
-            df['incident_count'], 
-            bins=[0, 1, 3, 5, float('inf')], 
-            labels=['New', 'Low', 'Medium', 'High'],
-            include_lowest=True
-        )
+        if 'participant_name' in df.columns:
+            participant_history = df.groupby('participant_name').agg({
+                'incident_id': 'count',
+                'severity_score': 'mean',
+                'incident_date': ['min', 'max']
+            }).round(2)
+            
+            participant_history.columns = ['incident_count', 'avg_severity', 'first_incident', 'last_incident']
+            df = df.merge(participant_history, left_on='participant_name', right_index=True, how='left')
+            
+            # Risk categorization
+            df['participant_risk_level'] = pd.cut(
+                df['incident_count'], 
+                bins=[0, 1, 3, 5, float('inf')], 
+                labels=['New', 'Low', 'Medium', 'High'],
+                include_lowest=True
+            )
+        else:
+            df['incident_count'] = 1
+            df['avg_severity'] = df['severity_score']
+            df['participant_risk_level'] = 'New'
         
         # Seasonal analysis
         df['season'] = df['incident_date'].dt.month.map({
@@ -236,6 +274,57 @@ def process_data(df):
             9: 'Spring', 10: 'Spring', 11: 'Spring'
         })
         
+        # Enhanced medical attention analysis
+        if 'medical_attention_required' in df.columns:
+            df['medical_attention'] = df['medical_attention_required']
+        elif 'treatment_required' in df.columns:
+            df['medical_attention'] = df['treatment_required']
+        else:
+            df['medical_attention'] = 'No'  # Default
+        
+        # Injury severity analysis
+        if 'injury_severity' in df.columns:
+            injury_severity_weights = {'None': 0, 'Minor': 1, 'Moderate': 2, 'Major': 3, 'Severe': 4}
+            df['injury_severity_score'] = df['injury_severity'].map(injury_severity_weights).fillna(0)
+        else:
+            df['injury_severity_score'] = 0
+        
+        # Reporter analysis
+        if 'reported_by' in df.columns:
+            df['reporter_type'] = df['reported_by'].str.extract(r'(\w+)').fillna('Staff')
+        else:
+            df['reporter_type'] = 'Staff'
+        
+        # Contributing factors analysis
+        if 'contributing_factors' in df.columns:
+            # Count number of contributing factors (assuming comma-separated)
+            df['num_contributing_factors'] = df['contributing_factors'].str.count(',') + 1
+            df['num_contributing_factors'] = df['num_contributing_factors'].fillna(0)
+        else:
+            df['num_contributing_factors'] = 0
+        
+        # Enhanced reportable incident analysis
+        if 'reportable' in df.columns:
+            df['is_reportable'] = df['reportable'].map({'Yes': 1, 'No': 0}).fillna(0)
+        else:
+            df['is_reportable'] = 0
+        
+        # Time period categorization
+        df['time_period'] = df['hour'].apply(lambda x: 
+            'Morning' if 6 <= x < 12 else
+            'Afternoon' if 12 <= x < 18 else
+            'Evening' if 18 <= x < 22 else
+            'Night'
+        )
+        
+        # Incident complexity score (combining multiple factors)
+        df['complexity_score'] = (
+            df['severity_score'] * 0.3 +
+            df['injury_severity_score'] * 0.2 +
+            df['num_contributing_factors'] * 0.2 +
+            df['is_reportable'] * 0.3
+        )
+        
         return df
         
     except Exception as e:
@@ -243,7 +332,7 @@ def process_data(df):
         return None
 
 def load_data_from_file(uploaded_file):
-    """Enhanced file loading with better error handling"""
+    """Enhanced file loading with better error handling for NDIS incident data"""
     try:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, encoding='utf-8')
@@ -253,13 +342,23 @@ def load_data_from_file(uploaded_file):
             st.error("❌ Unsupported file format. Please upload CSV or Excel files.")
             return None
         
-        # Validate required columns
+        # Validate core required columns
         required_cols = ['incident_date', 'incident_type', 'severity']
         missing_cols = [col for col in required_cols if col not in df.columns]
         
         if missing_cols:
             st.error(f"❌ Missing required columns: {missing_cols}. Please ensure your file contains these columns.")
             return None
+        
+        # Check for your specific NDIS file structure
+        ndis_specific_cols = ['participant_name', 'ndis_number', 'dob', 'notification_date', 
+                             'location', 'subcategory', 'reportable', 'injury_type', 
+                             'medical_attention_required']
+        
+        found_ndis_cols = [col for col in ndis_specific_cols if col in df.columns]
+        
+        if len(found_ndis_cols) >= 5:  # If most NDIS columns are present
+            st.sidebar.success(f"✅ NDIS incident data detected with {len(found_ndis_cols)} standard columns")
         
         return process_data(df)
         
@@ -422,50 +521,59 @@ if df is None or len(df) == 0:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📋 Required Columns")
+        st.markdown("### 📋 Your File Columns")
         st.markdown("""
-        Your CSV/Excel file must contain these columns:
-        - **incident_date** - Date of the incident
-        - **incident_type** - Type/category of incident  
-        - **severity** - Severity level (Low, Medium, High, Critical)
+        Your NDIS incident file contains these columns:
         
-        **Optional columns for enhanced analysis:**
-        - participant_name - Participant identifier
-        - location - Where incident occurred
-        - incident_time - Time of incident
-        - reportable - Whether incident is reportable (Yes/No)
-        - medical_attention - If medical attention required
-        - description - Incident description
-        - immediate_action - Actions taken
+        **Core Incident Data:**
+        - incident_id, participant_name, ndis_number
+        - incident_date, incident_time, notification_date
+        - location, incident_type, subcategory, severity
+        
+        **Medical & Injury Information:**
+        - injury_type, injury_severity, treatment_required
+        - medical_attention_required, medical_treatment_type
+        - medical_outcome
+        
+        **Additional Details:**
+        - reportable, description, immediate_action
+        - actions_taken, contributing_factors, reported_by
+        - dob (for age calculation)
         """)
     
     with col2:
-        st.markdown("### 📁 Supported Formats")
+        st.markdown("### 📁 File Requirements")
         st.markdown("""
         **File Types:**
-        - CSV files (.csv)
+        - CSV files (.csv) - UTF-8 encoding
         - Excel files (.xlsx, .xls)
         
         **Data Requirements:**
-        - UTF-8 encoding recommended for CSV
         - Headers in first row
         - Date format: DD/MM/YYYY or YYYY-MM-DD
-        - No completely empty rows
+        - Time format: HH:MM (24-hour)
+        - Severity: Low, Medium, High, Critical
+        - Reportable: Yes, No
         
-        **File Size Limit:**
-        - Maximum 200MB
-        - Recommended: Under 50MB for optimal performance
+        **Enhanced Analytics:**
+        - Age calculated from DOB
+        - Notification delays tracked
+        - Medical attention analysis
+        - Injury severity scoring
         """)
     
-    # Sample data format
-    st.markdown("### 📝 Sample Data Format")
+    # Sample data format specific to NDIS structure
+    st.markdown("### 📝 Expected Data Structure")
     sample_data = pd.DataFrame({
+        'incident_id': ['INC000001', 'INC000002', 'INC000003'],
+        'participant_name': ['Participant_001', 'Participant_002', 'Participant_001'],
+        'ndis_number': [12345678, 87654321, 12345678],
         'incident_date': ['01/01/2024', '02/01/2024', '03/01/2024'],
         'incident_type': ['Fall', 'Medication Error', 'Behavioral Incident'],
         'severity': ['Medium', 'High', 'Low'],
-        'participant_name': ['Participant_001', 'Participant_002', 'Participant_001'],
         'location': ['Main Office', 'Residential Care', 'Community Center'],
-        'reportable': ['Yes', 'Yes', 'No']
+        'reportable': ['Yes', 'Yes', 'No'],
+        'medical_attention_required': ['No', 'Yes', 'No']
     })
     
     st.dataframe(sample_data, use_container_width=True)
@@ -651,21 +759,39 @@ if analysis_mode == "executive":
             st.metric("⏱️ Avg Delay", "N/A")
     
     with col4:
-        if 'participant_risk_level' in df_filtered.columns:
-            high_risk_count = len(df_filtered[df_filtered['participant_risk_level'] == 'High']['participant_name'].unique())
-            st.metric("🔄 High-Risk Participants", high_risk_count)
+        if 'injury_severity' in df_filtered.columns:
+            high_injury_count = len(df_filtered[df_filtered['injury_severity'].isin(['Major', 'Severe'])])
+            st.metric("⚕️ Serious Injuries", high_injury_count)
+        elif 'medical_attention_required' in df_filtered.columns:
+            medical_required = len(df_filtered[df_filtered['medical_attention_required'] == 'Yes'])
+            st.metric("🏥 Medical Required", medical_required)
         else:
             repeat_participants = df_filtered['participant_name'].value_counts()
             repeat_count = len(repeat_participants[repeat_participants > 1])
             st.metric("🔄 Repeat Participants", repeat_count)
     
     with col5:
-        if 'notification_delay' in df_filtered.columns:
-            compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100
-            target_met = "✅" if compliance_rate >= 90 else "❌"
-            st.metric("📋 Compliance Rate", f"{compliance_rate:.1f}%", delta=target_met)
+        if 'reportable' in df_filtered.columns:
+            reportable_count = len(df_filtered[df_filtered['reportable'] == 'Yes'])
+            reportable_rate = (reportable_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.metric("📋 Reportable Incidents", f"{reportable_count} ({reportable_rate:.1f}%)")
         else:
-            st.metric("📋 Compliance Rate", "N/A")
+            compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100 if 'notification_delay' in df_filtered.columns else 0
+            st.metric("📋 Compliance Rate", f"{compliance_rate:.1f}%")_name'].value_counts()
+            repeat_count = len(repeat_participants[repeat_participants > 1])
+            st.metric("🔄 Repeat Participants", repeat_count)
+    
+    with col5:
+        if 'medical_attention' in df_filtered.columns:
+            medical_attention_rate = (df_filtered['medical_attention'] == 'Yes').mean() * 100
+            medical_status = "🔴" if medical_attention_rate > 30 else "🟡" if medical_attention_rate > 15 else "🟢"
+            st.metric("🏥 Medical Attention Rate", f"{medical_attention_rate:.1f}%", delta=medical_status)
+        elif 'medical_attention_required' in df_filtered.columns:
+            medical_attention_rate = (df_filtered['medical_attention_required'] == 'Yes').mean() * 100
+            medical_status = "🔴" if medical_attention_rate > 30 else "🟡" if medical_attention_rate > 15 else "🟢"
+            st.metric("🏥 Medical Attention Rate", f"{medical_attention_rate:.1f}%", delta=medical_status)
+        else:
+            st.metric("🏥 Medical Attention", "N/A")
     
     # Enhanced visualizations
     st.markdown("---")
@@ -928,12 +1054,12 @@ elif analysis_mode == "risk":
             </div>
             """, unsafe_allow_html=True)
     
-    # Risk factor analysis
-    st.markdown("### 📈 Risk Factor Analysis")
+    # Enhanced risk factor analysis for NDIS data
+    st.markdown("### 📈 NDIS-Specific Risk Factor Analysis")
     
     risk_factors = {}
     
-    # Calculate various risk factors
+    # Calculate various risk factors specific to NDIS data
     if 'is_weekend' in df_filtered.columns and len(df_filtered) > 10:
         weekend_incidents = df_filtered[df_filtered['is_weekend'] == True]
         weekday_incidents = df_filtered[df_filtered['is_weekend'] == False]
@@ -953,7 +1079,7 @@ elif analysis_mode == "risk":
         day_severity = day_incidents['severity_score'].mean()
         risk_factors['Night vs Day Hours'] = night_severity / day_severity if day_severity > 0 else 1
     
-    # Age-based risk
+    # Age-based risk (if age data available)
     if 'age_group' in df_filtered.columns:
         age_severity = df_filtered.groupby('age_group')['severity_score'].mean()
         if len(age_severity) > 1:
@@ -970,6 +1096,26 @@ elif analysis_mode == "risk":
             delayed_severity = delayed_incidents['severity_score'].mean()
             timely_severity = timely_incidents['severity_score'].mean()
             risk_factors['Delayed vs Timely Reporting'] = delayed_severity / timely_severity if timely_severity > 0 else 1
+    
+    # Medical attention vs non-medical incidents
+    if 'medical_attention_required' in df_filtered.columns:
+        medical_incidents = df_filtered[df_filtered['medical_attention_required'] == 'Yes']
+        non_medical_incidents = df_filtered[df_filtered['medical_attention_required'] == 'No']
+        
+        if len(medical_incidents) > 0 and len(non_medical_incidents) > 0:
+            medical_severity = medical_incidents['severity_score'].mean()
+            non_medical_severity = non_medical_incidents['severity_score'].mean()
+            risk_factors['Medical vs Non-Medical'] = medical_severity / non_medical_severity if non_medical_severity > 0 else 1
+    
+    # Injury severity correlation
+    if 'injury_severity' in df_filtered.columns:
+        major_injuries = df_filtered[df_filtered['injury_severity'].isin(['Major', 'Severe'])]
+        minor_injuries = df_filtered[df_filtered['injury_severity'].isin(['None', 'Minor'])]
+        
+        if len(major_injuries) > 0 and len(minor_injuries) > 0:
+            major_incident_severity = major_injuries['severity_score'].mean()
+            minor_incident_severity = minor_injuries['severity_score'].mean()
+            risk_factors['Major vs Minor Injuries'] = major_incident_severity / minor_incident_severity if minor_incident_severity > 0 else 1
     
     if risk_factors:
         risk_factor_df = pd.DataFrame(list(risk_factors.items()), columns=['Risk Factor', 'Risk Ratio'])
@@ -1547,27 +1693,23 @@ elif analysis_mode == "performance":
         )
     
     with col4:
-        # Repeat incident rate
-        if 'participant_risk_level' in df_filtered.columns:
-            repeat_rate = len(df_filtered[df_filtered['participant_risk_level'].isin(['Medium', 'High'])]) / len(df_filtered) * 100
-            target_repeat = 20  # Target: <20% repeat incidents
-            repeat_status = "🟢" if repeat_rate <= target_repeat else "🔴"
-            
-            st.metric(
-                "Repeat Incident Rate",
-                f"{repeat_rate:.1f}%",
-                delta=f"{repeat_status} Target: ≤{target_repeat}%"
-            )
+        if 'injury_severity_score' in df_filtered.columns:
+            avg_injury_severity = df_filtered['injury_severity_score'].mean()
+            st.metric("Avg Injury Severity", f"{avg_injury_severity:.2f}/4.0")
+        elif 'complexity_score' in df_filtered.columns:
+            avg_complexity = df_filtered['complexity_score'].mean()
+            st.metric("Avg Complexity Score", f"{avg_complexity:.2f}")
         else:
-            st.metric("Repeat Incident Rate", "N/A")
+            repeat_rate = len(df_filtered[df_filtered['participant_risk_level'].isin(['Medium', 'High'])]) / len(df_filtered) * 100 if 'participant_risk_level' in df_filtered.columns else 0
+            st.metric("Repeat Incident Rate", f"{repeat_rate:.1f}%")
     
     with col5:
-        # Medical attention rate
-        if 'medical_attention' in df_filtered.columns:
-            medical_rate = (df_filtered['medical_attention'] == 'Yes').mean() * 100
-            st.metric("Medical Attention Rate", f"{medical_rate:.1f}%")
+        if 'num_contributing_factors' in df_filtered.columns:
+            avg_factors = df_filtered['num_contributing_factors'].mean()
+            st.metric("Avg Contributing Factors", f"{avg_factors:.1f}")
         else:
-            st.metric("Medical Attention Rate", "N/A")
+            medical_rate = (df_filtered['medical_attention_required'] == 'Yes').mean() * 100 if 'medical_attention_required' in df_filtered.columns else 0
+            st.metric("Medical Attention Rate", f"{medical_rate:.1f}%")
     
     # Performance trends
     st.markdown("### 📊 Performance Trends")
