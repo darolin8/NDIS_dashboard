@@ -637,7 +637,18 @@ if uploaded_file is not None:
         df = load_data_from_file(uploaded_file)
         if df is not None:
             st.session_state.data_loaded = True
-            st.sidebar.success("✅ File loaded successfully!")
+            st.sidebar.success(f"✅ File loaded: {len(df)} incidents")
+            
+            # Add debug information
+            st.sidebar.info(f"📊 Data Summary:")
+            st.sidebar.write(f"- Total incidents: {len(df)}")
+            if 'incident_date' in df.columns:
+                st.sidebar.write(f"- Date range: {df['incident_date'].min().strftime('%Y-%m-%d')} to {df['incident_date'].max().strftime('%Y-%m-%d')}")
+            if 'severity' in df.columns:
+                severity_counts = df['severity'].value_counts()
+                st.sidebar.write(f"- Severity breakdown:")
+                for sev, count in severity_counts.items():
+                    st.sidebar.write(f"  - {sev}: {count}")
         else:
             st.sidebar.error("❌ Failed to load file. Please check the format and required columns.")
 else:
@@ -820,11 +831,32 @@ with col2:
         default=location_options
     )
 
-# Apply filters
+# Apply filters with debugging
 df_filtered = df_filtered[
     (df_filtered['severity'].isin(severity_filter)) &
     (df_filtered['location'].isin(location_filter))
 ]
+
+# Debug information
+if len(df_filtered) != len(df):
+    st.sidebar.warning(f"⚠️ After all filters: {len(df)} → {len(df_filtered)} records")
+    
+    # Show what's causing the reduction
+    severity_check = df[df['severity'].isin(severity_filter)]
+    location_check = df[df['location'].isin(location_filter)]
+    
+    st.sidebar.write(f"Debug Info:")
+    st.sidebar.write(f"- Original: {len(df)} records")
+    st.sidebar.write(f"- After severity filter: {len(severity_check)} records")
+    st.sidebar.write(f"- After location filter: {len(location_check)} records")
+    st.sidebar.write(f"- After both filters: {len(df_filtered)} records")
+    
+    if len(df_filtered) < 5:
+        st.sidebar.error("⚠️ Very few records remaining after filtering!")
+        st.sidebar.write("Consider:")
+        st.sidebar.write("- Removing some filters")
+        st.sidebar.write("- Checking data quality")
+        st.sidebar.write("- Expanding time range")
 
 # Live insights panel
 st.sidebar.markdown("---")
@@ -839,25 +871,57 @@ for insight in insights[:3]:
 # Main content area
 st.title("🏥 Advanced NDIS Incident Analytics Dashboard")
 
-# Status bar
+# Status bar with detailed debugging
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.success(f"✅ {len(df_filtered)} incidents loaded")
+    if len(df_filtered) < len(df):
+        st.warning(f"⚠️ {len(df_filtered)} of {len(df)} incidents shown")
+    else:
+        st.success(f"✅ {len(df_filtered)} incidents loaded")
 with col2:
-    date_range = f"{df_filtered['incident_date'].min().strftime('%b %Y')} - {df_filtered['incident_date'].max().strftime('%b %Y')}"
-    st.info(f"📅 {date_range}")
+    if 'incident_date' in df_filtered.columns and len(df_filtered) > 0:
+        date_range = f"{df_filtered['incident_date'].min().strftime('%b %Y')} - {df_filtered['incident_date'].max().strftime('%b %Y')}"
+        st.info(f"📅 {date_range}")
+    else:
+        st.info("📅 No date range")
 with col3:
-    compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100 if 'notification_delay' in df_filtered.columns else 0
-    if compliance_rate >= 90:
-        st.success(f"✅ {compliance_rate:.1f}% compliant")
+    if 'notification_delay' in df_filtered.columns and len(df_filtered) > 0:
+        compliance_rate = (df_filtered['notification_delay'] <= 1).mean() * 100
+        if compliance_rate >= 90:
+            st.success(f"✅ {compliance_rate:.1f}% compliant")
+        else:
+            st.warning(f"⚠️ {compliance_rate:.1f}% compliant")
     else:
-        st.warning(f"⚠️ {compliance_rate:.1f}% compliant")
+        st.info("📊 No compliance data")
 with col4:
-    critical_count = len(df_filtered[df_filtered['severity'] == 'Critical'])
-    if critical_count == 0:
-        st.success("✅ No critical incidents")
+    if len(df_filtered) > 0:
+        critical_count = len(df_filtered[df_filtered['severity'] == 'Critical'])
+        if critical_count == 0:
+            st.success("✅ No critical incidents")
+        else:
+            st.error(f"🚨 {critical_count} critical incidents")
     else:
-        st.error(f"🚨 {critical_count} critical incidents")
+        st.error("❌ No data to display")
+
+# Show data quality issues if very few records
+if len(df_filtered) < 10 and len(df) > len(df_filtered):
+    st.warning("⚠️ **Data Filtering Issue Detected**")
+    st.write("Very few records are being displayed. This might be due to:")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("**Possible Causes:**")
+        st.write("- Restrictive filters applied")
+        st.write("- Date range too narrow") 
+        st.write("- Missing data in key columns")
+        st.write("- Data format issues")
+    
+    with col2:
+        st.write("**Quick Fixes:**")
+        st.write("- Reset filters using sidebar")
+        st.write("- Expand time range to 'All Time'")
+        st.write("- Check severity/location filters")
+        st.write("- Verify data quality in source file")
 
 # Main dashboard content
 if analysis_mode == "executive":
@@ -2553,26 +2617,46 @@ with col4:
 # Apply enhanced filters
 display_df = df_filtered.copy()
 
+# Debug: Show filtering impact
+if len(df_filtered) != len(df):
+    st.sidebar.warning(f"⚠️ Filters applied: {len(df)} → {len(df_filtered)} records")
+
 if search_term:
     search_cols = ['description', 'immediate_action', 'actions_taken']
     search_mask = pd.Series(False, index=display_df.index)
     for col in search_cols:
         if col in display_df.columns:
             search_mask |= display_df[col].str.contains(search_term, case=False, na=False)
+    
+    before_search = len(display_df)
     display_df = display_df[search_mask]
+    if len(display_df) != before_search:
+        st.info(f"🔍 Search filtered: {before_search} → {len(display_df)} records")
 
 if participant_search:
+    before_participant = len(display_df)
     display_df = display_df[
         display_df['participant_name'].str.contains(participant_search, case=False, na=False)
     ]
+    if len(display_df) != before_participant:
+        st.info(f"👤 Participant filter: {before_participant} → {len(display_df)} records")
 
 # Apply severity quick filter
 if severity_quick_filter == "Critical Only":
+    before_severity = len(display_df)
     display_df = display_df[display_df['severity'] == 'Critical']
+    if len(display_df) != before_severity:
+        st.info(f"⚠️ Severity filter: {before_severity} → {len(display_df)} records")
 elif severity_quick_filter == "High & Critical":
+    before_severity = len(display_df)
     display_df = display_df[display_df['severity'].isin(['High', 'Critical'])]
+    if len(display_df) != before_severity:
+        st.info(f"⚠️ Severity filter: {before_severity} → {len(display_df)} records")
 elif severity_quick_filter == "Medium & Above":
+    before_severity = len(display_df)
     display_df = display_df[display_df['severity'].isin(['Medium', 'High', 'Critical'])]
+    if len(display_df) != before_severity:
+        st.info(f"⚠️ Severity filter: {before_severity} → {len(display_df)} records")
 
 # Enhanced column selection
 st.markdown("### 📊 Data Display Options")
