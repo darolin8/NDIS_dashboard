@@ -800,63 +800,99 @@ risk_focus_options = {
 
 risk_focus = st.sidebar.selectbox("Risk Focus", list(risk_focus_options.keys()))
 
-# Apply risk-based filters
+# Apply risk-based filters with debugging
+original_count = len(df_filtered)
+
 if risk_focus_options[risk_focus] == "critical":
     df_filtered = df_filtered[df_filtered['severity'] == 'Critical']
+    st.sidebar.write(f"Critical filter: {original_count} → {len(df_filtered)}")
 elif risk_focus_options[risk_focus] == "high_risk":
     df_filtered = df_filtered[df_filtered['severity'].isin(['High', 'Critical'])]
+    st.sidebar.write(f"High risk filter: {original_count} → {len(df_filtered)}")
 elif risk_focus_options[risk_focus] == "repeat":
     if 'participant_risk_level' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['participant_risk_level'].isin(['Medium', 'High'])]
+        st.sidebar.write(f"Repeat participants filter: {original_count} → {len(df_filtered)}")
 elif risk_focus_options[risk_focus] == "delayed":
     if 'notification_delay' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['notification_delay'] > 1]
+        st.sidebar.write(f"Delayed reports filter: {original_count} → {len(df_filtered)}")
 
-# Multi-select filters with better defaults
+# Show current risk focus
+st.sidebar.write(f"Current risk focus: {risk_focus}")
+if len(df_filtered) != original_count:
+    st.sidebar.warning(f"Risk focus reduced data: {original_count} → {len(df_filtered)}")
+
+# Multi-select filters with better defaults and debugging
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
-    severity_options = sorted(df['severity'].unique())
+    severity_options = sorted(df['severity'].unique()) if 'severity' in df.columns else []
+    st.sidebar.write(f"Available severities: {severity_options}")
+    
     severity_filter = st.multiselect(
         "⚠️ Severity",
         options=severity_options,
-        default=severity_options
+        default=severity_options,  # Default to all available
+        key="severity_filter"
     )
 
 with col2:
-    location_options = sorted(df['location'].unique())
+    location_options = sorted(df['location'].unique()) if 'location' in df.columns else []
+    st.sidebar.write(f"Available locations: {location_options}")
+    
     location_filter = st.multiselect(
         "📍 Location", 
         options=location_options,
-        default=location_options
+        default=location_options,  # Default to all available
+        key="location_filter"
     )
 
-# Apply filters with debugging
-df_filtered = df_filtered[
-    (df_filtered['severity'].isin(severity_filter)) &
-    (df_filtered['location'].isin(location_filter))
-]
+# Show what's selected
+st.sidebar.write(f"Selected severities: {len(severity_filter)}/{len(severity_options)}")
+st.sidebar.write(f"Selected locations: {len(location_filter)}/{len(location_options)}")
 
-# Debug information
-if len(df_filtered) != len(df):
-    st.sidebar.warning(f"⚠️ After all filters: {len(df)} → {len(df_filtered)} records")
+# Warning if nothing selected
+if not severity_filter:
+    st.sidebar.error("⚠️ No severities selected - this will show no data!")
+    severity_filter = severity_options  # Reset to all
+
+if not location_filter:
+    st.sidebar.error("⚠️ No locations selected - this will show no data!")
+    location_filter = location_options  # Reset to all
+
+# Apply filters with better debugging
+severity_mask = df_filtered['severity'].isin(severity_filter)
+location_mask = df_filtered['location'].isin(location_filter)
+
+# Debug the masks
+st.sidebar.write(f"Filter Debug:")
+st.sidebar.write(f"- Severity mask: {severity_mask.sum()} records")
+st.sidebar.write(f"- Location mask: {location_mask.sum()} records") 
+st.sidebar.write(f"- Both masks: {(severity_mask & location_mask).sum()} records")
+
+# Show what values are being filtered
+if severity_mask.sum() != len(df_filtered):
+    excluded_severities = df_filtered[~severity_mask]['severity'].unique()
+    st.sidebar.write(f"- Excluded severities: {excluded_severities}")
+
+if location_mask.sum() != len(df_filtered):
+    excluded_locations = df_filtered[~location_mask]['location'].unique()
+    st.sidebar.write(f"- Excluded locations: {excluded_locations}")
+
+# Apply the combined filter
+df_filtered = df_filtered[severity_mask & location_mask]
+
+# Additional debugging - show actual values in data
+if len(df_filtered) < 10:
+    st.sidebar.write("Remaining severity values:")
+    st.sidebar.write(df_filtered['severity'].value_counts().to_dict())
+    st.sidebar.write("Remaining location values:")
+    st.sidebar.write(df_filtered['location'].value_counts().to_dict())
     
-    # Show what's causing the reduction
-    severity_check = df[df['severity'].isin(severity_filter)]
-    location_check = df[df['location'].isin(location_filter)]
-    
-    st.sidebar.write(f"Debug Info:")
-    st.sidebar.write(f"- Original: {len(df)} records")
-    st.sidebar.write(f"- After severity filter: {len(severity_check)} records")
-    st.sidebar.write(f"- After location filter: {len(location_check)} records")
-    st.sidebar.write(f"- After both filters: {len(df_filtered)} records")
-    
-    if len(df_filtered) < 5:
-        st.sidebar.error("⚠️ Very few records remaining after filtering!")
-        st.sidebar.write("Consider:")
-        st.sidebar.write("- Removing some filters")
-        st.sidebar.write("- Checking data quality")
-        st.sidebar.write("- Expanding time range")
+    st.sidebar.write("Selected filters:")
+    st.sidebar.write(f"- Severities: {severity_filter}")
+    st.sidebar.write(f"- Locations: {location_filter}")
 
 # Live insights panel
 st.sidebar.markdown("---")
