@@ -452,45 +452,99 @@ def load_data_from_file(uploaded_file):
 
 @st.cache_data
 def calculate_enhanced_correlations(df):
-    """Enhanced correlation analysis with more variables"""
+    """Enhanced correlation analysis with more variables and better categorical handling"""
     try:
         numeric_df = df.copy()
         
-        # Convert categorical to numeric
+        # Convert categorical to numeric with proper handling
         categorical_mappings = {
             'severity': {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4},
             'reportable': {'No': 0, 'Yes': 1},
             'medical_attention': {'No': 0, 'Yes': 1},
+            'medical_attention_required': {'No': 0, 'Yes': 1},
             'is_weekend': {False: 0, True: 1},
             'participant_risk_level': {'New': 1, 'Low': 2, 'Medium': 3, 'High': 4}
         }
         
         for col, mapping in categorical_mappings.items():
             if col in numeric_df.columns:
-                numeric_df[f'{col}_numeric'] = numeric_df[col].map(mapping).fillna(0)
+                # Convert categorical columns to regular object type first
+                if hasattr(numeric_df[col], 'cat'):
+                    numeric_df[col] = numeric_df[col].astype(str)
+                
+                # Create new numeric column
+                numeric_df[f'{col}_numeric'] = numeric_df[col].map(mapping)
+                # Fill NaN values with 0 for unmapped categories
+                numeric_df[f'{col}_numeric'] = numeric_df[f'{col}_numeric'].fillna(0)
         
-        # Select correlation variables
-        correlation_vars = [
+        # Handle boolean columns
+        boolean_cols = ['is_weekend']
+        for col in boolean_cols:
+            if col in numeric_df.columns:
+                if col not in [f'{c}_numeric' for c in categorical_mappings.keys()]:
+                    numeric_df[f'{col}_numeric'] = numeric_df[col].astype(int)
+        
+        # Select correlation variables that actually exist
+        potential_vars = [
             'age', 'severity_numeric', 'notification_delay', 'reportable_numeric',
-            'medical_attention_numeric', 'is_weekend_numeric', 'hour', 'quarter',
-            'incident_count', 'avg_severity', 'participant_risk_level_numeric'
+            'medical_attention_numeric', 'medical_attention_required_numeric', 
+            'is_weekend_numeric', 'hour', 'quarter', 'incident_count', 
+            'avg_severity', 'participant_risk_level_numeric', 'injury_severity_score',
+            'num_contributing_factors', 'complexity_score'
         ]
         
-        available_vars = [var for var in correlation_vars if var in numeric_df.columns]
+        # Only include variables that exist and have valid data
+        correlation_vars = []
+        for var in potential_vars:
+            if var in numeric_df.columns:
+                # Check if column has valid numeric data
+                if numeric_df[var].dtype in ['int64', 'float64', 'Int64', 'Float64']:
+                    # Check if column has variance (not all same values)
+                    if numeric_df[var].nunique() > 1:
+                        correlation_vars.append(var)
         
-        if len(available_vars) < 2:
-            # Fallback correlation matrix
-            available_vars = ['severity_numeric', 'notification_delay']
-            for var in available_vars:
+        # Ensure we have at least 2 variables for correlation
+        if len(correlation_vars) < 2:
+            # Create minimal correlation matrix with basic variables
+            if 'severity_numeric' not in correlation_vars and 'severity_numeric' in numeric_df.columns:
+                correlation_vars.append('severity_numeric')
+            if 'hour' not in correlation_vars and 'hour' in numeric_df.columns:
+                correlation_vars.append('hour')
+            
+            # If still not enough, create some basic numeric columns
+            if len(correlation_vars) < 2:
+                numeric_df['severity_numeric'] = numeric_df.get('severity_score', 1)
+                numeric_df['time_numeric'] = numeric_df.get('hour', 12)
+                correlation_vars = ['severity_numeric', 'time_numeric']
+        
+        # Calculate correlation matrix with error handling
+        try:
+            correlation_subset = numeric_df[correlation_vars].select_dtypes(include=[np.number])
+            corr_matrix = correlation_subset.corr()
+            
+            # Remove any columns/rows with all NaN values
+            corr_matrix = corr_matrix.dropna(how='all', axis=0).dropna(how='all', axis=1)
+            
+        except Exception as corr_error:
+            # Fallback: create simple correlation matrix
+            st.warning(f"Advanced correlation calculation failed, using simplified version: {str(corr_error)}")
+            simple_vars = ['severity_score', 'hour']
+            for var in simple_vars:
                 if var not in numeric_df.columns:
                     numeric_df[var] = 1
+            
+            corr_matrix = numeric_df[simple_vars].corr()
         
-        corr_matrix = numeric_df[available_vars].corr()
         return corr_matrix, numeric_df
         
     except Exception as e:
         st.error(f"❌ Correlation calculation error: {str(e)}")
-        return pd.DataFrame(), df
+        # Return minimal correlation matrix
+        minimal_df = pd.DataFrame({
+            'severity_score': [1, 2, 3],
+            'hour': [8, 12, 16]
+        })
+        return minimal_df.corr(), df
 
 def generate_enhanced_insights(df):
     """Generate more sophisticated insights"""
