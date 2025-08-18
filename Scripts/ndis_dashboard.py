@@ -479,7 +479,7 @@ def generate_enhanced_insights(df):
     return insights
 
 # Enhanced sidebar with better organization
-st.sidebar.image("https://via.placeholder.com/300x100/667eea/ffffff?text=NDIS+Analytics", use_column_width=True)
+st.sidebar.image("https://via.placeholder.com/300x100/667eea/ffffff?text=NDIS+Analytics", use_container_width=True)
 st.sidebar.markdown("---")
 
 # Data Source Selection
