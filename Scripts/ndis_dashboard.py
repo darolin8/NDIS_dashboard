@@ -169,9 +169,13 @@ def create_sample_ndis_data():
     notification_delays = np.random.choice([0, 1, 2, 3, 4, 5], n_records, p=[0.4, 0.3, 0.15, 0.08, 0.05, 0.02])
     notification_dates = incident_dates + pd.to_timedelta(notification_delays, unit='days')
     
-    # Incident times
+    # Incident times with corrected probabilities
+    hour_probs = [0.02]*6 + [0.06]*12 + [0.04]*6  # This sums to 0.84, need to normalize
+    hour_probs = np.array(hour_probs)
+    hour_probs = hour_probs / hour_probs.sum()  # Normalize to sum to 1
+    
     incident_times = [f"{h:02d}:{m:02d}" for h, m in zip(
-        np.random.choice(24, n_records, p=[0.02]*6 + [0.06]*12 + [0.04]*6), 
+        np.random.choice(24, n_records, p=hour_probs), 
         np.random.randint(0, 60, n_records)
     )]
     
