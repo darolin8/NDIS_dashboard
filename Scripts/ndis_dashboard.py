@@ -218,7 +218,7 @@ def process_data(df):
 
 @st.cache_data
 def prepare_ml_features(df):
-    """Prepare enhanced features for ML analysis"""
+    """Prepare enhanced features for ML analysis - FIXED VERSION"""
     try:
         if not SKLEARN_AVAILABLE:
             return df, {}
@@ -232,7 +232,20 @@ def prepare_ml_features(df):
         for col in categorical_cols:
             if col in ml_df.columns:
                 le = LabelEncoder()
-                ml_df[col] = ml_df[col].fillna('Unknown').astype(str)
+                
+                # Convert to string and handle NaN values FIRST
+                ml_df[col] = ml_df[col].astype(str)
+                ml_df[col] = ml_df[col].fillna('Unknown').replace('nan', 'Unknown')
+                
+                # For categorical columns created by pd.cut, convert to string
+                if hasattr(ml_df[col], 'cat'):
+                    # Add 'Unknown' to categories if it's not already there
+                    if 'Unknown' not in ml_df[col].cat.categories:
+                        ml_df[col] = ml_df[col].cat.add_categories(['Unknown'])
+                    # Convert categorical to string
+                    ml_df[col] = ml_df[col].astype(str)
+                
+                # Now encode
                 ml_df[f'{col}_encoded'] = le.fit_transform(ml_df[col])
                 label_encoders[col] = le
         
@@ -247,10 +260,10 @@ def prepare_ml_features(df):
         return df, {}
 
 def predict_future_incidents(df, prediction_days=30):
-    """Predict future incident patterns using multiple models"""
+    """Enhanced prediction with multiple models and confidence intervals"""
     try:
         if not SKLEARN_AVAILABLE:
-            return None, None, None
+            return None
         
         # Prepare time series data
         daily_counts = df.groupby(df['incident_date'].dt.date).size()
@@ -262,11 +275,26 @@ def predict_future_incidents(df, prediction_days=30):
         ma_window = min(7, len(daily_counts) // 4)
         ma_prediction = daily_counts.rolling(window=ma_window).mean().iloc[-1]
         
+        # Weighted moving average
+        weights = np.exp(np.linspace(-1, 0, ma_window))
+        weights /= weights.sum()
+        wma_prediction = np.average(daily_counts.iloc[-ma_window:], weights=weights)
+        
         # Trend-based prediction
         days_numeric = np.arange(len(daily_counts))
         z = np.polyfit(days_numeric, daily_counts.values, 1)
         p = np.poly1d(z)
         trend_prediction = p(len(daily_counts) + prediction_days)
+        
+        # Exponential smoothing if available
+        exp_smoothing_prediction = None
+        if STATSMODELS_AVAILABLE and len(daily_counts) > 10:
+            try:
+                model = ExponentialSmoothing(daily_counts, seasonal_periods=7, trend='add', seasonal='add')
+                model_fit = model.fit()
+                exp_smoothing_prediction = model_fit.forecast(steps=prediction_days).mean()
+            except:
+                pass
         
         # ARIMA prediction if available
         arima_prediction = None
@@ -279,13 +307,49 @@ def predict_future_incidents(df, prediction_days=30):
             except:
                 pass
         
-        # Prepare feature-based prediction
+        # Random Forest for multi-variate prediction
         ml_df, label_encoders = prepare_ml_features(df)
         
-        # Random Forest prediction for incident severity
+        # Create lagged features for time series
+        ts_features = []
+        for i in range(1, min(8, len(daily_counts))):
+            ts_features.append(daily_counts.shift(i).fillna(0))
+        
+        if len(ts_features) > 0:
+            ts_df = pd.DataFrame(ts_features).T
+            ts_df.columns = [f'lag_{i}' for i in range(1, len(ts_features) + 1)]
+            ts_df['target'] = daily_counts.values
+            ts_df = ts_df.dropna()
+            
+            if len(ts_df) > 10:
+                X_ts = ts_df.drop('target', axis=1)
+                y_ts = ts_df['target']
+                
+                X_train, X_test, y_train, y_test = train_test_split(X_ts, y_ts, test_size=0.2, random_state=42)
+                
+                rf_regressor = RandomForestRegressor(n_estimators=100, random_state=42)
+                rf_regressor.fit(X_train, y_train)
+                
+                # Generate future predictions
+                last_values = daily_counts.iloc[-len(ts_features):].values
+                rf_predictions = []
+                
+                for _ in range(prediction_days):
+                    X_pred = last_values.reshape(1, -1)
+                    pred = rf_regressor.predict(X_pred)[0]
+                    rf_predictions.append(pred)
+                    last_values = np.append(last_values[1:], pred)
+                
+                rf_prediction = np.mean(rf_predictions)
+            else:
+                rf_prediction = None
+        else:
+            rf_prediction = None
+        
+        # Severity predictor
         severity_predictor = None
         if 'severity_encoded' in ml_df.columns:
-            feature_cols = ['hour', 'day_of_week_num', 'month_num', 'age']
+            feature_cols = ['hour', 'day_of_week_num', 'month_num', 'age', 'risk_score']
             feature_cols = [col for col in feature_cols if col in ml_df.columns]
             
             if len(feature_cols) >= 2:
@@ -306,8 +370,11 @@ def predict_future_incidents(df, prediction_days=30):
         
         predictions = {
             'moving_average': ma_prediction,
+            'weighted_moving_average': wma_prediction,
             'trend_based': trend_prediction,
+            'exponential_smoothing': exp_smoothing_prediction,
             'arima': arima_prediction,
+            'random_forest': rf_prediction,
             'severity_predictor': severity_predictor,
             'daily_counts': daily_counts
         }
@@ -319,7 +386,7 @@ def predict_future_incidents(df, prediction_days=30):
         return None
 
 def enhanced_anomaly_detection(df):
-    """Enhanced multi-method anomaly detection"""
+    """Enhanced multi-method anomaly detection with ensemble approach"""
     try:
         if not SKLEARN_AVAILABLE:
             return None
@@ -328,7 +395,8 @@ def enhanced_anomaly_detection(df):
         
         # Select features for anomaly detection
         feature_cols = [col for col in ml_df.columns if col.endswith('_encoded')]
-        numeric_cols = ['age', 'hour', 'severity_score', 'risk_score', 'notification_delay']
+        numeric_cols = ['age', 'hour', 'severity_score', 'risk_score', 'notification_delay', 
+                       'incident_count_by_participant', 'location_incident_rate']
         feature_cols.extend([col for col in numeric_cols if col in ml_df.columns])
         
         if len(feature_cols) < 2:
@@ -344,10 +412,11 @@ def enhanced_anomaly_detection(df):
         # Isolation Forest
         iso_forest = IsolationForest(contamination=0.1, random_state=42)
         anomaly_results['isolation_forest'] = iso_forest.fit_predict(X_scaled)
+        anomaly_results['isolation_forest_scores'] = iso_forest.score_samples(X_scaled)
         
         # One-Class SVM
         try:
-            svm_detector = OneClassSVM(nu=0.1)
+            svm_detector = OneClassSVM(nu=0.1, kernel='rbf', gamma='auto')
             anomaly_results['one_class_svm'] = svm_detector.fit_predict(X_scaled)
         except:
             pass
@@ -355,14 +424,46 @@ def enhanced_anomaly_detection(df):
         # Local Outlier Factor
         lof = LocalOutlierFactor(n_neighbors=20, contamination=0.1)
         anomaly_results['lof'] = lof.fit_predict(X_scaled)
+        anomaly_results['lof_scores'] = lof.negative_outlier_factor_
+        
+        # Elliptic Envelope (Robust Covariance)
+        try:
+            ee = EllipticEnvelope(contamination=0.1, random_state=42)
+            anomaly_results['elliptic_envelope'] = ee.fit_predict(X_scaled)
+        except:
+            pass
+        
+        # DBSCAN for density-based anomaly detection
+        try:
+            dbscan = DBSCAN(eps=0.5, min_samples=5)
+            clusters = dbscan.fit_predict(X_scaled)
+            anomaly_results['dbscan'] = np.where(clusters == -1, -1, 1)
+        except:
+            pass
         
         # Ensemble anomaly score
         ensemble_scores = np.zeros(len(X))
+        method_count = 0
+        
         for method, scores in anomaly_results.items():
-            ensemble_scores += (scores == -1).astype(int)
+            if not method.endswith('_scores'):
+                ensemble_scores += (scores == -1).astype(int)
+                method_count += 1
         
         # Normalize ensemble scores
-        ensemble_scores = ensemble_scores / len(anomaly_results)
+        if method_count > 0:
+            ensemble_scores = ensemble_scores / method_count
+        
+        # Calculate confidence scores
+        confidence_scores = np.zeros(len(X))
+        if 'isolation_forest_scores' in anomaly_results:
+            confidence_scores += -anomaly_results['isolation_forest_scores']
+        if 'lof_scores' in anomaly_results:
+            confidence_scores += -anomaly_results['lof_scores']
+        
+        # Normalize confidence scores
+        if confidence_scores.max() > confidence_scores.min():
+            confidence_scores = (confidence_scores - confidence_scores.min()) / (confidence_scores.max() - confidence_scores.min())
         
         # Identify anomalies (threshold at 0.5 - majority vote)
         final_anomalies = ensemble_scores >= 0.5
@@ -374,18 +475,33 @@ def enhanced_anomaly_detection(df):
         # Analyze anomaly patterns
         anomaly_patterns = {}
         if len(anomaly_data) > 0:
-            for col in ['incident_type', 'severity', 'location']:
+            for col in ['incident_type', 'severity', 'location', 'time_period']:
                 if col in anomaly_data.columns:
                     anomaly_patterns[col] = anomaly_data[col].value_counts().to_dict()
         
+        # Statistical analysis of anomalies
+        anomaly_stats = {}
+        if len(anomaly_data) > 0:
+            for col in ['risk_score', 'age', 'hour', 'notification_delay']:
+                if col in anomaly_data.columns:
+                    anomaly_stats[col] = {
+                        'mean': anomaly_data[col].mean(),
+                        'std': anomaly_data[col].std(),
+                        'min': anomaly_data[col].min(),
+                        'max': anomaly_data[col].max()
+                    }
+        
         return {
             'anomaly_scores': ensemble_scores,
+            'confidence_scores': confidence_scores,
             'anomaly_flags': final_anomalies,
             'anomaly_indices': anomaly_indices,
             'anomaly_patterns': anomaly_patterns,
-            'methods_used': list(anomaly_results.keys()),
+            'anomaly_stats': anomaly_stats,
+            'methods_used': [k for k in anomaly_results.keys() if not k.endswith('_scores')],
             'feature_cols': feature_cols,
-            'X_scaled': X_scaled
+            'X_scaled': X_scaled,
+            'individual_results': anomaly_results
         }
         
     except Exception as e:
@@ -393,7 +509,7 @@ def enhanced_anomaly_detection(df):
         return None
 
 def advanced_association_rules(df):
-    """Advanced association rule mining with multiple algorithms"""
+    """Advanced association rule mining with multiple algorithms and metrics"""
     try:
         if not MLXTEND_AVAILABLE:
             return None
@@ -405,7 +521,7 @@ def advanced_association_rules(df):
         if 'age_group' in df.columns:
             transaction_cols.append('age_group')
         
-        # Create transactions
+        # Create transactions with additional derived attributes
         transactions = []
         for _, row in df.iterrows():
             transaction = []
@@ -417,6 +533,12 @@ def advanced_association_rules(df):
             if 'risk_score' in row:
                 risk_level = 'high_risk' if row['risk_score'] > 5 else 'low_risk'
                 transaction.append(f"risk={risk_level}")
+            
+            # Add time-based attributes
+            if 'is_weekend' in row:
+                transaction.append(f"weekend={row['is_weekend']}")
+            if 'quarter' in row:
+                transaction.append(f"quarter=Q{row['quarter']}")
             
             if len(transaction) >= 2:
                 transactions.append(transaction)
@@ -430,7 +552,7 @@ def advanced_association_rules(df):
         df_transactions = pd.DataFrame(te_ary, columns=te.columns_)
         
         # Try multiple support levels
-        support_levels = [0.01, 0.05, 0.1]
+        support_levels = [0.01, 0.02, 0.05, 0.1]
         all_rules = []
         
         for min_support in support_levels:
@@ -440,7 +562,7 @@ def advanced_association_rules(df):
                 
                 if len(frequent_itemsets) > 0:
                     # Generate rules with multiple metrics
-                    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=0.5)
+                    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=0.3)
                     
                     if len(rules) > 0:
                         # Calculate additional metrics
@@ -449,6 +571,13 @@ def advanced_association_rules(df):
                                                       (1 - rules['confidence']))
                         rules['leverage'] = rules['support'] - (rules['antecedent support'] * 
                                                                 rules['consequent support'])
+                        rules['zhang'] = np.where(rules['leverage'] == 0, 0,
+                                                 rules['leverage'] / 
+                                                 np.maximum(rules['antecedent support'] * (1 - rules['consequent support']),
+                                                           rules['consequent support'] * (1 - rules['antecedent support'])))
+                        
+                        # Add rule strength score
+                        rules['strength_score'] = (rules['lift'] * rules['confidence'] * rules['support']) ** (1/3)
                         
                         all_rules.append(rules)
             except:
@@ -459,8 +588,8 @@ def advanced_association_rules(df):
             combined_rules = pd.concat(all_rules, ignore_index=True)
             combined_rules = combined_rules.drop_duplicates(subset=['antecedents', 'consequents'])
             
-            # Sort by lift and confidence
-            combined_rules = combined_rules.sort_values(['lift', 'confidence'], ascending=False)
+            # Sort by composite strength score
+            combined_rules = combined_rules.sort_values('strength_score', ascending=False)
             
             return combined_rules
         
@@ -470,533 +599,790 @@ def advanced_association_rules(df):
         st.error(f"Advanced association rules error: {str(e)}")
         return None
 
-def load_data_from_file(uploaded_file):
-    """Load data from uploaded file"""
+def advanced_clustering(df, method='kmeans', n_clusters=4):
+    """Advanced clustering with multiple algorithms"""
     try:
-        df = pd.read_csv(uploaded_file)
-        
-        if len(df) == 0:
-            st.error("❌ The uploaded file is empty.")
+        if not SKLEARN_AVAILABLE:
             return None
         
-        st.info(f"📁 Loaded {len(df)} rows from uploaded file")
-        processed_df = process_data(df)
-        return processed_df
+        ml_df, _ = prepare_ml_features(df)
+        
+        # Select features for clustering
+        feature_cols = [col for col in ml_df.columns if col.endswith('_encoded')]
+        numeric_cols = ['age', 'hour', 'severity_score', 'risk_score', 'notification_delay']
+        feature_cols.extend([col for col in numeric_cols if col in ml_df.columns])
+        
+        if len(feature_cols) < 2:
+            return None
+        
+        X = ml_df[feature_cols].fillna(0)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        # Apply selected clustering method
+        if method == 'kmeans':
+            clusterer = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42)
+        elif method == 'dbscan':
+            clusterer = DBSCAN(eps=0.5, min_samples=5)
+        elif method == 'hierarchical':
+            clusterer = AgglomerativeClustering(n_clusters=n_clusters)
+        else:
+            clusterer = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42)
+        
+        cluster_labels = clusterer.fit_predict(X_scaled)
+        
+        # Calculate metrics only if we have valid clusters
+        metrics = {}
+        unique_labels = np.unique(cluster_labels)
+        
+        if len(unique_labels) > 1:
+            try:
+                metrics['silhouette'] = silhouette_score(X_scaled, cluster_labels)
+                metrics['calinski_harabasz'] = calinski_harabasz_score(X_scaled, cluster_labels)
+            except:
+                pass
+        
+        # PCA for visualization
+        pca = PCA(n_components=min(3, X_scaled.shape[1]), random_state=42)
+        X_pca = pca.fit_transform(X_scaled)
+        
+        # Cluster profiles
+        ml_df['cluster'] = cluster_labels
+        profiles = {}
+        
+        for cluster_id in unique_labels:
+            cluster_data = ml_df[ml_df['cluster'] == cluster_id]
+            profile = {
+                'size': len(cluster_data),
+                'percentage': len(cluster_data) / len(ml_df) * 100
+            }
+            
+            # Numeric features
+            for col in ['risk_score', 'age', 'severity_score']:
+                if col in cluster_data.columns:
+                    profile[f'{col}_mean'] = cluster_data[col].mean()
+                    profile[f'{col}_std'] = cluster_data[col].std()
+            
+            # Categorical features
+            for col in ['incident_type', 'severity', 'location']:
+                if col in cluster_data.columns:
+                    top_value = cluster_data[col].mode()[0] if len(cluster_data[col].mode()) > 0 else 'N/A'
+                    profile[f'top_{col}'] = top_value
+            
+            profiles[f'cluster_{cluster_id}'] = profile
+        
+        return {
+            'labels': cluster_labels,
+            'n_clusters': len(unique_labels),
+            'X_pca': X_pca,
+            'pca': pca,
+            'metrics': metrics,
+            'profiles': profiles,
+            'feature_cols': feature_cols,
+            'method': method
+        }
         
     except Exception as e:
-        st.error(f"❌ Error reading file: {str(e)}")
+        st.error(f"Clustering error: {str(e)}")
         return None
 
-# Main Application
-st.title("🏥 NDIS Incident Analytics Dashboard - Enhanced ML Edition")
-
-# Data loading UI
-st.sidebar.subheader("📁 Data Upload")
-st.sidebar.markdown("**Upload your NDIS incidents CSV file to begin analysis**")
-
-uploaded_file = st.sidebar.file_uploader(
-    "Choose a CSV file", 
-    type="csv",
-    help="Upload your NDIS incidents data in CSV format"
-)
-
-# Load data
-df = None
-if uploaded_file is not None:
-    with st.spinner("Loading and processing your data..."):
-        df = load_data_from_file(uploaded_file)
-        if df is not None:
-            st.sidebar.success("✅ File uploaded and processed successfully!")
-        else:
-            st.sidebar.error("❌ Error processing file. Please check the format.")
-
-# Check if we have data to work with
-if df is None or len(df) == 0:
-    st.markdown("""
-    # 🏥 Enhanced NDIS Analytics with Advanced ML
+def generate_sample_data(n_records=100):
+    """Generate sample NDIS incident data for demonstration"""
+    np.random.seed(42)
     
-    ## 📁 Welcome! Please Upload Your Data
+    incident_types = ['Fall', 'Medication Error', 'Property Damage', 'Injury', 'Behavioral', 
+                     'Staff Incident', 'Transportation', 'Medical Emergency', 'Neglect', 'Other']
+    severities = ['Low', 'Medium', 'High', 'Critical']
+    locations = ['Residential Home A', 'Day Program B', 'Community Center C', 'Workplace D', 
+                'Residential Home E', 'Day Program F']
     
-    This enhanced dashboard now includes:
-    - 🔮 **Predictive Analytics** - Forecast future incident patterns
-    - 🚨 **Advanced Anomaly Detection** - Multi-algorithm ensemble approach
-    - 🔗 **Sophisticated Association Rules** - Discover complex relationships
+    # Generate dates over the last 6 months
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=180)
     
-    ### 📋 Required CSV Columns:
-    - `incident_date` - Date of incident (DD/MM/YYYY format)
-    - `incident_type` - Type of incident
-    - `severity` - Severity level (Low, Medium, High, Critical)
-    - `location` - Where the incident occurred
-    
-    ### 🔧 Optional Columns for Enhanced Analysis:
-    - `notification_date` - When incident was reported
-    - `participant_name` - Participant involved
-    - `age` - Participant age
-    - `reportable` - Whether incident is reportable (Yes/No)
-    - `incident_time` - Time of incident (HH:MM)
-    - `description` - Incident description
-    """)
-    
-    # Show sample data format
-    st.subheader("📋 Sample Data Format")
-    sample_data = pd.DataFrame({
-        'incident_date': ['01/01/2024', '02/01/2024', '03/01/2024'],
-        'incident_type': ['Fall', 'Medication Error', 'Behavioral'],
-        'severity': ['Medium', 'High', 'Low'],
-        'location': ['Day Program', 'Residential', 'Community'],
-        'reportable': ['Yes', 'No', 'No']
-    })
-    st.dataframe(sample_data, use_container_width=True)
-    st.stop()
-
-# Process data if loaded successfully
-try:
-    ml_df, label_encoders = prepare_ml_features(df)
-    
-    st.success(f"✅ Successfully loaded {len(df)} incidents from {df['incident_date'].min().strftime('%B %Y')} to {df['incident_date'].max().strftime('%B %Y')}")
-    
-except Exception as e:
-    st.error(f"❌ Error processing data: {str(e)}")
-    st.stop()
-
-# Sidebar controls
-st.sidebar.header("🎛️ Analysis Controls")
-
-# Analysis Mode Selection
-analysis_mode = st.sidebar.selectbox(
-    "🔬 Analysis Mode",
-    ["Executive Overview", "🔮 Predictive Analytics", "🚨 Anomaly Detection", "🔗 Association Rules", "Risk Analysis", "Data Explorer"]
-)
-
-# Filters
-st.sidebar.subheader("🎯 Filters")
-
-# Date range filter
-if 'incident_date' in df.columns:
-    min_date = df['incident_date'].min().date()
-    max_date = df['incident_date'].max().date()
-    
-    date_range = st.sidebar.date_input(
-        "📅 Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
-    
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        df_filtered = df[
-            (df['incident_date'].dt.date >= start_date) & 
-            (df['incident_date'].dt.date <= end_date)
-        ]
-    else:
-        df_filtered = df.copy()
-else:
-    df_filtered = df.copy()
-
-# Severity filter
-if 'severity' in df.columns:
-    severity_options = df['severity'].unique()
-    severity_filter = st.sidebar.multiselect(
-        "⚠️ Severity Level",
-        options=severity_options,
-        default=severity_options
-    )
-    df_filtered = df_filtered[df_filtered['severity'].isin(severity_filter)]
-
-# Location filter
-if 'location' in df.columns:
-    location_options = df['location'].unique()
-    location_filter = st.sidebar.multiselect(
-        "📍 Location",
-        options=location_options,
-        default=location_options
-    )
-    df_filtered = df_filtered[df_filtered['location'].isin(location_filter)]
-
-# Main dashboard content based on mode
-if analysis_mode == "Executive Overview":
-    # KPIs
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📊 Total Incidents", len(df_filtered))
-    
-    with col2:
-        if 'severity' in df_filtered.columns:
-            critical_count = len(df_filtered[df_filtered['severity'].str.lower().isin(['critical', 'high'])])
-            st.metric("🚨 High Severity", critical_count)
-        else:
-            st.metric("🚨 High Severity", "N/A")
-    
-    with col3:
-        if 'risk_score' in df_filtered.columns:
-            avg_risk = df_filtered['risk_score'].mean()
-            st.metric("⚡ Avg Risk Score", f"{avg_risk:.1f}")
-        else:
-            st.metric("⚡ Avg Risk Score", "N/A")
-    
-    with col4:
-        if 'participant_name' in df_filtered.columns:
-            unique_participants = df_filtered['participant_name'].nunique()
-            st.metric("👥 Participants", unique_participants)
-        else:
-            st.metric("👥 Participants", "N/A")
-    
-    # Visualizations
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Incident types
-        if 'incident_type' in df_filtered.columns:
-            incident_counts = df_filtered['incident_type'].value_counts().head(10)
-            fig1 = px.bar(
-                x=incident_counts.values,
-                y=incident_counts.index,
-                orientation='h',
-                title="🔝 Top Incident Types",
-                labels={'x': 'Count', 'y': 'Incident Type'},
-                color=incident_counts.values,
-                color_continuous_scale='viridis'
-            )
-            fig1.update_layout(height=400)
-            st.plotly_chart(fig1, use_container_width=True)
-    
-    with col2:
-        # Risk distribution
-        if 'risk_score' in df_filtered.columns:
-            fig2 = px.histogram(
-                df_filtered,
-                x='risk_score',
-                nbins=20,
-                title="⚡ Risk Score Distribution",
-                labels={'risk_score': 'Risk Score', 'count': 'Number of Incidents'},
-                color_discrete_sequence=['#FF6B6B']
-            )
-            fig2.update_layout(height=400)
-            st.plotly_chart(fig2, use_container_width=True)
-    
-    # Time series analysis
-    st.subheader("📈 Incident Trends")
-    if 'incident_date' in df_filtered.columns:
-        daily_incidents = df_filtered.groupby(df_filtered['incident_date'].dt.date).size().reset_index()
-        daily_incidents.columns = ['Date', 'Count']
+    data = []
+    for i in range(n_records):
+        # Generate random date
+        days_back = np.random.randint(0, 180)
+        incident_date = end_date - timedelta(days=days_back)
         
-        fig3 = px.line(
-            daily_incidents,
-            x='Date',
-            y='Count',
-            title="Daily Incident Trends",
-            markers=True
-        )
-        fig3.add_scatter(x=daily_incidents['Date'], 
-                        y=daily_incidents['Count'].rolling(7).mean(),
-                        mode='lines',
-                        name='7-day Moving Average',
-                        line=dict(dash='dash'))
-        st.plotly_chart(fig3, use_container_width=True)
-
-elif analysis_mode == "🔮 Predictive Analytics":
-    st.header("🔮 Predictive Analytics")
-    st.markdown("*Forecast future incident patterns using advanced machine learning*")
-    
-    # Prediction controls
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        prediction_days = st.slider("Forecast Horizon (days)", 7, 90, 30)
-    with col2:
-        prediction_confidence = st.slider("Confidence Level (%)", 80, 99, 95)
-    with col3:
-        if st.button("🚀 Generate Predictions", type="primary"):
-            st.session_state['run_predictions'] = True
-    
-    if st.session_state.get('run_predictions', False):
-        with st.spinner("🔮 Generating predictions..."):
-            predictions = predict_future_incidents(df_filtered, prediction_days)
-            
-            if predictions:
-                # Display prediction results
-                st.subheader("📊 Incident Volume Predictions")
-        with st.spinner("🔮 Generating predictions..."):
-            predictions = predict_future_incidents(df_filtered, prediction_days)
-
-            if predictions:
-                daily_counts = predictions['daily_counts']
-                last_date = pd.to_datetime(daily_counts.index[-1])
-                future_index = pd.date_range(last_date + pd.Timedelta(days=1), periods=prediction_days)
-
-                # Moving average & trend
-                ma_pred = predictions['moving_average'] if predictions['moving_average'] is not None else 0
-                trend_pred = max(0, predictions['trend_based']) if predictions['trend_based'] is not None else 0
-
-                # Build a simple forecast line by blending MA and trend
-                blend = 0.6
-                base_future = np.linspace(daily_counts.iloc[-7:].mean(), trend_pred, prediction_days)
-                forecast_vals = blend * ma_pred + (1 - blend) * base_future
-
-                # ARIMA override if available
-                if predictions.get('arima') is not None:
-                    try:
-                        # If ARIMA returned a series/array, align it
-                        arima_vals = np.asarray(predictions['arima'])[:prediction_days]
-                        if len(arima_vals) == prediction_days:
-                            forecast_vals = 0.5 * forecast_vals + 0.5 * arima_vals
-                    except:
-                        pass
-
-                # Confidence interval (simple heuristic based on recent std)
-                recent_std = daily_counts[-14:].std() if len(daily_counts) >= 14 else max(1.5, daily_counts.std())
-                z = {80: 1.28, 85: 1.44, 90: 1.64, 95: 1.96, 99: 2.58}.get(prediction_confidence, 1.96)
-                ci = z * recent_std
-                lower = np.maximum(0, forecast_vals - ci)
-                upper = forecast_vals + ci
-
-                # Build Plotly figure
-                hist_df = pd.DataFrame({"Date": pd.to_datetime(daily_counts.index), "Count": daily_counts.values})
-                fc_df = pd.DataFrame({"Date": future_index, "Forecast": forecast_vals, "Lower": lower, "Upper": upper})
-
-                fig_fc = go.Figure()
-                fig_fc.add_trace(go.Scatter(x=hist_df["Date"], y=hist_df["Count"],
-                                            mode="lines+markers", name="Observed"))
-                fig_fc.add_trace(go.Scatter(x=fc_df["Date"], y=fc_df["Forecast"],
-                                            mode="lines+markers", name="Forecast"))
-                fig_fc.add_trace(go.Scatter(x=pd.concat([fc_df["Date"], fc_df["Date"][::-1]]),
-                                            y=pd.concat([fc_df["Upper"], fc_df["Lower"][::-1]]),
-                                            fill="toself", opacity=0.2, line=dict(width=0),
-                                            name=f"{prediction_confidence}% CI"))
-                fig_fc.update_layout(title="Incident Forecast", xaxis_title="Date", yaxis_title="Incidents")
-                st.plotly_chart(fig_fc, use_container_width=True)
-
-                # Quick stats
-                colA, colB, colC = st.columns(3)
-                with colA:
-                    st.metric("Avg Next-Day Forecast", f"{forecast_vals[0]:.1f}")
-                with colB:
-                    st.metric("Avg 7-Day Forecast", f"{np.mean(forecast_vals[:7]):.1f}")
-                with colC:
-                    st.metric("Avg 30-Day Forecast", f"{np.mean(forecast_vals[:min(30, prediction_days)]):.1f}")
-
-                # Severity predictor (if built)
-                sev_pred = predictions.get('severity_predictor')
-                if sev_pred:
-                    st.subheader("🎯 Severity Classifier (Prototype)")
-                    st.write(f"Model: RandomForestClassifier • Features: {', '.join(sev_pred['features'])}")
-                    st.metric("Validation Accuracy", f"{sev_pred['accuracy']*100:.1f}%")
-                    # Show feature importances
-                    try:
-                        importances = sev_pred['model'].feature_importances_
-                        imp_df = pd.DataFrame({"Feature": sev_pred['features'], "Importance": importances}).sort_values("Importance", ascending=False)
-                        fig_imp = px.bar(imp_df, x="Importance", y="Feature", orientation="h", title="Feature Importance")
-                        st.plotly_chart(fig_imp, use_container_width=True)
-                    except:
-                        pass
-            else:
-                st.warning("No predictions could be generated. Try widening your date range or uploading more data.")
-elif analysis_mode == "🚨 Anomaly Detection":
-    st.header("🚨 Anomaly Detection")
-    st.markdown("Multi-model ensemble (Isolation Forest, LOF, One-Class SVM) with majority vote.")
-
-    results = enhanced_anomaly_detection(df_filtered)
-    if not results:
-        st.info("Not enough features or ML libraries not available to run anomaly detection.")
-        st.stop()
-
-    anom_flags = results['anomaly_flags']
-    anom_idx = results['anomaly_indices']
-    methods = results['methods_used']
-    scores = results['anomaly_scores']
-
-    st.write(f"Methods used: **{', '.join(methods)}**")
-    st.metric("Detected Anomalies", int(anom_flags.sum()))
-
-    # Attach scores back to rows for inspection
-    df_view = df_filtered.reset_index(drop=True).copy()
-    df_view['anomaly_score'] = scores
-    df_view['is_anomaly'] = anom_flags
-
-    # Show top anomalies
-    top_n = st.slider("Show top N anomalies", 5, 50, 15)
-    top_anom = df_view.sort_values("anomaly_score", ascending=False).head(top_n)
-    st.dataframe(top_anom, use_container_width=True)
-
-    # Simple distribution plot
-    fig_sc = px.histogram(df_view, x="anomaly_score", nbins=30, title="Anomaly Score Distribution")
-    st.plotly_chart(fig_sc, use_container_width=True)
-
-    # Pattern summary
-    st.subheader("🔎 Anomaly Pattern Highlights")
-    patterns = results.get('anomaly_patterns', {})
-    if patterns:
-        cols = st.columns(min(3, len(patterns)))
-        for (k, v), c in zip(patterns.items(), cols):
-            patt_df = pd.DataFrame({"Value": list(v.keys()), "Count": list(v.values())}).sort_values("Count", ascending=False).head(10)
-            c.plotly_chart(px.bar(patt_df, x="Count", y="Value", orientation="h", title=k), use_container_width=True)
-    else:
-        st.write("No categorical patterns detected among anomalies.")
-
-elif analysis_mode == "🔗 Association Rules":
-    st.header("🔗 Association Rules")
-    st.markdown("Discover relationships between attributes (via FP-Growth → association rules).")
-
-    if not MLXTEND_AVAILABLE:
-        st.warning("`mlxtend` not installed — cannot compute association rules.")
-        st.stop()
-
-    rules = advanced_association_rules(df_filtered)
-    if rules is None or len(rules) == 0:
-        st.info("No strong rules found. Try widening your filters or uploading more data.")
-    else:
-        # Format antecedents/consequents as strings
-        rules_view = rules.copy()
-        rules_view['antecedents'] = rules_view['antecedents'].apply(lambda s: ", ".join(sorted(list(s))))
-        rules_view['consequents'] = rules_view['consequents'].apply(lambda s: ", ".join(sorted(list(s))))
-        cols_to_show = ['antecedents','consequents','support','confidence','lift','leverage','conviction']
-        rules_view = rules_view[cols_to_show].round(4)
-
-        st.subheader("Top Rules (by Lift & Confidence)")
-        top_k = st.slider("Show top K rules", 5, 100, 20)
-        st.dataframe(rules_view.head(top_k), use_container_width=True)
-
-        # Visuals
-        st.subheader("Rule Metrics")
-        fig_sc = px.scatter(rules_view, x="support", y="confidence", size="lift",
-                            hover_data=["antecedents","consequents"], title="Support vs Confidence (size=Lift)")
-        st.plotly_chart(fig_sc, use_container_width=True)
-
-        heat = rules_view.pivot_table(index="antecedents", columns="consequents", values="lift", aggfunc="max")
-        if heat.shape[0] <= 40 and heat.shape[1] <= 40:
-            fig_heat = px.imshow(heat, aspect="auto", title="Lift Heatmap (Antecedents → Consequents)")
-            st.plotly_chart(fig_heat, use_container_width=True)
+        # Generate time with higher probability during day hours
+        if np.random.random() < 0.8:
+            hour = np.random.randint(7, 18)  # Day hours
         else:
-            st.caption("Heatmap skipped (too many unique antecedents/consequents).")
+            hour = np.random.randint(0, 24)  # Any hour
+        minute = np.random.randint(0, 60)
+        incident_time = f"{hour:02d}:{minute:02d}"
+        
+        # Generate correlated severity and type
+        incident_type = np.random.choice(incident_types)
+        if incident_type in ['Medical Emergency', 'Injury']:
+            severity = np.random.choice(severities, p=[0.1, 0.3, 0.4, 0.2])
+        else:
+            severity = np.random.choice(severities, p=[0.4, 0.3, 0.2, 0.1])
+        
+        # Generate notification delay (most same day, some delays)
+        if np.random.random() < 0.8:
+            notification_delay = np.random.uniform(0, 1)  # Same day
+        else:
+            notification_delay = np.random.uniform(1, 3)  # 1-3 days delay
+        
+        notification_date = incident_date + timedelta(days=notification_delay)
+        
+        record = {
+            'incident_id': f'INC{i+1:06d}',
+            'participant_name': f'Participant_{np.random.randint(1, n_records//3):03d}',
+            'incident_date': incident_date.strftime('%d/%m/%Y'),
+            'incident_time': incident_time,
+            'notification_date': notification_date.strftime('%d/%m/%Y'),
+            'incident_type': incident_type,
+            'severity': severity,
+            'location': np.random.choice(locations),
+            'age': np.random.randint(18, 85),
+            'reportable': np.random.choice(['Yes', 'No'], p=[0.3, 0.7])
+        }
+        data.append(record)
+    
+    return pd.DataFrame(data)
 
-elif analysis_mode == "Risk Analysis":
-    st.header("⚠️ Risk Analysis")
-    st.markdown("Identify hotspots by location, time, and severity.")
+def create_prediction_visualizations(predictions, df):
+    """Create visualizations for prediction results"""
+    if not predictions:
+        return None
+    
+    # Prepare prediction comparison chart
+    prediction_methods = []
+    prediction_values = []
+    
+    for method, value in predictions.items():
+        if method != 'daily_counts' and method != 'severity_predictor' and value is not None:
+            prediction_methods.append(method.replace('_', ' ').title())
+            prediction_values.append(max(0, value))
+    
+    if prediction_methods:
+        fig_pred = go.Figure(data=[
+            go.Bar(x=prediction_methods, y=prediction_values, 
+                  marker_color='rgba(55, 128, 191, 0.7)',
+                  text=[f'{v:.1f}' for v in prediction_values],
+                  textposition='auto')
+        ])
+        
+        fig_pred.update_layout(
+            title='Incident Prediction Comparison (Next 30 Days Average)',
+            xaxis_title='Prediction Method',
+            yaxis_title='Predicted Daily Incidents',
+            height=400
+        )
+        
+        return fig_pred
+    
+    return None
 
-    if 'risk_score' not in df_filtered.columns:
-        st.info("Risk score not available.")
-        st.stop()
+def create_anomaly_visualizations(anomaly_results, df):
+    """Create visualizations for anomaly detection results"""
+    if not anomaly_results:
+        return None, None
+    
+    # Anomaly score distribution
+    fig_dist = go.Figure()
+    fig_dist.add_trace(go.Histogram(
+        x=anomaly_results['anomaly_scores'],
+        nbinsx=20,
+        marker_color='rgba(255, 99, 132, 0.7)',
+        name='Anomaly Scores'
+    ))
+    
+    fig_dist.update_layout(
+        title='Distribution of Anomaly Scores',
+        xaxis_title='Anomaly Score',
+        yaxis_title='Frequency',
+        height=400
+    )
+    
+    # Create anomaly scatter plot if PCA data is available
+    fig_scatter = None
+    if len(anomaly_results['X_scaled']) > 0 and len(anomaly_results['feature_cols']) >= 2:
+        # Use first two features for scatter plot
+        feature1 = anomaly_results['feature_cols'][0]
+        feature2 = anomaly_results['feature_cols'][1] if len(anomaly_results['feature_cols']) > 1 else anomaly_results['feature_cols'][0]
+        
+        colors = ['red' if flag else 'blue' for flag in anomaly_results['anomaly_flags']]
+        
+        fig_scatter = go.Figure()
+        
+        # Normal points
+        normal_indices = ~anomaly_results['anomaly_flags']
+        if np.any(normal_indices):
+            fig_scatter.add_trace(go.Scatter(
+                x=anomaly_results['X_scaled'][normal_indices, 0],
+                y=anomaly_results['X_scaled'][normal_indices, 1],
+                mode='markers',
+                marker=dict(color='blue', size=6, opacity=0.6),
+                name='Normal',
+                hovertemplate='Normal Incident<extra></extra>'
+            ))
+        
+        # Anomalous points
+        anomaly_indices = anomaly_results['anomaly_flags']
+        if np.any(anomaly_indices):
+            fig_scatter.add_trace(go.Scatter(
+                x=anomaly_results['X_scaled'][anomaly_indices, 0],
+                y=anomaly_results['X_scaled'][anomaly_indices, 1],
+                mode='markers',
+                marker=dict(color='red', size=8, opacity=0.8),
+                name='Anomaly',
+                hovertemplate='Anomalous Incident<extra></extra>'
+            ))
+        
+        fig_scatter.update_layout(
+            title='Anomaly Detection Results (Feature Space)',
+            xaxis_title=f'Scaled {feature1}',
+            yaxis_title=f'Scaled {feature2}',
+            height=500
+        )
+    
+    return fig_dist, fig_scatter
 
-    # Hotspots by location
-    loc_risk = df_filtered.groupby('location').agg(
-        incidents=('incident_id', 'count'),
-        avg_risk=('risk_score', 'mean'),
-        high_sev=('severity', lambda s: (s.str.lower().isin(['high','critical'])).sum())
-    ).reset_index().sort_values(['avg_risk','incidents'], ascending=[False, False])
-    st.subheader("📍 Location Hotspots")
-    st.dataframe(loc_risk, use_container_width=True)
-    st.plotly_chart(px.bar(loc_risk.head(15), x="location", y="avg_risk", title="Avg Risk by Location"), use_container_width=True)
+def create_clustering_visualizations(clustering_results, df):
+    """Create visualizations for clustering results"""
+    if not clustering_results:
+        return None, None
+    
+    # PCA scatter plot
+    fig_pca = go.Figure()
+    
+    unique_clusters = np.unique(clustering_results['labels'])
+    colors = px.colors.qualitative.Set1[:len(unique_clusters)]
+    
+    for i, cluster_id in enumerate(unique_clusters):
+        cluster_mask = clustering_results['labels'] == cluster_id
+        cluster_points = clustering_results['X_pca'][cluster_mask]
+        
+        fig_pca.add_trace(go.Scatter(
+            x=cluster_points[:, 0],
+            y=cluster_points[:, 1],
+            mode='markers',
+            marker=dict(color=colors[i % len(colors)], size=8, opacity=0.7),
+            name=f'Cluster {cluster_id}' if cluster_id != -1 else 'Noise',
+            hovertemplate=f'Cluster {cluster_id}<extra></extra>'
+        ))
+    
+    fig_pca.update_layout(
+        title=f'Incident Clustering Results - {clustering_results["method"].title()}',
+        xaxis_title='First Principal Component',
+        yaxis_title='Second Principal Component',
+        height=500
+    )
+    
+    # Cluster size chart
+    cluster_sizes = []
+    cluster_labels = []
+    
+    for cluster_id in unique_clusters:
+        size = np.sum(clustering_results['labels'] == cluster_id)
+        cluster_sizes.append(size)
+        cluster_labels.append(f'Cluster {cluster_id}' if cluster_id != -1 else 'Noise')
+    
+    fig_sizes = go.Figure(data=[
+        go.Pie(labels=cluster_labels, values=cluster_sizes, hole=0.3)
+    ])
+    
+    fig_sizes.update_layout(
+        title='Cluster Size Distribution',
+        height=400
+    )
+    
+    return fig_pca, fig_sizes
 
-    # Time heatmap (day vs hour)
-    if {'day_of_week','hour'}.issubset(df_filtered.columns):
-        heat_df = df_filtered.pivot_table(index='day_of_week', columns='hour', values='incident_id', aggfunc='count').fillna(0)
-        heat_df = heat_df.reindex(['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'])
-        fig_heat = px.imshow(heat_df, aspect="auto", title="Incidents Heatmap (Day vs Hour)")
-        st.plotly_chart(fig_heat, use_container_width=True)
+def main():
+    """Main Streamlit application"""
+    st.title("🏥 NDIS Analytics Dashboard - Enhanced")
+    st.markdown("Advanced analytics for NDIS incident management with ML-powered insights")
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("📊 Data Source")
+        
+        data_source = st.radio(
+            "Choose data source:",
+            ["Upload CSV File", "Use Sample Data"]
+        )
+        
+        df = None
+        
+        if data_source == "Upload CSV File":
+            uploaded_file = st.file_uploader(
+                "Upload NDIS incidents CSV file",
+                type=['csv'],
+                help="CSV should contain columns: incident_date, incident_type, severity, location"
+            )
+            
+            if uploaded_file:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    st.success(f"✅ File uploaded: {len(df)} records")
+                except Exception as e:
+                    st.error(f"❌ Error reading file: {str(e)}")
+        
+        else:  # Use Sample Data
+            sample_size = st.slider("Sample data size:", 50, 500, 200)
+            if st.button("Generate Sample Data"):
+                df = generate_sample_data(sample_size)
+                st.success(f"✅ Sample data generated: {len(df)} records")
+        
+        # ML Configuration
+        st.header("🤖 ML Configuration")
+        
+        if not SKLEARN_AVAILABLE:
+            st.warning("⚠️ Scikit-learn not available. ML features disabled.")
+        
+        if not MLXTEND_AVAILABLE:
+            st.warning("⚠️ MLxtend not available. Association rules disabled.")
+        
+        if not STATSMODELS_AVAILABLE:
+            st.warning("⚠️ Statsmodels not available. Advanced forecasting disabled.")
+    
+    # Process data if available
+    if df is not None:
+        df_processed = process_data(df)
+        
+        if df_processed is None:
+            st.error("❌ Failed to process data. Please check your data format.")
+            return
+        
+        # Display basic info
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{len(df_processed)}</h3>
+                <p>Total Incidents</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            critical_count = len(df_processed[df_processed['severity'] == 'Critical'])
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{critical_count}</h3>
+                <p>Critical Incidents</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            unique_participants = df_processed['participant_name'].nunique()
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{unique_participants}</h3>
+                <p>Participants</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            avg_risk = df_processed['risk_score'].mean()
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{avg_risk:.1f}</h3>
+                <p>Avg Risk Score</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Main tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Overview", "🔮 Predictions", "⚠️ Anomaly Detection", 
+            "🎯 Clustering Analysis", "🔗 Association Rules"
+        ])
+        
+        with tab1:
+            st.header("📊 Incident Overview")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Incident trend over time
+                daily_incidents = df_processed.groupby('incident_date').size().reset_index()
+                daily_incidents.columns = ['Date', 'Count']
+                
+                fig_trend = px.line(daily_incidents, x='Date', y='Count',
+                                  title='Daily Incident Trend')
+                st.plotly_chart(fig_trend, use_container_width=True)
+            
+            with col2:
+                # Severity distribution
+                severity_dist = df_processed['severity'].value_counts()
+                fig_severity = px.pie(values=severity_dist.values, names=severity_dist.index,
+                                    title='Incident Severity Distribution')
+                st.plotly_chart(fig_severity, use_container_width=True)
+            
+            col3, col4 = st.columns(2)
+            
+            with col3:
+                # Incident types
+                type_dist = df_processed['incident_type'].value_counts().head(10)
+                fig_types = px.bar(x=type_dist.index, y=type_dist.values,
+                                 title='Top Incident Types')
+                fig_types.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_types, use_container_width=True)
+            
+            with col4:
+                # Risk score distribution
+                fig_risk = px.histogram(df_processed, x='risk_score', nbins=20,
+                                      title='Risk Score Distribution')
+                st.plotly_chart(fig_risk, use_container_width=True)
+        
+        with tab2:
+            st.header("🔮 Predictive Analytics")
+            
+            if SKLEARN_AVAILABLE:
+                with st.spinner('Generating predictions...'):
+                    predictions = predict_future_incidents(df_processed)
+                
+                if predictions:
+                    # Display prediction cards
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        ma_pred = predictions.get('moving_average', 0)
+                        st.markdown(f"""
+                        <div class="prediction-card">
+                            <h3>Moving Average</h3>
+                            <h2>{ma_pred:.1f}</h2>
+                            <p>incidents/day</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        trend_pred = predictions.get('trend_based', 0)
+                        st.markdown(f"""
+                        <div class="prediction-card">
+                            <h3>Trend Analysis</h3>
+                            <h2>{trend_pred:.1f}</h2>
+                            <p>incidents/day</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        rf_pred = predictions.get('random_forest', 0)
+                        if rf_pred:
+                            st.markdown(f"""
+                            <div class="prediction-card">
+                                <h3>ML Forecast</h3>
+                                <h2>{rf_pred:.1f}</h2>
+                                <p>incidents/day</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown("""
+                            <div class="prediction-card">
+                                <h3>ML Forecast</h3>
+                                <h2>N/A</h2>
+                                <p>Insufficient data</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    # Prediction comparison chart
+                    fig_pred = create_prediction_visualizations(predictions, df_processed)
+                    if fig_pred:
+                        st.plotly_chart(fig_pred, use_container_width=True)
+                    
+                    # Severity prediction model info
+                    if predictions.get('severity_predictor'):
+                        sev_pred = predictions['severity_predictor']
+                        st.markdown(f"""
+                        <div class="insight-box">
+                            <h4>🎯 Severity Prediction Model</h4>
+                            <p>Model Accuracy: <strong>{sev_pred['accuracy']:.2%}</strong></p>
+                            <p>Key Features: {', '.join(sev_pred['features'])}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                else:
+                    st.warning("⚠️ Unable to generate predictions. Insufficient data.")
+            else:
+                st.warning("⚠️ Predictive analytics requires scikit-learn installation.")
+        
+        with tab3:
+            st.header("⚠️ Anomaly Detection")
+            
+            if SKLEARN_AVAILABLE:
+                with st.spinner('Detecting anomalies...'):
+                    anomaly_results = enhanced_anomaly_detection(df_processed)
+                
+                if anomaly_results:
+                    # Anomaly summary
+                    n_anomalies = np.sum(anomaly_results['anomaly_flags'])
+                    anomaly_rate = n_anomalies / len(df_processed) * 100
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.markdown(f"""
+                        <div class="anomaly-card">
+                            <h3>{n_anomalies}</h3>
+                            <p>Anomalies Detected</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"""
+                        <div class="anomaly-card">
+                            <h3>{anomaly_rate:.1f}%</h3>
+                            <p>Anomaly Rate</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        n_methods = len(anomaly_results['methods_used'])
+                        st.markdown(f"""
+                        <div class="anomaly-card">
+                            <h3>{n_methods}</h3>
+                            <p>Detection Methods</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Anomaly visualizations
+                    fig_dist, fig_scatter = create_anomaly_visualizations(anomaly_results, df_processed)
+                    
+                    col4, col5 = st.columns(2)
+                    
+                    with col4:
+                        if fig_dist:
+                            st.plotly_chart(fig_dist, use_container_width=True)
+                    
+                    with col5:
+                        if fig_scatter:
+                            st.plotly_chart(fig_scatter, use_container_width=True)
+                    
+                    # Anomaly patterns
+                    if anomaly_results['anomaly_patterns']:
+                        st.subheader("🔍 Anomaly Patterns")
+                        
+                        for pattern_type, patterns in anomaly_results['anomaly_patterns'].items():
+                            if patterns:
+                                st.write(f"**{pattern_type.title()}:**")
+                                for value, count in list(patterns.items())[:5]:
+                                    st.write(f"- {value}: {count} incidents")
+                    
+                    # Show anomalous incidents
+                    if n_anomalies > 0:
+                        st.subheader("🚨 Anomalous Incidents")
+                        anomaly_incidents = df_processed.iloc[anomaly_results['anomaly_indices']]
+                        display_columns = ['incident_id', 'incident_date', 'incident_type', 
+                                         'severity', 'location', 'risk_score']
+                        display_columns = [col for col in display_columns if col in anomaly_incidents.columns]
+                        st.dataframe(anomaly_incidents[display_columns], use_container_width=True)
+                
+                else:
+                    st.warning("⚠️ Unable to perform anomaly detection. Insufficient data.")
+            else:
+                st.warning("⚠️ Anomaly detection requires scikit-learn installation.")
+        
+        with tab4:
+            st.header("🎯 Clustering Analysis")
+            
+            if SKLEARN_AVAILABLE:
+                # Clustering controls
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    clustering_method = st.selectbox(
+                        "Select clustering method:",
+                        ['kmeans', 'dbscan', 'hierarchical']
+                    )
+                
+                with col2:
+                    if clustering_method in ['kmeans', 'hierarchical']:
+                        n_clusters = st.slider("Number of clusters:", 2, 10, 4)
+                    else:
+                        n_clusters = None
+                        st.info("DBSCAN automatically determines clusters")
+                
+                if st.button("Run Clustering Analysis"):
+                    with st.spinner('Performing clustering analysis...'):
+                        clustering_results = advanced_clustering(df_processed, 
+                                                               method=clustering_method,
+                                                               n_clusters=n_clusters)
+                    
+                    if clustering_results:
+                        # Clustering metrics
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h3>{clustering_results['n_clusters']}</h3>
+                                <p>Clusters Found</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            if 'silhouette' in clustering_results['metrics']:
+                                silhouette = clustering_results['metrics']['silhouette']
+                                st.markdown(f"""
+                                <div class="metric-card">
+                                    <h3>{silhouette:.3f}</h3>
+                                    <p>Silhouette Score</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        
+                        with col3:
+                            method_name = clustering_results['method'].title()
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h3>{method_name}</h3>
+                                <p>Method Used</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Clustering visualizations
+                        fig_pca, fig_sizes = create_clustering_visualizations(clustering_results, df_processed)
+                        
+                        col4, col5 = st.columns(2)
+                        
+                        with col4:
+                            if fig_pca:
+                                st.plotly_chart(fig_pca, use_container_width=True)
+                        
+                        with col5:
+                            if fig_sizes:
+                                st.plotly_chart(fig_sizes, use_container_width=True)
+                        
+                        # Cluster profiles
+                        if clustering_results['profiles']:
+                            st.subheader("📊 Cluster Profiles")
+                            
+                            for cluster_name, profile in clustering_results['profiles'].items():
+                                with st.expander(f"{cluster_name.replace('_', ' ').title()} ({profile['size']} incidents, {profile['percentage']:.1f}%)"):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.write("**Numeric Characteristics:**")
+                                        for key, value in profile.items():
+                                            if '_mean' in key:
+                                                feature = key.replace('_mean', '')
+                                                std_key = f'{feature}_std'
+                                                if std_key in profile:
+                                                    st.write(f"- {feature}: {value:.2f} ± {profile[std_key]:.2f}")
+                                    
+                                    with col2:
+                                        st.write("**Categorical Characteristics:**")
+                                        for key, value in profile.items():
+                                            if key.startswith('top_'):
+                                                feature = key.replace('top_', '')
+                                                st.write(f"- Most common {feature}: {value}")
+                    else:
+                        st.warning("⚠️ Unable to perform clustering. Insufficient data.")
+            else:
+                st.warning("⚠️ Clustering analysis requires scikit-learn installation.")
+        
+        with tab5:
+            st.header("🔗 Association Rules")
+            
+            if MLXTEND_AVAILABLE:
+                with st.spinner('Mining association rules...'):
+                    association_rules_df = advanced_association_rules(df_processed)
+                
+                if association_rules_df is not None and len(association_rules_df) > 0:
+                    st.success(f"✅ Found {len(association_rules_df)} association rules")
+                    
+                    # Rule strength distribution
+                    fig_strength = px.histogram(association_rules_df, x='strength_score',
+                                              title='Distribution of Rule Strength Scores',
+                                              nbins=20)
+                    st.plotly_chart(fig_strength, use_container_width=True)
+                    
+                    # Top rules by different metrics
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("🏆 Top Rules by Confidence")
+                        top_confidence = association_rules_df.nlargest(5, 'confidence')[
+                            ['antecedents', 'consequents', 'confidence', 'lift', 'support']
+                        ]
+                        
+                        for idx, rule in top_confidence.iterrows():
+                            antecedents = ', '.join(list(rule['antecedents']))
+                            consequents = ', '.join(list(rule['consequents']))
+                            
+                            st.markdown(f"""
+                            <div class="insight-box">
+                                <strong>If:</strong> {antecedents}<br>
+                                <strong>Then:</strong> {consequents}<br>
+                                <small>Confidence: {rule['confidence']:.2f}, Lift: {rule['lift']:.2f}, Support: {rule['support']:.3f}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.subheader("📈 Top Rules by Lift")
+                        top_lift = association_rules_df.nlargest(5, 'lift')[
+                            ['antecedents', 'consequents', 'confidence', 'lift', 'support']
+                        ]
+                        
+                        for idx, rule in top_lift.iterrows():
+                            antecedents = ', '.join(list(rule['antecedents']))
+                            consequents = ', '.join(list(rule['consequents']))
+                            
+                            st.markdown(f"""
+                            <div class="insight-box">
+                                <strong>If:</strong> {antecedents}<br>
+                                <strong>Then:</strong> {consequents}<br>
+                                <small>Confidence: {rule['confidence']:.2f}, Lift: {rule['lift']:.2f}, Support: {rule['support']:.3f}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    # Interactive scatter plot of rules
+                    fig_rules = px.scatter(association_rules_df, 
+                                         x='support', y='confidence', 
+                                         size='lift', color='strength_score',
+                                         title='Association Rules Visualization',
+                                         labels={'support': 'Support', 'confidence': 'Confidence'},
+                                         hover_data=['lift'])
+                    st.plotly_chart(fig_rules, use_container_width=True)
+                    
+                    # Full rules table
+                    with st.expander("📋 All Association Rules"):
+                        # Format the rules for better display
+                        display_rules = association_rules_df.copy()
+                        display_rules['antecedents'] = display_rules['antecedents'].apply(lambda x: ', '.join(list(x)))
+                        display_rules['consequents'] = display_rules['consequents'].apply(lambda x: ', '.join(list(x)))
+                        
+                        display_columns = ['antecedents', 'consequents', 'support', 'confidence', 'lift', 'strength_score']
+                        st.dataframe(display_rules[display_columns], use_container_width=True)
+                
+                else:
+                    st.warning("⚠️ No association rules found. Try with more data or adjust parameters.")
+            else:
+                st.warning("⚠️ Association rules require MLxtend installation.")
+    
+    else:
+        st.info("👆 Please upload a CSV file or generate sample data to begin analysis.")
+        
+        # Show expected data format
+        st.subheader("📋 Expected Data Format")
+        st.write("Your CSV file should contain the following columns:")
+        
+        expected_format = pd.DataFrame({
+            'Column': ['incident_date', 'incident_type', 'severity', 'location', 'participant_name', 'age'],
+            'Description': [
+                'Date of incident (DD/MM/YYYY or YYYY-MM-DD)',
+                'Type of incident (Fall, Injury, etc.)',
+                'Severity level (Low, Medium, High, Critical)',
+                'Location where incident occurred',
+                'Name or ID of participant (optional)',
+                'Age of participant (optional)'
+            ],
+            'Example': [
+                '15/03/2024',
+                'Fall',
+                'Medium',
+                'Residential Home A',
+                'Participant_001',
+                '45'
+            ]
+        })
+        
+        st.table(expected_format)
 
-    # Top participants (if present)
-    if 'participant_name' in df_filtered.columns:
-        top_part = df_filtered.groupby('participant_name').agg(incidents=('incident_id','count'),
-                                                               avg_risk=('risk_score','mean')).reset_index().sort_values('incidents', ascending=False).head(20)
-        st.subheader("👤 Participants with Most Incidents")
-        st.dataframe(top_part, use_container_width=True)
-
-elif analysis_mode == "Data Explorer":
-    st.header("🗂️ Data Explorer")
-    st.markdown("Browse, search, and download the filtered dataset.")
-    st.dataframe(df_filtered, use_container_width=True)
-
-    # Quick search
-    if 'description' in df_filtered.columns:
-        query = st.text_input("Full-text search 'description'", "")
-        if query.strip():
-            mask = df_filtered['description'].astype(str).str.contains(query, case=False, na=False)
-            st.write(f"Matches: {mask.sum()}")
-            st.dataframe(df_filtered[mask], use_container_width=True)
-
-    # CSV download
-    csv = df_filtered.to_csv(index=False).encode('utf-8')
-    st.download_button("⬇️ Download filtered data (CSV)", csv, "ndis_filtered.csv", "text/csv")
-
-# ---- OPTIONAL: add a Clustering mode to your selectbox for richer insights ----
-# To enable this, update your selectbox options to include "🧩 Clustering"
-# e.g. ["Executive Overview", "🔮 Predictive Analytics", "🚨 Anomaly Detection", "🔗 Association Rules", "🧩 Clustering", "Risk Analysis", "Data Explorer"]
-elif analysis_mode == "🧩 Clustering":
-    st.header("🧩 Clustering")
-    st.markdown("Group similar incidents with K-Means (with PCA visualization).")
-
-    if not SKLEARN_AVAILABLE:
-        st.warning("scikit-learn not available — cannot run clustering.")
-        st.stop()
-
-    # Build feature matrix
-    ml_df, _ = prepare_ml_features(df_filtered)
-    feat_cols = [c for c in ml_df.columns if c.endswith('_encoded')] + \
-                [c for c in ['age','hour','severity_score','risk_score','notification_delay'] if c in ml_df.columns]
-    X = ml_df[feat_cols].fillna(0)
-    if X.shape[1] < 2 or X.shape[0] < 10:
-        st.info("Not enough data/features for clustering.")
-        st.stop()
-
-    # Scale + PCA
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-
-    # Pick K via silhouette
-    k_min, k_max = 2, min(10, max(3, X.shape[0]//5))
-    k_choice = st.slider("Number of clusters (K)", k_min, k_max, min(5, k_max))
-    km = KMeans(n_clusters=k_choice, n_init="auto", random_state=42)
-    labels = km.fit_predict(Xs)
-
-    try:
-        sil = silhouette_score(Xs, labels)
-        ch = calinski_harabasz_score(Xs, labels)
-    except:
-        sil, ch = np.nan, np.nan
-
-    st.metric("Silhouette Score", f"{sil:.3f}" if sil==sil else "N/A")
-    st.metric("Calinski-Harabasz", f"{ch:.1f}" if ch==ch else "N/A")
-
-    # PCA to 2D for plotting
-    try:
-        pca = PCA(n_components=2, random_state=42)
-        Xp = pca.fit_transform(Xs)
-        plot_df = pd.DataFrame({"PC1": Xp[:,0], "PC2": Xp[:,1], "cluster": labels})
-        # Attach some readable labels for hover
-        for add_col in ['incident_type','severity','location','time_period']:
-            if add_col in ml_df.columns:
-                plot_df[add_col] = ml_df[add_col].values
-        fig_clu = px.scatter(plot_df, x="PC1", y="PC2", color="cluster",
-                             hover_data=[c for c in plot_df.columns if c not in ['PC1','PC2','cluster']],
-                             title="Clusters (PCA 2D)")
-        st.plotly_chart(fig_clu, use_container_width=True)
-    except Exception as e:
-        st.info(f"PCA plot unavailable: {e}")
-
-    # Cluster profiles
-    ml_df['cluster'] = labels
-    st.subheader("Cluster Profiles")
-    prof_cols = ['cluster','severity_score','risk_score','age','hour']
-    prof_cols = [c for c in prof_cols if c in ml_df.columns]
-    prof = ml_df[prof_cols].groupby('cluster').mean().reset_index()
-    st.dataframe(prof, use_container_width=True)
-
-    # Top categories per cluster
-    st.subheader("Top Categories per Cluster")
-    cat_cols = [c for c in ['incident_type','severity','location','time_period'] if c in ml_df.columns]
-    for c in cat_cols:
-        st.markdown(f"**{c}**")
-        topc = ml_df.groupby(['cluster', c]).size().reset_index(name='count')
-        for cl in sorted(ml_df['cluster'].unique()):
-            tmp = topc[topc['cluster']==cl].sort_values('count', ascending=False).head(5)
-            if len(tmp):
-                st.write(f"Cluster {cl}: " + ", ".join(f"{r[c]} ({int(r['count'])})" for _, r in tmp.iterrows()))
-analysis_mode = st.sidebar.selectbox(
-    "🔬 Analysis Mode",
-    ["Executive Overview", "🔮 Predictive Analytics", "🚨 Anomaly Detection", "🔗 Association Rules", "🧩 Clustering", "Risk Analysis", "Data Explorer"]
-)
-
-
-
-         
+if __name__ == "__main__":
+    main()
