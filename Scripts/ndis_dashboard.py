@@ -146,6 +146,130 @@ st.markdown("""
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 
+def create_sample_ndis_data():
+    """Create sample NDIS incident data matching your CSV structure"""
+    np.random.seed(42)  # For reproducible data
+    n_records = 100
+    
+    # Sample participants
+    participants = [f'Participant_{i:03d}' for i in range(1, 31)]
+    
+    # NDIS numbers (8-digit format)
+    ndis_numbers = [np.random.randint(10000000, 99999999) for _ in range(n_records)]
+    
+    # Date of birth (ages 18-65)
+    start_date = pd.Timestamp('1960-01-01')
+    end_date = pd.Timestamp('2005-12-31')
+    dobs = pd.date_range(start_date, end_date, periods=30).tolist()
+    
+    # Incident dates (2023-2024)
+    incident_dates = pd.date_range('2023-01-01', '2024-12-31', periods=n_records)
+    
+    # Notification dates (same day to 5 days later)
+    notification_delays = np.random.choice([0, 1, 2, 3, 4, 5], n_records, p=[0.4, 0.3, 0.15, 0.08, 0.05, 0.02])
+    notification_dates = incident_dates + pd.to_timedelta(notification_delays, unit='days')
+    
+    # Incident times
+    incident_times = [f"{h:02d}:{m:02d}" for h, m in zip(
+        np.random.choice(24, n_records, p=[0.02]*6 + [0.06]*12 + [0.04]*6), 
+        np.random.randint(0, 60, n_records)
+    )]
+    
+    # Locations
+    locations = ['Main Office', 'Community Center', 'Residential Care', 'Day Program', 'Supported Living']
+    
+    # Incident types and subcategories
+    incident_types = ['Fall', 'Medication Error', 'Behavioral Incident', 'Property Damage', 'Injury', 'Verbal Aggression']
+    subcategories = {
+        'Fall': ['Slip', 'Trip', 'Loss of Balance', 'Mobility Aid Related'],
+        'Medication Error': ['Wrong Dose', 'Wrong Time', 'Wrong Medication', 'Missed Dose'],
+        'Behavioral Incident': ['Verbal Outburst', 'Physical Aggression', 'Self Harm', 'Property Damage'],
+        'Property Damage': ['Equipment Damage', 'Facility Damage', 'Personal Property'],
+        'Injury': ['Cut', 'Bruise', 'Sprain', 'Fracture'],
+        'Verbal Aggression': ['Threatening Language', 'Inappropriate Language', 'Harassment']
+    }
+    
+    # Severity levels
+    severity_levels = ['Low', 'Medium', 'High', 'Critical']
+    severity_weights = [0.4, 0.35, 0.2, 0.05]
+    
+    # Injury types and severity
+    injury_types = ['None', 'Bruise', 'Cut', 'Sprain', 'Fracture', 'Head Injury']
+    injury_severities = ['None', 'Minor', 'Moderate', 'Major', 'Severe']
+    
+    # Medical outcomes
+    medical_outcomes = ['No Treatment Required', 'First Aid Applied', 'GP Visit', 'Hospital Visit', 'Ongoing Treatment']
+    
+    # Create the dataset
+    data = []
+    for i in range(n_records):
+        participant = np.random.choice(participants)
+        incident_type = np.random.choice(incident_types)
+        severity = np.random.choice(severity_levels, p=severity_weights)
+        
+        # Determine if injury occurred based on incident type
+        injury_likely = incident_type in ['Fall', 'Injury'] or (incident_type == 'Behavioral Incident' and np.random.random() < 0.3)
+        
+        if injury_likely:
+            injury_type = np.random.choice(['Bruise', 'Cut', 'Sprain', 'Fracture'], p=[0.5, 0.3, 0.15, 0.05])
+            injury_severity = np.random.choice(['Minor', 'Moderate', 'Major'], p=[0.7, 0.25, 0.05])
+            medical_required = 'Yes' if injury_severity in ['Moderate', 'Major'] else np.random.choice(['Yes', 'No'], p=[0.3, 0.7])
+        else:
+            injury_type = 'None'
+            injury_severity = 'None'
+            medical_required = 'No'
+        
+        # Determine medical treatment
+        if medical_required == 'Yes':
+            treatment_required = 'Yes'
+            medical_treatment = np.random.choice(['First Aid', 'GP Visit', 'Hospital Visit'], p=[0.6, 0.3, 0.1])
+            medical_outcome = np.random.choice(medical_outcomes[1:], p=[0.4, 0.3, 0.2, 0.1])
+        else:
+            treatment_required = 'No'
+            medical_treatment = 'None'
+            medical_outcome = 'No Treatment Required'
+        
+        # Reportable incidents (critical severity or major injuries)
+        reportable = 'Yes' if (severity == 'Critical' or injury_severity == 'Major' or 
+                             incident_type == 'Medication Error') else np.random.choice(['Yes', 'No'], p=[0.2, 0.8])
+        
+        record = {
+            'incident_id': f'INC{i+1:06d}',
+            'participant_name': participant,
+            'ndis_number': ndis_numbers[i],
+            'dob': dobs[i % len(dobs)].strftime('%d/%m/%Y'),
+            'incident_date': incident_dates[i].strftime('%d/%m/%Y'),
+            'incident_time': incident_times[i],
+            'notification_date': notification_dates[i].strftime('%d/%m/%Y'),
+            'location': np.random.choice(locations),
+            'incident_type': incident_type,
+            'subcategory': np.random.choice(subcategories[incident_type]),
+            'severity': severity,
+            'reportable': reportable,
+            'description': f'{incident_type} incident involving {participant}. {np.random.choice(["Minor incident", "Routine incident", "Significant incident", "Concerning incident"])}.',
+            'immediate_action': f'{np.random.choice(["First aid provided", "Supervisor notified", "Medical consultation", "Incident documented", "Safety measures implemented"])}.',
+            'actions_taken': f'{np.random.choice(["Staff debriefing conducted", "Risk assessment updated", "Additional training scheduled", "Environment modified", "Policy reviewed"])}.',
+            'contributing_factors': np.random.choice([
+                'Environmental factors, Staff shortage',
+                'Equipment failure',
+                'Communication breakdown, Time pressure',
+                'Participant condition, Medication effects',
+                'Training gap, Procedure not followed'
+            ]),
+            'reported_by': np.random.choice(['Support Worker', 'Team Leader', 'Nurse', 'Manager', 'Supervisor']),
+            'injury_type': injury_type,
+            'injury_severity': injury_severity,
+            'treatment_required': treatment_required,
+            'medical_attention_required': medical_required,
+            'medical_treatment_type': medical_treatment,
+            'medical_outcome': medical_outcome
+        }
+        
+        data.append(record)
+    
+    df = pd.DataFrame(data)
+    return process_data(df)
+
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def process_data(df):
     """Process and enhance the NDIS incident data with comprehensive feature engineering"""
@@ -621,38 +745,66 @@ st.sidebar.image("https://via.placeholder.com/300x100/667eea/ffffff?text=NDIS+An
 st.sidebar.markdown("---")
 
 # Data Source Selection
-st.sidebar.subheader("📁 Data Upload")
-st.sidebar.markdown("Upload your incident data file to begin analysis")
-
-uploaded_file = st.sidebar.file_uploader(
-    "Choose a file", 
-    type=["csv", "xlsx", "xls"],
-    help="Upload CSV or Excel file containing incident data with required columns: incident_date, incident_type, severity"
+st.sidebar.subheader("📁 Data Source")
+data_source_option = st.sidebar.radio(
+    "Choose data source:",
+    ["📤 Upload Your File", "📊 Use Sample NDIS Data"],
+    help="Upload your own data or use the built-in sample dataset"
 )
 
-# Load data based on upload
+# Load data based on selection
 df = None
-if uploaded_file is not None:
-    with st.spinner("Processing uploaded file..."):
-        df = load_data_from_file(uploaded_file)
+
+if data_source_option == "📤 Upload Your File":
+    st.sidebar.markdown("Upload your incident data file to begin analysis")
+    
+    uploaded_file = st.sidebar.file_uploader(
+        "Choose a file", 
+        type=["csv", "xlsx", "xls"],
+        help="Upload CSV or Excel file containing incident data with required columns: incident_date, incident_type, severity"
+    )
+    
+    if uploaded_file is not None:
+        with st.spinner("Processing uploaded file..."):
+            df = load_data_from_file(uploaded_file)
+            if df is not None:
+                st.session_state.data_loaded = True
+                st.sidebar.success(f"✅ File loaded: {len(df)} incidents")
+                
+                # Add debug information
+                st.sidebar.info(f"📊 Data Summary:")
+                st.sidebar.write(f"- Total incidents: {len(df)}")
+                if 'incident_date' in df.columns:
+                    st.sidebar.write(f"- Date range: {df['incident_date'].min().strftime('%Y-%m-%d')} to {df['incident_date'].max().strftime('%Y-%m-%d')}")
+                if 'severity' in df.columns:
+                    severity_counts = df['severity'].value_counts()
+                    st.sidebar.write(f"- Severity breakdown:")
+                    for sev, count in severity_counts.items():
+                        st.sidebar.write(f"  - {sev}: {count}")
+            else:
+                st.sidebar.error("❌ Failed to load file. Please check the format and required columns.")
+    else:
+        st.sidebar.info("📤 Please upload a CSV or Excel file to begin")
+
+else:  # Use Sample NDIS Data
+    st.sidebar.success("✅ Using built-in NDIS sample data")
+    try:
+        # Create the sample data directly
+        df = create_sample_ndis_data()
         if df is not None:
             st.session_state.data_loaded = True
-            st.sidebar.success(f"✅ File loaded: {len(df)} incidents")
-            
-            # Add debug information
-            st.sidebar.info(f"📊 Data Summary:")
+            st.sidebar.info(f"📊 Sample Data Summary:")
             st.sidebar.write(f"- Total incidents: {len(df)}")
-            if 'incident_date' in df.columns:
-                st.sidebar.write(f"- Date range: {df['incident_date'].min().strftime('%Y-%m-%d')} to {df['incident_date'].max().strftime('%Y-%m-%d')}")
-            if 'severity' in df.columns:
-                severity_counts = df['severity'].value_counts()
-                st.sidebar.write(f"- Severity breakdown:")
-                for sev, count in severity_counts.items():
-                    st.sidebar.write(f"  - {sev}: {count}")
+            st.sidebar.write(f"- Date range: {df['incident_date'].min().strftime('%Y-%m-%d')} to {df['incident_date'].max().strftime('%Y-%m-%d')}")
+            severity_counts = df['severity'].value_counts()
+            st.sidebar.write(f"- Severity breakdown:")
+            for sev, count in severity_counts.items():
+                st.sidebar.write(f"  - {sev}: {count}")
         else:
-            st.sidebar.error("❌ Failed to load file. Please check the format and required columns.")
-else:
-    st.sidebar.info("📤 Please upload a CSV or Excel file to begin")
+            st.sidebar.error("❌ Failed to create sample data")
+    except Exception as e:
+        st.sidebar.error(f"❌ Error creating sample data: {str(e)}")
+        df = None
 
 # Only proceed if data is loaded
 if df is None or len(df) == 0:
