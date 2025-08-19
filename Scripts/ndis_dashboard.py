@@ -409,7 +409,7 @@ with ml_tab4:
             
             for rec in recommendations:
                 st.markdown(f"- {rec}")
-
+    
     with ml_tab5:
         st.subheader("📊 ML Insights Summary")
         st.markdown("*Key findings from machine learning analysis*")
@@ -2410,3 +2410,4 @@ with st.sidebar:
         """)
     
     st.markdown("**Built with Streamlit & Plotly** 🚀")
+         
