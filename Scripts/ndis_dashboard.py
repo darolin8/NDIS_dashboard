@@ -923,10 +923,16 @@ time_range_options = {
     "📅 Custom Range": "custom"
 }
 
+# Debug: Show data date range first
+if 'incident_date' in df.columns:
+    data_start = df['incident_date'].min()
+    data_end = df['incident_date'].max()
+    st.sidebar.write(f"**📊 Data covers:** {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
+
 selected_range = st.sidebar.selectbox("Time Period", list(time_range_options.keys()), key="time_range_select")
 
 # Debug: Show original data count before time filtering
-st.sidebar.write(f"**Before time filter:** {len(df)} total records")
+st.sidebar.write(f"**🔢 Before time filter:** {len(df)} total records")
 
 if time_range_options[selected_range] == "custom":
     col1, col2 = st.sidebar.columns(2)
@@ -937,25 +943,34 @@ if time_range_options[selected_range] == "custom":
     
     df_filtered = df[(df['incident_date'].dt.date >= start_date) & 
                      (df['incident_date'].dt.date <= end_date)]
-    st.sidebar.write(f"**After custom date filter:** {len(df_filtered)} records")
+    st.sidebar.write(f"**📅 After custom date filter:** {len(df_filtered)} records")
+    st.sidebar.write(f"Filter range: {start_date} to {end_date}")
     
 elif time_range_options[selected_range] is not None:
     end_date = df['incident_date'].max()
     start_date = end_date - timedelta(days=time_range_options[selected_range])
+    
+    # Show the calculated date range
+    st.sidebar.write(f"**📅 Filter will use:** {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    
     df_filtered = df[(df['incident_date'] >= start_date) & (df['incident_date'] <= end_date)]
-    st.sidebar.write(f"**After {selected_range} filter:** {len(df_filtered)} records")
+    st.sidebar.write(f"**⏰ After {selected_range} filter:** {len(df_filtered)} records")
     
-    # Show the actual date range being used
-    st.sidebar.write(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    
+    # Show if this is the problem
+    if len(df_filtered) < len(df) * 0.5:
+        st.sidebar.error(f"🚨 TIME FILTER IS THE PROBLEM!")
+        st.sidebar.write(f"Removed {len(df) - len(df_filtered)} records")
+        st.sidebar.write("**Solution: Select 'All Time'**")
+        
 else:
     df_filtered = df.copy()
-    st.sidebar.write(f"**After time filter (All Time):** {len(df_filtered)} records")
+    st.sidebar.write(f"**✅ After time filter (All Time):** {len(df_filtered)} records")
 
 # Show warning if time filter dramatically reduces data
-if len(df_filtered) < len(df) * 0.1:  # Less than 10% of original data
-    st.sidebar.error(f"⚠️ Time filter removed {len(df) - len(df_filtered)} records!")
-    st.sidebar.write("Consider selecting 'All Time' or expanding the date range")
+reduction_pct = (1 - len(df_filtered)/len(df)) * 100 if len(df) > 0 else 0
+if reduction_pct > 50:
+    st.sidebar.error(f"⚠️ Time filter removed {reduction_pct:.1f}% of your data!")
+    st.sidebar.write("This is likely the main issue - try 'All Time'")
 
 # Smart filters with reset option
 st.sidebar.subheader("🎯 Smart Filters")
@@ -980,28 +995,70 @@ risk_focus_options = {
 
 risk_focus = st.sidebar.selectbox("Risk Focus", list(risk_focus_options.keys()), key="risk_focus_select")
 
-# Apply risk-based filters with debugging
-original_count = len(df_filtered)
+# Apply risk-based filters with detailed debugging
+original_count_before_risk = len(df_filtered)
+st.sidebar.write(f"**🎯 Before risk filter:** {original_count_before_risk} records")
 
 if risk_focus_options[risk_focus] == "critical":
     df_filtered = df_filtered[df_filtered['severity'] == 'Critical']
-    st.sidebar.write(f"Critical filter: {original_count} → {len(df_filtered)}")
+    st.sidebar.write(f"**🚨 After Critical filter:** {len(df_filtered)} records")
+    if len(df_filtered) < original_count_before_risk * 0.5:
+        st.sidebar.error("🚨 CRITICAL FILTER IS THE PROBLEM!")
+        st.sidebar.write("Solution: Change risk focus to 'All Incidents'")
+        
 elif risk_focus_options[risk_focus] == "high_risk":
     df_filtered = df_filtered[df_filtered['severity'].isin(['High', 'Critical'])]
-    st.sidebar.write(f"High risk filter: {original_count} → {len(df_filtered)}")
+    st.sidebar.write(f"**⚠️ After High Risk filter:** {len(df_filtered)} records")
+    if len(df_filtered) < original_count_before_risk * 0.5:
+        st.sidebar.error("🚨 HIGH RISK FILTER IS THE PROBLEM!")
+        st.sidebar.write("Solution: Change risk focus to 'All Incidents'")
+        
 elif risk_focus_options[risk_focus] == "repeat":
     if 'participant_risk_level' in df_filtered.columns:
+        before_repeat = len(df_filtered)
         df_filtered = df_filtered[df_filtered['participant_risk_level'].isin(['Medium', 'High'])]
-        st.sidebar.write(f"Repeat participants filter: {original_count} → {len(df_filtered)}")
+        st.sidebar.write(f"**🔄 After Repeat filter:** {len(df_filtered)} records")
+        if len(df_filtered) < before_repeat * 0.5:
+            st.sidebar.error("🚨 REPEAT PARTICIPANTS FILTER IS THE PROBLEM!")
+            st.sidebar.write("Solution: Change risk focus to 'All Incidents'")
+            
 elif risk_focus_options[risk_focus] == "delayed":
     if 'notification_delay' in df_filtered.columns:
+        before_delayed = len(df_filtered)
         df_filtered = df_filtered[df_filtered['notification_delay'] > 1]
-        st.sidebar.write(f"Delayed reports filter: {original_count} → {len(df_filtered)}")
+        st.sidebar.write(f"**⏰ After Delayed filter:** {len(df_filtered)} records")
+        if len(df_filtered) < before_delayed * 0.5:
+            st.sidebar.error("🚨 DELAYED REPORTS FILTER IS THE PROBLEM!")
+            st.sidebar.write("Solution: Change risk focus to 'All Incidents'")
+else:
+    st.sidebar.write(f"**✅ No risk filter applied:** {len(df_filtered)} records")
 
-# Show current risk focus
-st.sidebar.write(f"Current risk focus: {risk_focus}")
-if len(df_filtered) != original_count:
-    st.sidebar.warning(f"Risk focus reduced data: {original_count} → {len(df_filtered)}")
+# Show current risk focus and its impact
+risk_reduction_pct = ((original_count_before_risk - len(df_filtered)) / original_count_before_risk * 100) if original_count_before_risk > 0 else 0
+
+st.sidebar.write(f"**Current risk focus:** {risk_focus}")
+if risk_reduction_pct > 50:
+    st.sidebar.error(f"🚨 Risk filter removed {risk_reduction_pct:.1f}% of remaining data!")
+    st.sidebar.write("**This is likely the main problem!**")
+    st.sidebar.write("**Solution: Set risk focus to 'All Incidents'**")
+elif risk_reduction_pct > 0:
+    st.sidebar.info(f"ℹ️ Risk filter removed {risk_reduction_pct:.1f}% of data")
+
+# Summary of filter chain impact
+total_reduction = ((len(df) - len(df_filtered)) / len(df) * 100) if len(df) > 0 else 0
+st.sidebar.write(f"**📊 Total data reduction:** {total_reduction:.1f}% ({len(df)} → {len(df_filtered)})")
+
+if total_reduction > 90:
+    st.sidebar.error("🚨 **MAJOR DATA LOSS DETECTED!**")
+    st.sidebar.write("**Quick fixes:**")
+    st.sidebar.write("1. Set time period to 'All Time'")
+    st.sidebar.write("2. Set risk focus to 'All Incidents'")
+    st.sidebar.write("3. Click 'Reset All Filters'")
+    
+    # Add immediate fix button
+    if st.sidebar.button("🛠️ **FIX NOW**: Reset to All Data", type="primary"):
+        st.session_state.quick_fix = True
+        st.rerun()
 
 # Multi-select filters with better defaults and debugging
 st.sidebar.markdown("---")
@@ -1199,12 +1256,18 @@ if len(df_filtered) < 10 and len(df) > len(df_filtered):
             st.session_state.emergency_reset = True
             st.rerun()
 
-# Handle emergency reset
-if st.session_state.get('emergency_reset', False):
+# Handle quick fix
+if st.session_state.get('quick_fix', False):
+    # Reset to show all data
     df_filtered = df.copy()
-    st.session_state.emergency_reset = False
-    st.success("✅ Emergency reset applied - showing all data")
-    st.info("You can now re-apply filters gradually to see their impact")
+    st.session_state.quick_fix = False
+    
+    # Reset filter states
+    st.session_state.severity_filter_state = sorted(df['severity'].unique()) if 'severity' in df.columns else []
+    st.session_state.location_filter_state = sorted(df['location'].unique()) if 'location' in df.columns else []
+    
+    st.sidebar.success("✅ **FIXED!** All filters reset - showing all data")
+    st.sidebar.info("You can now reapply filters one by one to see their effect")
 
 # Main dashboard content
 if analysis_mode == "executive":
