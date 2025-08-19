@@ -1,6 +1,3 @@
-Perfect! Here's the complete fixed code to copy and paste into your GitHub file:
-
-```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
