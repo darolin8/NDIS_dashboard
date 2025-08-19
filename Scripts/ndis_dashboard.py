@@ -48,7 +48,8 @@ try:
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler, LabelEncoder
     import plotly.express as px
-    import warnings
+
+import warnings
 warnings.filterwarnings('ignore')
 
 # Page config
