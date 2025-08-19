@@ -717,7 +717,7 @@ elif analysis_mode == "🔮 Predictive Analytics":
             if predictions:
                 # Display prediction results
                 st.subheader("📊 Incident Volume Predictions")
-                        with st.spinner("🔮 Generating predictions..."):
+        with st.spinner("🔮 Generating predictions..."):
             predictions = predict_future_incidents(df_filtered, prediction_days)
 
             if predictions:
