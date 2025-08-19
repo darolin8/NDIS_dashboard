@@ -912,7 +912,7 @@ selected_mode = st.sidebar.selectbox(
 )
 analysis_mode = analysis_modes[selected_mode]
 
-# Enhanced time controls
+# Enhanced time controls with debugging
 st.sidebar.subheader("📅 Time Controls")
 time_range_options = {
     "📅 Last 30 Days": 30,
@@ -923,7 +923,10 @@ time_range_options = {
     "📅 Custom Range": "custom"
 }
 
-selected_range = st.sidebar.selectbox("Time Period", list(time_range_options.keys()))
+selected_range = st.sidebar.selectbox("Time Period", list(time_range_options.keys()), key="time_range_select")
+
+# Debug: Show original data count before time filtering
+st.sidebar.write(f"**Before time filter:** {len(df)} total records")
 
 if time_range_options[selected_range] == "custom":
     col1, col2 = st.sidebar.columns(2)
@@ -934,17 +937,38 @@ if time_range_options[selected_range] == "custom":
     
     df_filtered = df[(df['incident_date'].dt.date >= start_date) & 
                      (df['incident_date'].dt.date <= end_date)]
+    st.sidebar.write(f"**After custom date filter:** {len(df_filtered)} records")
+    
 elif time_range_options[selected_range] is not None:
     end_date = df['incident_date'].max()
     start_date = end_date - timedelta(days=time_range_options[selected_range])
     df_filtered = df[(df['incident_date'] >= start_date) & (df['incident_date'] <= end_date)]
+    st.sidebar.write(f"**After {selected_range} filter:** {len(df_filtered)} records")
+    
+    # Show the actual date range being used
+    st.sidebar.write(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    
 else:
     df_filtered = df.copy()
+    st.sidebar.write(f"**After time filter (All Time):** {len(df_filtered)} records")
 
-# Smart filters
+# Show warning if time filter dramatically reduces data
+if len(df_filtered) < len(df) * 0.1:  # Less than 10% of original data
+    st.sidebar.error(f"⚠️ Time filter removed {len(df) - len(df_filtered)} records!")
+    st.sidebar.write("Consider selecting 'All Time' or expanding the date range")
+
+# Smart filters with reset option
 st.sidebar.subheader("🎯 Smart Filters")
 
-# Risk-based filtering
+# Add reset button at the top
+if st.sidebar.button("🔄 Reset All Filters", type="secondary"):
+    # Clear all filter session states
+    for key in list(st.session_state.keys()):
+        if key.endswith('_filter') or key in ['risk_focus', 'time_range']:
+            del st.session_state[key]
+    st.rerun()
+
+# Risk-based filtering with debugging
 risk_focus_options = {
     "🔍 All Incidents": "all",
     "🚨 Critical Only": "critical",
@@ -954,7 +978,7 @@ risk_focus_options = {
     "⏰ Delayed Reports": "delayed"
 }
 
-risk_focus = st.sidebar.selectbox("Risk Focus", list(risk_focus_options.keys()))
+risk_focus = st.sidebar.selectbox("Risk Focus", list(risk_focus_options.keys()), key="risk_focus_select")
 
 # Apply risk-based filters with debugging
 original_count = len(df_filtered)
@@ -980,42 +1004,59 @@ if len(df_filtered) != original_count:
     st.sidebar.warning(f"Risk focus reduced data: {original_count} → {len(df_filtered)}")
 
 # Multi-select filters with better defaults and debugging
+st.sidebar.markdown("---")
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
     severity_options = sorted(df['severity'].unique()) if 'severity' in df.columns else []
     st.sidebar.write(f"Available severities: {severity_options}")
     
+    # Use session state to maintain selections
+    if 'severity_filter_state' not in st.session_state:
+        st.session_state.severity_filter_state = severity_options
+    
     severity_filter = st.multiselect(
         "⚠️ Severity",
         options=severity_options,
-        default=severity_options,  # Default to all available
+        default=st.session_state.severity_filter_state,
         key="severity_filter"
     )
+    
+    # Update session state
+    st.session_state.severity_filter_state = severity_filter
 
 with col2:
     location_options = sorted(df['location'].unique()) if 'location' in df.columns else []
     st.sidebar.write(f"Available locations: {location_options}")
     
+    # Use session state to maintain selections
+    if 'location_filter_state' not in st.session_state:
+        st.session_state.location_filter_state = location_options
+    
     location_filter = st.multiselect(
         "📍 Location", 
         options=location_options,
-        default=location_options,  # Default to all available
+        default=st.session_state.location_filter_state,
         key="location_filter"
     )
+    
+    # Update session state
+    st.session_state.location_filter_state = location_filter
 
 # Show what's selected
 st.sidebar.write(f"Selected severities: {len(severity_filter)}/{len(severity_options)}")
 st.sidebar.write(f"Selected locations: {len(location_filter)}/{len(location_options)}")
 
-# Warning if nothing selected
+# Warning if nothing selected and auto-reset
 if not severity_filter:
-    st.sidebar.error("⚠️ No severities selected - this will show no data!")
-    severity_filter = severity_options  # Reset to all
+    st.sidebar.error("⚠️ No severities selected - resetting to all!")
+    severity_filter = severity_options
+    st.session_state.severity_filter_state = severity_options
 
 if not location_filter:
-    st.sidebar.error("⚠️ No locations selected - this will show no data!")
-    location_filter = location_options  # Reset to all
+    st.sidebar.error("⚠️ No locations selected - resetting to all!")
+    location_filter = location_options  
+    st.session_state.location_filter_state = location_options
 
 # Apply filters with better debugging
 severity_mask = df_filtered['severity'].isin(severity_filter)
@@ -1095,25 +1136,75 @@ with col4:
     else:
         st.error("❌ No data to display")
 
-# Show data quality issues if very few records
+# Show data quality issues if very few records with detailed diagnosis
 if len(df_filtered) < 10 and len(df) > len(df_filtered):
-    st.warning("⚠️ **Data Filtering Issue Detected**")
-    st.write("Very few records are being displayed. This might be due to:")
+    st.error("⚠️ **Data Filtering Issue Detected**")
     
+    # Create diagnosis
     col1, col2 = st.columns(2)
     with col1:
-        st.write("**Possible Causes:**")
-        st.write("- Restrictive filters applied")
-        st.write("- Date range too narrow") 
-        st.write("- Missing data in key columns")
-        st.write("- Data format issues")
+        st.write("**🔍 Filter Impact Analysis:**")
+        
+        # Check each filter's impact
+        original_count = len(df)
+        
+        # Time filter impact
+        if selected_range != "📅 All Time":
+            time_filtered = len(df_filtered)
+            time_reduction = original_count - time_filtered
+            st.write(f"- Time filter removed: **{time_reduction}** records")
+            st.write(f"  - Original: {original_count}")
+            st.write(f"  - After time filter: {time_filtered}")
+        
+        # Risk focus impact
+        risk_reduction = 0
+        if risk_focus != "🔍 All Incidents":
+            st.write(f"- Risk focus '{risk_focus}' may be limiting results")
+        
+        # Severity/Location filter impact
+        if severity_filter and len(severity_filter) < len(severity_options):
+            excluded_sev = len(severity_options) - len(severity_filter)
+            st.write(f"- Severity filter excludes: **{excluded_sev}** severity levels")
+        
+        if location_filter and len(location_filter) < len(location_options):
+            excluded_loc = len(location_options) - len(location_filter)
+            st.write(f"- Location filter excludes: **{excluded_loc}** locations")
     
     with col2:
-        st.write("**Quick Fixes:**")
-        st.write("- Reset filters using sidebar")
-        st.write("- Expand time range to 'All Time'")
-        st.write("- Check severity/location filters")
-        st.write("- Verify data quality in source file")
+        st.write("**🔧 Quick Fixes:**")
+        
+        # Suggest specific fixes based on what we found
+        fixes = []
+        
+        if selected_range != "📅 All Time":
+            fixes.append("✅ Change time period to 'All Time'")
+        
+        if risk_focus != "🔍 All Incidents":
+            fixes.append("✅ Set risk focus to 'All Incidents'")
+        
+        if not severity_filter or len(severity_filter) < len(severity_options):
+            fixes.append("✅ Ensure all severity levels are selected")
+            
+        if not location_filter or len(location_filter) < len(location_options):
+            fixes.append("✅ Ensure all locations are selected")
+        
+        fixes.append("✅ Click 'Reset All Filters' button")
+        fixes.append("✅ Check if using sample data vs uploaded file")
+        
+        for fix in fixes:
+            st.write(f"- {fix}")
+        
+        # Add emergency "Show All Data" button
+        if st.button("🚨 Emergency: Show All Data", type="primary"):
+            st.session_state.emergency_reset = True
+            st.rerun()
+
+# Handle emergency reset
+if st.session_state.get('emergency_reset', False):
+    df_filtered = df.copy()
+    st.session_state.emergency_reset = False
+    st.success("✅ Emergency reset applied - showing all data")
+    st.info("You can now re-apply filters gradually to see their impact")
 
 # Main dashboard content
 if analysis_mode == "executive":
