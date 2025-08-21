@@ -5,7 +5,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
+from scipy import stats
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import warnings
+warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
@@ -47,9 +52,30 @@ st.markdown("""
 def load_incident_data():
     """Load and prepare the actual NDIS incident data"""
     try:
-        # Load the CSV data
-        df = pd.read_csv('ndis_incidents_synthetic.csv')
+        # Try multiple possible file paths
+        possible_paths = [
+            'text data/ndis_incidents_synthetic.csv',  # GitHub repo structure
+            'ndis_incidents_synthetic.csv',
+            './ndis_incidents_synthetic.csv',
+            'data/ndis_incidents_synthetic.csv',
+            '../ndis_incidents_synthetic.csv',
+            './text data/ndis_incidents_synthetic.csv'
+        ]
         
+        df = None
+        for path in possible_paths:
+            try:
+                df = pd.read_csv(path)
+                st.sidebar.success(f"✅ Data loaded from: {path}")
+                break
+            except FileNotFoundError:
+                continue
+        
+        if df is None:
+            # If no file found, show file upload option
+            st.error("CSV file not found. Please upload your data file below.")
+            return None
+            
         # Clean and prepare the data
         df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
         df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
@@ -68,17 +94,111 @@ def load_incident_data():
         
         return df
         
-    except FileNotFoundError:
-        st.error("CSV file not found. Please ensure 'ndis_incidents_synthetic.csv' is in the same directory.")
-        return pd.DataFrame()
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
-        return pd.DataFrame()
+        return None
 
-# Load the data
+# Function to create sample data if no file is available
+@st.cache_data
+def create_sample_data():
+    """Create sample NDIS incident data for demonstration"""
+    np.random.seed(42)
+    
+    # Sample data matching your CSV structure
+    sample_data = {
+        'incident_id': [f'INC-2024-{i:04d}' for i in range(1, 101)],
+        'participant_name': [f'Participant {i}' for i in range(1, 101)],
+        'ndis_number': np.random.randint(400000000, 500000000, 100),
+        'dob': pd.date_range('1950-01-01', '2010-12-31', periods=100).strftime('%d/%m/%Y'),
+        'incident_date': pd.date_range('2024-01-01', '2024-12-31', periods=100).strftime('%d/%m/%Y'),
+        'incident_time': [f'{np.random.randint(0,24):02d}:{np.random.randint(0,60):02d}' for _ in range(100)],
+        'notification_date': pd.date_range('2024-01-01', '2024-12-31', periods=100).strftime('%d/%m/%Y'),
+        'location': np.random.choice(['Group Home', 'Transport Vehicle', 'Day Program', 'Community Access', 'Therapy Clinic'], 100),
+        'incident_type': np.random.choice(['Injury', 'Missing Person', 'Death', 'Restrictive Practices', 'Transport Incident', 'Medication Error'], 100),
+        'subcategory': np.random.choice(['Fall', 'Unexplained absence', 'Natural causes', 'Unauthorised', 'Vehicle crash', 'Wrong dose'], 100),
+        'severity': np.random.choice(['Critical', 'High', 'Medium', 'Low'], 100, p=[0.1, 0.2, 0.4, 0.3]),
+        'reportable': np.random.choice(['Yes', 'No'], 100, p=[0.7, 0.3]),
+        'description': ['Sample incident description' for _ in range(100)],
+        'immediate_action': ['Immediate action taken' for _ in range(100)],
+        'actions_taken': ['Follow-up actions completed' for _ in range(100)],
+        'contributing_factors': np.random.choice(['Staff error', 'Equipment failure', 'Environmental factors', 'Participant behavior', 'System failure'], 100),
+        'reported_by': [f'Staff Member {i} (Support Worker)' for i in range(1, 101)],
+        'injury_type': np.random.choice(['No physical injury', 'Minor injury', 'Major injury'], 100, p=[0.6, 0.3, 0.1]),
+        'injury_severity': np.random.choice(['None', 'Mild', 'Moderate', 'Severe'], 100, p=[0.5, 0.3, 0.15, 0.05]),
+        'treatment_required': np.random.choice(['Yes', 'No'], 100, p=[0.3, 0.7]),
+        'medical_attention_required': np.random.choice(['Yes', 'No'], 100, p=[0.25, 0.75]),
+        'medical_treatment_type': np.random.choice(['None', 'First aid', 'GP visit', 'Hospital'], 100, p=[0.6, 0.25, 0.1, 0.05]),
+        'medical_outcome': np.random.choice(['No treatment required', 'Treated and released', 'Ongoing monitoring'], 100, p=[0.7, 0.25, 0.05])
+    }
+    
+    return pd.DataFrame(sample_data)
+
+# Load the data with fallback options
 df = load_incident_data()
 
-if df.empty:
+# If no data loaded, offer file upload and sample data options
+if df is None:
+    st.title("🏥 NDIS Dashboard - Data Loading")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📁 Upload Your Data")
+        uploaded_file = st.file_uploader(
+            "Choose your NDIS incidents CSV file",
+            type=['csv'],
+            help="Upload your ndis_incidents_synthetic.csv file or any CSV with the same structure"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                df = pd.read_csv(uploaded_file)
+                
+                # Apply the same data processing
+                df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+                df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+                df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
+                df['reporting_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+                df['same_day_reporting'] = df['reporting_delay_hours'] <= 24
+                df['age_at_incident'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+                df['incident_month'] = df['incident_date'].dt.month_name()
+                df['incident_year'] = df['incident_date'].dt.year
+                
+                st.success(f"✅ Successfully loaded {len(df)} incidents from uploaded file!")
+                
+            except Exception as e:
+                st.error(f"Error processing uploaded file: {str(e)}")
+                df = None
+    
+    with col2:
+        st.subheader("🎯 Use Sample Data")
+        st.info("""
+        Can't find your CSV file? Use our sample data to explore the dashboard features.
+        
+        The sample data includes:
+        - 100 realistic NDIS incidents
+        - All required fields and categories
+        - Proper date formatting
+        - Compliance tracking data
+        """)
+        
+        if st.button("🚀 Load Sample Data"):
+            df = create_sample_data()
+            
+            # Apply the same data processing
+            df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+            df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+            df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
+            df['reporting_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+            df['same_day_reporting'] = df['reporting_delay_hours'] <= 24
+            df['age_at_incident'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+            df['incident_month'] = df['incident_date'].dt.month_name()
+            df['incident_year'] = df['incident_date'].dt.year
+            
+            st.success("✅ Sample data loaded successfully!")
+            st.experimental_rerun()
+
+if df is None or df.empty:
     st.stop()
 
 # Sidebar for navigation and filters
@@ -565,50 +685,316 @@ elif page == "Risk Analysis":
     with col4:
         st.metric("Risk Factors Identified", f"{filtered_df['contributing_factors'].nunique()}", "Analysis points")
     
-    # Risk analysis charts
-    col1, col2 = st.columns(2)
+    # Advanced analytics tabs
+    tab1, tab2, tab3 = st.tabs(["🔥 Risk Clustering", "📊 Statistical Analysis", "🎯 Predictive Insights"])
     
-    with col1:
-        st.subheader("🔥 Risk Heat Map - Type vs Location")
+    with tab1:
+        st.subheader("🔍 Machine Learning Risk Clustering")
+        
+        if not filtered_df.empty and len(filtered_df) > 10:
+            # Prepare data for clustering
+            clustering_features = []
+            feature_names = []
+            
+            # Encode categorical variables for clustering
+            if 'location' in filtered_df.columns:
+                location_encoded = pd.get_dummies(filtered_df['location'], prefix='location')
+                clustering_features.append(location_encoded)
+                feature_names.extend(location_encoded.columns.tolist())
+            
+            if 'incident_type' in filtered_df.columns:
+                type_encoded = pd.get_dummies(filtered_df['incident_type'], prefix='type')
+                clustering_features.append(type_encoded)
+                feature_names.extend(type_encoded.columns.tolist())
+            
+            if 'severity' in filtered_df.columns:
+                severity_map = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+                severity_numeric = filtered_df['severity'].map(severity_map).fillna(0)
+                clustering_features.append(pd.DataFrame({'severity_score': severity_numeric}))
+                feature_names.append('severity_score')
+            
+            if 'reporting_delay_hours' in filtered_df.columns:
+                delay_df = pd.DataFrame({'reporting_delay': filtered_df['reporting_delay_hours'].fillna(0)})
+                clustering_features.append(delay_df)
+                feature_names.append('reporting_delay')
+            
+            if clustering_features:
+                # Combine all features
+                features_df = pd.concat(clustering_features, axis=1).fillna(0)
+                
+                # Standardize features
+                scaler = StandardScaler()
+                features_scaled = scaler.fit_transform(features_df)
+                
+                # Perform clustering
+                n_clusters = min(4, len(filtered_df) // 5)  # Adaptive cluster count
+                if n_clusters >= 2:
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    clusters = kmeans.fit_predict(features_scaled)
+                    
+                    # Add clusters to dataframe
+                    df_clustered = filtered_df.copy()
+                    df_clustered['risk_cluster'] = clusters
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Visualize clusters with PCA
+                        if features_scaled.shape[1] > 2:
+                            pca = PCA(n_components=2)
+                            features_pca = pca.fit_transform(features_scaled)
+                            
+                            fig = px.scatter(
+                                x=features_pca[:, 0],
+                                y=features_pca[:, 1],
+                                color=clusters.astype(str),
+                                title=f"Risk Clusters (PCA Visualization)",
+                                labels={'x': f'PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)', 
+                                       'y': f'PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)'},
+                                hover_data=[filtered_df['incident_type'], filtered_df['location']]
+                            )
+                            fig.update_layout(height=400)
+                            st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        # Cluster characteristics
+                        st.markdown("**Cluster Characteristics:**")
+                        
+                        for cluster_id in sorted(df_clustered['risk_cluster'].unique()):
+                            cluster_data = df_clustered[df_clustered['risk_cluster'] == cluster_id]
+                            cluster_size = len(cluster_data)
+                            
+                            # Calculate cluster risk profile
+                            high_risk_pct = (cluster_data['severity'].isin(['Critical', 'High'])).mean() * 100
+                            avg_delay = cluster_data['reporting_delay_hours'].mean()
+                            
+                            # Most common characteristics
+                            top_location = cluster_data['location'].mode().iloc[0] if not cluster_data['location'].mode().empty else 'Unknown'
+                            top_type = cluster_data['incident_type'].mode().iloc[0] if not cluster_data['incident_type'].mode().empty else 'Unknown'
+                            
+                            st.markdown(f"""
+                            **Cluster {cluster_id + 1}** ({cluster_size} incidents)
+                            - High-risk rate: {high_risk_pct:.1f}%
+                            - Avg reporting delay: {avg_delay:.1f}h
+                            - Primary location: {top_location}
+                            - Primary type: {top_type}
+                            """)
+                    
+                    # Cluster summary table
+                    cluster_summary = df_clustered.groupby('risk_cluster').agg({
+                        'incident_id': 'count',
+                        'severity': lambda x: (x.isin(['Critical', 'High'])).sum(),
+                        'reporting_delay_hours': 'mean',
+                        'medical_attention_required': lambda x: (x == 'Yes').sum()
+                    }).round(2)
+                    
+                    cluster_summary.columns = ['Total Incidents', 'High-Risk Count', 'Avg Delay (hrs)', 'Medical Attention']
+                    cluster_summary['High-Risk %'] = (cluster_summary['High-Risk Count'] / cluster_summary['Total Incidents'] * 100).round(1)
+                    
+                    st.markdown("**Cluster Summary Table:**")
+                    st.dataframe(cluster_summary, use_container_width=True)
+                
+                else:
+                    st.info("Not enough data points for meaningful clustering analysis.")
+            else:
+                st.info("Insufficient categorical data for clustering analysis.")
+        else:
+            st.info("Need more than 10 incidents for clustering analysis.")
+    
+    with tab2:
+        st.subheader("📈 Statistical Analysis")
         
         if not filtered_df.empty:
-            # Create pivot table for heatmap
-            risk_matrix = pd.crosstab(filtered_df['incident_type'], filtered_df['location'], values=filtered_df['severity'].map({'Critical': 3, 'High': 2, 'Medium': 1, 'Low': 0}), aggfunc='mean')
+            col1, col2 = st.columns(2)
             
-            fig = px.imshow(
-                risk_matrix.values,
-                x=risk_matrix.columns,
-                y=risk_matrix.index,
-                color_continuous_scale='Reds',
-                title="Average Risk Score by Type and Location",
-                aspect="auto"
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            with col1:
+                # Correlation analysis
+                st.markdown("**🔗 Statistical Correlations**")
+                
+                # Prepare numerical variables for correlation
+                numerical_vars = {}
+                
+                if 'reporting_delay_hours' in filtered_df.columns:
+                    numerical_vars['Reporting Delay (hrs)'] = filtered_df['reporting_delay_hours'].fillna(0)
+                
+                if 'age_at_incident' in filtered_df.columns:
+                    numerical_vars['Age at Incident'] = filtered_df['age_at_incident'].fillna(0)
+                
+                # Encode severity as numerical
+                if 'severity' in filtered_df.columns:
+                    severity_map = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+                    numerical_vars['Severity Score'] = filtered_df['severity'].map(severity_map).fillna(0)
+                
+                # Medical attention as binary
+                if 'medical_attention_required' in filtered_df.columns:
+                    numerical_vars['Medical Required'] = (filtered_df['medical_attention_required'] == 'Yes').astype(int)
+                
+                if len(numerical_vars) >= 2:
+                    corr_df = pd.DataFrame(numerical_vars)
+                    correlation_matrix = corr_df.corr()
+                    
+                    fig = px.imshow(
+                        correlation_matrix.values,
+                        x=correlation_matrix.columns,
+                        y=correlation_matrix.columns,
+                        color_continuous_scale='RdBu',
+                        title="Correlation Matrix",
+                        text_auto=True
+                    )
+                    fig.update_layout(height=400)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Highlight strong correlations
+                    strong_corrs = []
+                    for i in range(len(correlation_matrix.columns)):
+                        for j in range(i+1, len(correlation_matrix.columns)):
+                            corr_val = correlation_matrix.iloc[i, j]
+                            if abs(corr_val) > 0.3:  # Threshold for "strong" correlation
+                                strong_corrs.append((
+                                    correlation_matrix.columns[i],
+                                    correlation_matrix.columns[j],
+                                    corr_val
+                                ))
+                    
+                    if strong_corrs:
+                        st.markdown("**Strong Correlations (|r| > 0.3):**")
+                        for var1, var2, corr in strong_corrs:
+                            direction = "positive" if corr > 0 else "negative"
+                            st.markdown(f"• {var1} ↔ {var2}: {corr:.3f} ({direction})")
+                else:
+                    st.info("Need more numerical variables for correlation analysis.")
+            
+            with col2:
+                # Statistical tests
+                st.markdown("**🧪 Statistical Tests**")
+                
+                # Test: Does severity affect reporting delay?
+                if 'severity' in filtered_df.columns and 'reporting_delay_hours' in filtered_df.columns:
+                    severity_groups = []
+                    severity_labels = []
+                    
+                    for severity in ['Low', 'Medium', 'High', 'Critical']:
+                        group_data = filtered_df[filtered_df['severity'] == severity]['reporting_delay_hours'].dropna()
+                        if len(group_data) > 0:
+                            severity_groups.append(group_data)
+                            severity_labels.append(severity)
+                    
+                    if len(severity_groups) >= 2:
+                        # Perform ANOVA test
+                        try:
+                            f_stat, p_value = stats.f_oneway(*severity_groups)
+                            
+                            st.markdown("**Severity vs Reporting Delay (ANOVA):**")
+                            st.markdown(f"• F-statistic: {f_stat:.3f}")
+                            st.markdown(f"• p-value: {p_value:.3f}")
+                            
+                            if p_value < 0.05:
+                                st.markdown("• **Significant difference** between severity groups ✅")
+                            else:
+                                st.markdown("• No significant difference between severity groups")
+                                
+                        except Exception as e:
+                            st.markdown(f"• Statistical test error: {str(e)}")
+                
+                # Test: Location vs Medical attention
+                if 'location' in filtered_df.columns and 'medical_attention_required' in filtered_df.columns:
+                    contingency_table = pd.crosstab(
+                        filtered_df['location'], 
+                        filtered_df['medical_attention_required']
+                    )
+                    
+                    if contingency_table.shape[0] > 1 and contingency_table.shape[1] > 1:
+                        try:
+                            chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+                            
+                            st.markdown("**Location vs Medical Attention (Chi-square):**")
+                            st.markdown(f"• Chi-square: {chi2:.3f}")
+                            st.markdown(f"• p-value: {p_value:.3f}")
+                            
+                            if p_value < 0.05:
+                                st.markdown("• **Significant association** between location and medical needs ✅")
+                            else:
+                                st.markdown("• No significant association found")
+                                
+                        except Exception as e:
+                            st.markdown(f"• Statistical test error: {str(e)}")
     
-    with col2:
-        st.subheader("📊 Age Distribution Risk Analysis")
+    with tab3:
+        st.subheader("🔮 Predictive Insights")
         
-        if not filtered_df.empty and not filtered_df['age_at_incident'].isna().all():
-            # Age group analysis
-            filtered_df['age_group'] = pd.cut(filtered_df['age_at_incident'], 
-                                            bins=[0, 18, 35, 50, 65, 100], 
-                                            labels=['0-18', '19-35', '36-50', '51-65', '65+'])
+        if not filtered_df.empty:
+            # Risk prediction model (simplified)
+            col1, col2 = st.columns(2)
             
-            age_risk = filtered_df.groupby('age_group')['severity'].apply(
-                lambda x: (x.isin(['Critical', 'High'])).sum() / len(x) * 100
-            ).dropna()
+            with col1:
+                st.markdown("**📊 Risk Prediction Factors**")
+                
+                # Calculate risk scores based on historical patterns
+                risk_factors = {}
+                
+                # Location risk scores
+                if 'location' in filtered_df.columns:
+                    location_risk = filtered_df.groupby('location').agg({
+                        'severity': lambda x: (x.isin(['Critical', 'High'])).mean() * 100
+                    }).round(1)
+                    location_risk.columns = ['High-Risk %']
+                    
+                    st.markdown("**Risk by Location:**")
+                    for location, risk_pct in location_risk['High-Risk %'].items():
+                        risk_level = "🔴" if risk_pct > 30 else "🟡" if risk_pct > 15 else "🟢"
+                        st.markdown(f"• {location}: {risk_pct:.1f}% {risk_level}")
+                
+                # Time-based risk patterns
+                if 'incident_date' in filtered_df.columns:
+                    filtered_df['hour'] = pd.to_datetime(filtered_df['incident_time'], format='%H:%M', errors='coerce').dt.hour
+                    
+                    if not filtered_df['hour'].isna().all():
+                        hourly_risk = filtered_df.groupby('hour').agg({
+                            'severity': lambda x: (x.isin(['Critical', 'High'])).mean() * 100
+                        }).round(1)
+                        
+                        peak_hour = hourly_risk['severity'].idxmax()
+                        peak_risk = hourly_risk['severity'].max()
+                        
+                        st.markdown(f"**Peak Risk Time:** {peak_hour:02d}:00 ({peak_risk:.1f}% high-risk)")
             
-            fig = px.bar(
-                x=age_risk.index.astype(str),
-                y=age_risk.values,
-                title="High-Risk Incident Rate by Age Group",
-                labels={'x': 'Age Group', 'y': 'High-Risk Incident Rate (%)'}
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                st.markdown("**💡 Predictive Recommendations**")
+                
+                recommendations = []
+                
+                # Generate data-driven recommendations
+                if 'location' in filtered_df.columns:
+                    high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(2)
+                    if not high_risk_locations.empty:
+                        recommendations.append(f"🎯 Prioritize safety measures at {high_risk_locations.index[0]}")
+                
+                if 'contributing_factors' in filtered_df.columns:
+                    top_factor = filtered_df['contributing_factors'].mode().iloc[0] if not filtered_df['contributing_factors'].mode().empty else None
+                    if top_factor:
+                        recommendations.append(f"🔧 Address '{top_factor}' as primary prevention target")
+                
+                if 'reporting_delay_hours' in filtered_df.columns:
+                    avg_delay = filtered_df['reporting_delay_hours'].mean()
+                    if avg_delay > 24:
+                        recommendations.append("⏰ Improve reporting processes to meet 24-hour compliance")
+                
+                if 'medical_attention_required' in filtered_df.columns:
+                    medical_rate = (filtered_df['medical_attention_required'] == 'Yes').mean() * 100
+                    if medical_rate > 30:
+                        recommendations.append(f"🏥 Plan for {medical_rate:.0f}% medical attention rate in resource allocation")
+                
+                # Add general recommendations
+                recommendations.extend([
+                    "📊 Implement monthly trend monitoring",
+                    "👥 Provide targeted staff training based on risk patterns",
+                    "🔄 Review and update risk assessment protocols quarterly"
+                ])
+                
+                for i, rec in enumerate(recommendations[:6], 1):  # Limit to 6 recommendations
+                    st.markdown(f"{i}. {rec}")
     
-    # Detailed risk analysis
+    # Risk trend analysis (existing code continues...)
     st.subheader("📈 Risk Trend Analysis")
     
     if not filtered_df.empty:
