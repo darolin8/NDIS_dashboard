@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
-import seaborn as sns
 import matplotlib.pyplot as plt
 
 # Page configuration
