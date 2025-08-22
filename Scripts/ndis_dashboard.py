@@ -12,6 +12,28 @@ from sklearn.decomposition import PCA
 import warnings
 warnings.filterwarnings('ignore')
 
+# NDIS color palette - defined at the top for global access
+NDIS_COLORS = {
+    'primary': '#003F5C',
+    'secondary': '#2F9E7D', 
+    'accent': '#F59C2F',
+    'critical': '#DC2626',
+    'high': '#F59C2F',
+    'medium': '#2F9E7D',
+    'low': '#67A3C3',
+    'success': '#2F9E7D',
+    'warning': '#F59C2F',
+    'error': '#DC2626'
+}
+
+# Severity color mapping
+severity_colors = {
+    'Critical': NDIS_COLORS['critical'],
+    'High': NDIS_COLORS['high'],
+    'Medium': NDIS_COLORS['medium'],
+    'Low': NDIS_COLORS['low']
+}
+
 # Page configuration
 st.set_page_config(
     page_title="NDIS Executive Dashboard",
