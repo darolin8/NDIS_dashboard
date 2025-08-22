@@ -20,29 +20,194 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for NDIS accessible theme
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #007bff;
+    /* NDIS Accessible Theme */
+    :root {
+        --primary-color: #003F5C;      /* Deep Blue */
+        --secondary-color: #2F9E7D;    /* Teal/Turquoise */
+        --accent-color: #F59C2F;       /* Amber/Orange */
+        --background-color: #F7F9FA;   /* Light Neutral Gray */
+        --card-background: #FFFFFF;    /* White */
+        --text-primary: #1B1B1B;       /* Charcoal */
+        --text-on-dark: #FFFFFF;       /* White */
     }
-    .alert-card {
-        background-color: #fff3cd;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #ffc107;
+    
+    /* Main app styling */
+    .main > div {
+        background-color: var(--background-color);
+        padding-top: 2rem;
+    }
+    
+    /* Sidebar styling */
+    .css-1d391kg {
+        background-color: var(--primary-color);
+    }
+    
+    .css-1d391kg .css-1v0mbdj {
+        color: var(--text-on-dark);
+    }
+    
+    /* Metric cards with NDIS theme */
+    .metric-card {
+        background-color: var(--card-background);
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+        border-left: 4px solid var(--secondary-color);
+        box-shadow: 0 2px 4px rgba(0, 63, 92, 0.1);
+        margin-bottom: 1rem;
+    }
+    
+    .metric-card h4 {
+        color: var(--primary-color);
+        font-weight: 600;
         margin-bottom: 0.5rem;
     }
-    .critical-alert {
-        background-color: #f8d7da;
-        border-left-color: #dc3545;
+    
+    .metric-card h2 {
+        color: var(--text-primary);
+        font-weight: 700;
+        margin: 0.5rem 0;
     }
+    
+    /* Alert cards */
+    .alert-card {
+        background-color: var(--card-background);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid var(--accent-color);
+        margin-bottom: 0.75rem;
+        box-shadow: 0 1px 3px rgba(245, 156, 47, 0.1);
+    }
+    
+    .critical-alert {
+        border-left-color: #DC2626;
+        background-color: #FEF2F2;
+    }
+    
     .success-alert {
-        background-color: #d1e7dd;
-        border-left-color: #198754;
+        border-left-color: var(--secondary-color);
+        background-color: #F0FDF4;
+    }
+    
+    .warning-alert {
+        border-left-color: var(--accent-color);
+        background-color: #FFFBEB;
+    }
+    
+    /* Headers and titles */
+    h1, h2, h3 {
+        color: var(--primary-color) !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background-color: var(--secondary-color);
+        color: var(--text-on-dark);
+        border: none;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton > button:hover {
+        background-color: #267A63;
+        box-shadow: 0 4px 8px rgba(47, 158, 125, 0.3);
+    }
+    
+    /* Selectboxes and inputs */
+    .stSelectbox > div > div {
+        background-color: var(--card-background);
+        border: 1px solid var(--secondary-color);
+        border-radius: 0.5rem;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: var(--card-background);
+        border-radius: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        color: var(--primary-color);
+        font-weight: 500;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: var(--secondary-color);
+        color: var(--text-on-dark);
+    }
+    
+    /* Metrics */
+    [data-testid="metric-container"] {
+        background-color: var(--card-background);
+        border: 1px solid var(--secondary-color);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        box-shadow: 0 2px 4px rgba(47, 158, 125, 0.1);
+    }
+    
+    [data-testid="metric-container"] > div {
+        color: var(--primary-color);
+    }
+    
+    /* Dataframe styling */
+    .stDataFrame {
+        background-color: var(--card-background);
+        border-radius: 0.5rem;
+        overflow: hidden;
+    }
+    
+    /* Progress bars */
+    .stProgress > div > div {
+        background-color: var(--secondary-color);
+    }
+    
+    /* File uploader */
+    .stFileUploader {
+        background-color: var(--card-background);
+        border: 2px dashed var(--secondary-color);
+        border-radius: 0.75rem;
+        padding: 2rem;
+    }
+    
+    /* Info, warning, success, error boxes */
+    .stAlert {
+        border-radius: 0.5rem;
+    }
+    
+    /* Custom status indicators */
+    .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    
+    .status-high { background-color: #DC2626; }
+    .status-medium { background-color: var(--accent-color); }
+    .status-low { background-color: var(--secondary-color); }
+    .status-compliant { background-color: var(--secondary-color); }
+    .status-overdue { background-color: #DC2626; }
+    
+    /* Card containers */
+    .dashboard-card {
+        background-color: var(--card-background);
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 2px 8px rgba(0, 63, 92, 0.08);
+        border: 1px solid #E5E7EB;
+        margin-bottom: 1rem;
+    }
+    
+    /* Section headers */
+    .section-header {
+        color: var(--primary-color);
+        border-bottom: 2px solid var(--secondary-color);
+        padding-bottom: 0.5rem;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -198,8 +363,27 @@ if df is None:
             st.success("✅ Sample data loaded successfully!")
             st.experimental_rerun()
 
-if df is None or df.empty:
-    st.stop()
+    # NDIS color palette
+    NDIS_COLORS = {
+        'primary': '#003F5C',
+        'secondary': '#2F9E7D', 
+        'accent': '#F59C2F',
+        'critical': '#DC2626',
+        'high': '#F59C2F',
+        'medium': '#2F9E7D',
+        'low': '#67A3C3',
+        'success': '#2F9E7D',
+        'warning': '#F59C2F',
+        'error': '#DC2626'
+    }
+    
+    # Severity color mapping
+    severity_colors = {
+        'Critical': NDIS_COLORS['critical'],
+        'High': NDIS_COLORS['high'],
+        'Medium': NDIS_COLORS['medium'],
+        'Low': NDIS_COLORS['low']
+    }
 
 # Sidebar for navigation and filters
 st.sidebar.title("🏥 NDIS Dashboard")
@@ -280,7 +464,7 @@ if page == "Executive Summary":
         <div class="metric-card">
             <h4>Total Incidents</h4>
             <h2>{total_incidents}</h2>
-            <p style="color: #6c757d;">📊 Current period</p>
+            <p style="color: {NDIS_COLORS['primary']};">📊 Current period</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -289,7 +473,7 @@ if page == "Executive Summary":
         <div class="metric-card">
             <h4>Critical Incidents</h4>
             <h2>{critical_incidents}</h2>
-            <p style="color: #dc3545;">🚨 {critical_incidents/total_incidents*100:.1f}% of total</p>
+            <p style="color: {NDIS_COLORS['critical']};">🚨 {critical_incidents/total_incidents*100:.1f}% of total</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -298,7 +482,7 @@ if page == "Executive Summary":
         <div class="metric-card">
             <h4>Same-Day Reporting</h4>
             <h2>{same_day_rate:.1f}%</h2>
-            <p style="color: #198754;">⏰ Within 24 hours</p>
+            <p style="color: {NDIS_COLORS['success']};">⏰ Within 24 hours</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -307,7 +491,7 @@ if page == "Executive Summary":
         <div class="metric-card success-alert">
             <h4>Reportable Rate</h4>
             <h2>{reportable_rate:.1f}%</h2>
-            <p style="color: #198754;">✅ NDIS Commission</p>
+            <p style="color: {NDIS_COLORS['success']};">✅ NDIS Commission</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -328,10 +512,8 @@ if page == "Executive Summary":
             
             fig = go.Figure()
             
-            colors = {'Critical': '#dc3545', 'High': '#fd7e14', 'Medium': '#ffc107', 'Low': '#28a745'}
-            
             for severity in monthly_data.columns:
-                color = colors.get(severity, '#6c757d')
+                color = severity_colors.get(severity, NDIS_COLORS['primary'])
                 fig.add_trace(go.Bar(
                     x=monthly_data.index,
                     y=monthly_data[severity],
@@ -344,7 +526,10 @@ if page == "Executive Summary":
                 barmode='stack',
                 title="Monthly Distribution by Severity",
                 xaxis_title="Month",
-                yaxis_title="Number of Incidents"
+                yaxis_title="Number of Incidents",
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=NDIS_COLORS['primary'])
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -380,10 +565,18 @@ if page == "Executive Summary":
             fig = px.pie(
                 values=incident_counts.values,
                 names=incident_counts.index,
-                title=f"Top incident type: {incident_counts.index[0]} ({incident_counts.iloc[0]} cases)"
+                title=f"Top incident type: {incident_counts.index[0]} ({incident_counts.iloc[0]} cases)",
+                color_discrete_sequence=[NDIS_COLORS['primary'], NDIS_COLORS['secondary'], 
+                                       NDIS_COLORS['accent'], NDIS_COLORS['critical'],
+                                       '#67A3C3', '#8B9DC3']
             )
             fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(height=400)
+            fig.update_layout(
+                height=400,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=NDIS_COLORS['primary'])
+            )
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
@@ -409,9 +602,16 @@ if page == "Executive Summary":
                     'total_incidents': 'Total Incidents',
                     'critical_percentage': 'Critical Incident %'
                 },
-                color_continuous_scale='Reds'
+                color_continuous_scale=[[0, NDIS_COLORS['success']], 
+                                      [0.5, NDIS_COLORS['accent']], 
+                                      [1, NDIS_COLORS['critical']]]
             )
-            fig.update_layout(height=400)
+            fig.update_layout(
+                height=400,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=NDIS_COLORS['primary'])
+            )
             st.plotly_chart(fig, use_container_width=True)
     
     # Risk factors analysis
