@@ -1004,9 +1004,9 @@ elif page == "🤖 Machine Learning Analytics":
                         }
                         
                         results = {}
-                        for name, model in models.items():
+                        for name, model_instance in models.items():
                             try:
-                                scores = cross_val_score(model, X_clean, y_clean, cv=3, scoring='accuracy')
+                                scores = cross_val_score(model_instance, X_clean, y_clean, cv=3, scoring='accuracy')
                                 results[name] = scores.mean()
                             except:
                                 results[name] = 0
@@ -1017,9 +1017,13 @@ elif page == "🤖 Machine Learning Analytics":
                         
                         # Prediction confidence
                         if model is not None:
-                            pred_proba = model.predict_proba(X_clean)
-                            confidence = np.max(pred_proba, axis=1).mean()
-                            st.metric("Avg Confidence", f"{confidence:.2%}")
+                            try:
+                                pred_proba = model.predict_proba(X_clean)
+                                confidence = np.max(pred_proba, axis=1).mean()
+                                st.metric("Avg Confidence", f"{confidence:.2%}")
+                            except Exception as e:
+                                st.metric("Avg Confidence", "N/A")
+                                st.caption("Confidence calculation unavailable")
     
     with tab2:
         st.subheader("🚨 Anomaly Detection & Outlier Analysis")
@@ -1920,7 +1924,177 @@ elif page == "Risk Analysis":
                 
                 # Generate data-driven recommendations
                 if 'location' in filtered_df.columns:
-                    high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(2)
+                    high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(3)
+            
+            st.markdown("**Highest Risk Locations:**")
+            for location, count in high_risk_locations.items():
+                st.markdown(f"• {location}: {count} high-risk incidents")
+    
+    with col2:
+        st.markdown("### 💡 Recommendations")
+        
+        recommendations = [
+            "🎯 Focus prevention efforts on top contributing factors",
+            "📍 Implement additional safety measures at high-risk locations", 
+            "⏰ Improve reporting processes to meet 24-hour compliance",
+            "👥 Provide targeted training for staff in high-risk areas",
+            "📊 Monthly review of incident patterns and trends",
+            "🔄 Update risk assessment protocols based on data insights"
+        ]
+        
+        for rec in recommendations:
+            st.markdown(f"• {rec}")
+
+# Footer with data summary
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown(f"**Data Summary:** {len(df)} total incidents")
+with col2:
+    if not df.empty:
+        date_range_str = f"{df['incident_date'].min().strftime('%d/%m/%Y')} - {df['incident_date'].max().strftime('%d/%m/%Y')}"
+        st.markdown(f"**Date Range:** {date_range_str}")
+with col3:
+    st.markdown(f"**Last Updated:** {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+# Quick actions sidebar
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Quick Actions")
+
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
+
+if st.sidebar.button("📊 Export Current View"):
+    # Export filtered data to CSV
+    csv = filtered_df.to_csv(index=False)
+    st.sidebar.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name=f"ndis_incidents_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv"
+    )
+
+if st.sidebar.button("📧 Generate Alert Report"):
+    critical_count = len(filtered_df[filtered_df['severity'] == 'Critical'])
+    overdue_count = len(filtered_df[filtered_df['reporting_delay_hours'] > 24])
+    
+    if critical_count > 0 or overdue_count > 0:
+        st.sidebar.warning(f"Alert: {critical_count} critical incidents, {overdue_count} overdue reports")
+    else:
+        st.sidebar.success("No alerts - all within normal parameters")
+
+# ML Model Status sidebar
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🤖 ML Model Status")
+
+if len(df) >= 20:
+    st.sidebar.success("✅ Prediction models ready")
+    st.sidebar.info(f"📊 {len(df)} incidents available for training")
+else:
+    st.sidebar.warning("⚠️ Need more data for ML models")
+
+# Library status
+if MLXTEND_AVAILABLE:
+    st.sidebar.success("✅ Association rules available")
+else:
+    st.sidebar.error("❌ mlxtend not installed")
+
+if STATSMODELS_AVAILABLE:
+    st.sidebar.success("✅ Time series forecasting available")
+else:
+    st.sidebar.error("❌ statsmodels not installed")
+
+# Data quality indicator
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Data Quality")
+
+if not df.empty:
+    # Calculate data completeness
+    completeness = (1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+    st.sidebar.progress(completeness / 100)
+    st.sidebar.caption(f"{completeness:.1f}% - Data completeness")
+    
+    # Show data freshness
+    if not df['incident_date'].isna().all():
+        latest_incident = df['incident_date'].max()
+        days_old = (datetime.now() - latest_incident).days
+        st.sidebar.caption(f"Latest incident: {days_old} days ago")
+
+# Enhanced sample data info
+st.sidebar.markdown("---")
+st.sidebar.markdown("### About This Enhanced Data")
+st.sidebar.info("""
+This dashboard now includes comprehensive ML capabilities:
+
+**🤖 Machine Learning Features:**
+- Severity prediction models
+- Anomaly detection (Isolation Forest & SVM)
+- Association rule mining
+- Time series forecasting
+- Advanced clustering (K-Means & DBSCAN)
+
+**📊 Enhanced Analytics:**
+- 500 sample incidents for better ML performance
+- Statistical correlation analysis
+- Predictive insights and recommendations
+- Real-time model performance metrics
+
+**📈 Forecasting:**
+- Incident trend prediction
+- Seasonal pattern analysis
+- Resource planning support
+""")
+
+# Performance tips
+with st.expander("📈 Enhanced Dashboard Guide"):
+    st.markdown("""
+    **🤖 Machine Learning Features:**
+    - **Prediction Models**: Train models to predict incident severity
+    - **Anomaly Detection**: Identify unusual incidents that need investigation
+    - **Association Rules**: Discover patterns between incident characteristics
+    - **Time Series Forecasting**: Predict future incident trends
+    - **Advanced Clustering**: Group similar incidents for targeted interventions
+    
+    **📊 For Best ML Performance:**
+    - Use larger date ranges for more training data
+    - Include diverse incident types and severities
+    - Ensure data quality with complete fields
+    - Regular model retraining with new data
+    
+    **🔍 Understanding ML Results:**
+    - Higher accuracy scores indicate better prediction performance
+    - Anomaly scores help identify outliers requiring attention
+    - Association rules show which factors commonly occur together
+    - Clustering helps identify distinct incident patterns
+    - Forecasting supports proactive resource planning
+    
+    **⚠️ Important Notes:**
+    - ML models require sufficient data (20+ incidents minimum)
+    - Install required libraries for full functionality:
+      - `pip install mlxtend` for association rules
+      - `pip install statsmodels` for time series forecasting
+    - Model performance improves with more diverse, high-quality data
+    """)
+
+# Debug info (only show in development)
+if st.sidebar.checkbox("Show Debug Info", value=False):
+    st.sidebar.markdown("### Debug Information")
+    st.sidebar.write(f"Total records loaded: {len(df)}")
+    st.sidebar.write(f"Filtered records: {len(filtered_df)}")
+    st.sidebar.write(f"Date range: {len(date_range) if isinstance(date_range, tuple) else 'None'}")
+    st.sidebar.write(f"Memory usage: {df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB")
+    st.sidebar.write(f"ML libraries: mlxtend={MLXTEND_AVAILABLE}, statsmodels={STATSMODELS_AVAILABLE}")
+    
+    # Feature preparation debug
+    if not filtered_df.empty:
+        X, feature_names, _ = prepare_ml_features(filtered_df)
+        if X is not None:
+            st.sidebar.write(f"ML features: {len(feature_names)} features prepared")
+            st.sidebar.write(f"Feature matrix shape: {X.shape}")
+        else:
+            st.sidebar.write("ML features: Preparation failed")2)
                     if not high_risk_locations.empty:
                         recommendations.append(f"🎯 Prioritize safety measures at {high_risk_locations.index[0]}")
                 
@@ -2007,4 +2181,3 @@ elif page == "Risk Analysis":
             
             # High-risk locations
             high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(3)
-                
