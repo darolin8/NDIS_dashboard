@@ -2006,4 +2006,5 @@ elif page == "Risk Analysis":
                 st.markdown(f"• {factor}: {count} incidents ({percentage:.1f}%)")
             
             # High-risk locations
-            high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(
+            high_risk_locations = filtered_df[filtered_df['severity'].isin(['Critical', 'High'])]['location'].value_counts().head(3)
+                
