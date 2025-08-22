@@ -2094,7 +2094,7 @@ if st.sidebar.checkbox("Show Debug Info", value=False):
             st.sidebar.write(f"ML features: {len(feature_names)} features prepared")
             st.sidebar.write(f"Feature matrix shape: {X.shape}")
         else:
-            st.sidebar.write("ML features: Preparation failed")2)
+            st.sidebar.write("ML features: Preparation failed")
                     if not high_risk_locations.empty:
                         recommendations.append(f"🎯 Prioritize safety measures at {high_risk_locations.index[0]}")
                 
