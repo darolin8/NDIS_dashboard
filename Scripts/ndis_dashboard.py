@@ -2774,5 +2774,5 @@ elif page == "🤖 Machine Learning Analytics":
                                 
                                 st.metric("High-Risk Rate", f"{high_risk_pct:.1f}%")
                                 st.metric("Avg Delay", f"{avg_delay:.1f}h")
-                                st.metric("Medical Rate", fimport streamlit as st
+                                st.metric("Medical Rate",  f"{medical_rate:.1f}%")
 
