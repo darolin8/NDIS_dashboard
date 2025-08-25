@@ -77,14 +77,15 @@ def _numeric_width(w):
     if isinstance(w, (list, tuple, _np.ndarray)):
         nums = [v for v in w if isinstance(v, (int, float))]
         return max(nums) if nums else 1
-    if isinstance(w, (int, float)) and not _np.isnan(w):
+    if isinstance(w, (int, float)):
+        try:
+            if _np.isnan(w):  # handles float('nan')
+                return 1
+        except Exception:
+            pass
         return max(w, 1)
     return 1
 
-
-# =========================
-# Storytelling helper (your 5-step rules)
-# =========================
 def apply_5_step_story(
     fig: go.Figure,
     *,
@@ -97,50 +98,83 @@ def apply_5_step_story(
     fig = deepcopy(fig)
     axis_color = STORY_COLORS.get('axisline', '#E0E0E0')
 
-    # 1) Start grey; set safe line/marker styles without assuming width is numeric
+    # 1) Start grey, respecting trace schemas
     for tr in fig.data:
         ttype = getattr(tr, 'type', None)
 
-        # Marker color to context grey (skip hierarchical pies/trees only if you wish)
-        if hasattr(tr, "marker") and ttype not in ["sunburst", "treemap", "funnelarea"]:
-            # Try to preserve/normalize marker.line.width for bar-like traces
-            marker_line_width = 1
-            try:
-                mlw = getattr(getattr(tr.marker, "line", None), "width", None)
-                marker_line_width = _numeric_width(mlw)
-            except Exception:
-                pass
+        # Work out a safe marker line width if marker.line exists
+        marker_line_w = 1
+        try:
+            mlw = getattr(getattr(tr, "marker", None), "line", None)
+            marker_line_w = _numeric_width(getattr(mlw, "width", None))
+        except Exception:
+            pass
 
-            tr.update(marker=dict(
-                color=STORY_COLORS['context'],
-                line=dict(color=axis_color, width=marker_line_width)
-            ))
+        if hasattr(tr, "marker"):
+            if ttype == "pie":
+                # pie requires marker.colors (plural)
+                # match the number of slices
+                n = 0
+                try:
+                    n = len(getattr(tr, "labels", []) or [])
+                except Exception:
+                    pass
+                if not n:
+                    try:
+                        n = len(getattr(tr, "values", []) or [])
+                    except Exception:
+                        n = 1
+                tr.update(marker=dict(
+                    colors=[STORY_COLORS['context']] * n,
+                    line=dict(color=axis_color, width=marker_line_w),
+                ))
+            elif ttype not in ["sunburst", "treemap", "funnelarea"]:
+                # bar/scatter/box/violin/etc. accept marker.color
+                tr.update(marker=dict(
+                    color=STORY_COLORS['context'],
+                    line=dict(color=axis_color, width=marker_line_w),
+                ))
 
-        # Line-based traces (scatter, scattergl, polar, etc.)
+        # Line-based styling (scatter, line, polar, etc.)
         if hasattr(tr, "line") and getattr(tr, "line", None) is not None:
             w = _numeric_width(getattr(tr.line, "width", None))
             tr.update(line=dict(color=axis_color, width=w))
 
-    # 2) Emphasize one thing (and bring to front safely)
+    # 2) Emphasize selected traces + bring to front
     if emphasis_trace_idxs:
-        # Work on a copy of indices in case user passes a generator
         for idx in list(emphasis_trace_idxs):
             if 0 <= idx < len(fig.data):
                 tr = fig.data[idx]
+                ttype = getattr(tr, 'type', None)
                 if hasattr(tr, "marker"):
-                    tr.update(marker=dict(color=STORY_COLORS['emphasis'],
-                                          line=dict(color=STORY_COLORS['emphasis'],
-                                                    width=_numeric_width(getattr(getattr(tr, "marker", None), "line", None) and getattr(tr.marker.line, "width", None) or 1))))
+                    if ttype == "pie":
+                        n = 0
+                        try:
+                            n = len(getattr(tr, "labels", []) or [])
+                        except Exception:
+                            pass
+                        if not n:
+                            try:
+                                n = len(getattr(tr, "values", []) or [])
+                            except Exception:
+                                n = 1
+                        tr.update(marker=dict(
+                            colors=[STORY_COLORS['emphasis']] * n,
+                            line=dict(color=STORY_COLORS['emphasis'], width=3),
+                        ))
+                    else:
+                        tr.update(marker=dict(
+                            color=STORY_COLORS['emphasis'],
+                            line=dict(color=STORY_COLORS['emphasis'], width=3),
+                        ))
                 if hasattr(tr, "line") and getattr(tr, "line", None) is not None:
                     tr.update(line=dict(color=STORY_COLORS['emphasis'], width=3))
 
-                # Bring emphasized trace to front (fig.data is a tuple → use list)
-                new_data = list(fig.data)
-                emph = new_data.pop(idx)
-                new_data.append(emph)
-                fig.data = tuple(new_data)
+                nd = list(fig.data)
+                nd.append(nd.pop(idx))  # bring to front
+                fig.data = tuple(nd)
 
-    # 3) Remove clutter
+    # 3) De-clutter
     fig.update_layout(
         showlegend=show_legend,
         plot_bgcolor=STORY_COLORS['background'],
@@ -151,13 +185,13 @@ def apply_5_step_story(
     fig.update_xaxes(
         showline=False, zeroline=False, showgrid=False,
         tickfont=dict(color=STORY_COLORS['text']),
-        tickformat=f",.{max(decimals,0)}f" if decimals is not None else None
+        tickformat=f",.{max(decimals,0)}f" if decimals is not None else None,
     )
     fig.update_yaxes(
         showline=False, zeroline=False, showgrid=True,
         gridcolor=STORY_COLORS['grid'], gridwidth=0.5,
         tickfont=dict(color=STORY_COLORS['text']),
-        tickformat=f",.{max(decimals,0)}f" if decimals is not None else None
+        tickformat=f",.{max(decimals,0)}f" if decimals is not None else None,
     )
 
     # 4) Action title
@@ -167,8 +201,8 @@ def apply_5_step_story(
             title_html += f"<br><sup style='color:{STORY_COLORS['text']}'>{subtitle_text}</sup>"
         fig.update_layout(title={'text': title_html, 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}})
 
-    # 5) Return narrated fig
     return fig
+
 
 # =========================
 # Shared calcs
