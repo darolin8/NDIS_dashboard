@@ -2114,7 +2114,9 @@ if st.sidebar.checkbox("Show Debug Info", value=False):
             st.sidebar.write(f"ML features: {len(feature_names)} features prepared")
             st.sidebar.write(f"Feature matrix shape: {X.shape}")
         else:
-            st.sidebar.write("ML features: Preparation failed")    with col2:
+            st.sidebar.write("ML features: Preparation failed")    
+            
+    with col2:
         st.markdown(f"""
         <div class="metric-card">
             <h4>Critical Incidents</h4>
