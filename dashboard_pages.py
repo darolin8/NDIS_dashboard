@@ -84,10 +84,13 @@ def apply_5_step_story(
 ) -> go.Figure:
     fig = deepcopy(fig)
 
-    # 1) Start everything in grey
+    # 1) Start everything in grey, but skip traces that don't support marker/line (like Pie, Sunburst etc.)
     for tr in fig.data:
-        if hasattr(tr, "marker"):
+        trace_type = getattr(tr, 'type', None)
+        # Safely update marker only for traces that can have marker.color (not pie, sunburst, treemap, funnelarea)
+        if hasattr(tr, "marker") and trace_type not in ["pie", "funnelarea", "sunburst", "treemap"]:
             tr.update(marker=dict(color=STORY_COLORS['context']))
+        # Only update line if it exists
         if hasattr(tr, "line"):
             tr.update(line=dict(color=STORY_COLORS['axisline'], width=max(getattr(tr.line, "width", 1), 1)))
 
@@ -96,7 +99,8 @@ def apply_5_step_story(
         for idx in emphasis_trace_idxs:
             if 0 <= idx < len(fig.data):
                 tr = fig.data[idx]
-                if hasattr(tr, "marker"):
+                trace_type = getattr(tr, 'type', None)
+                if hasattr(tr, "marker") and trace_type not in ["pie", "funnelarea", "sunburst", "treemap"]:
                     tr.update(marker=dict(color=STORY_COLORS['emphasis']))
                 if hasattr(tr, "line"):
                     tr.update(line=dict(color=STORY_COLORS['emphasis'], width=3))
@@ -137,6 +141,8 @@ def compute_common_metrics(filtered_df: pd.DataFrame):
     same_day_rate = float(filtered_df['same_day_reporting'].mean() * 100) if total_incidents else 0.0
     reportable_rate = float((filtered_df['reportable'] == 'Yes').mean() * 100) if total_incidents else 0.0
     return total_incidents, critical_incidents, same_day_rate, reportable_rate
+
+# ... rest of your dashboard_pages.py unchanged (all render_* functions and PAGE_TO_RENDERER)
 
 # =========================
 # Pages
