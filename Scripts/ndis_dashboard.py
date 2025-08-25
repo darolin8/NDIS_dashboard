@@ -43,7 +43,7 @@ severity_colors = {
 }
 
 # =========================
-# Streamlit-safe chart utils
+# Streamlit-safe chart utils (prevents StreamlitDuplicateElementId)
 # =========================
 _KEY_REGISTRY = "_chart_key_registry"
 
@@ -71,7 +71,7 @@ def plotly_chart_safe(fig, *, name: str, namespace: str, idx: int | None = None,
     st.plotly_chart(fig_copy(fig), key=unique_chart_key(name, namespace, idx), use_container_width=True, **kwargs)
 
 # =========================
-# Storytelling helper
+# Storytelling helper (your 5-step rules)
 # =========================
 def apply_5_step_story(
     fig: go.Figure,
@@ -84,14 +84,14 @@ def apply_5_step_story(
 ) -> go.Figure:
     fig = deepcopy(fig)
 
-    # 1) Grey everything
+    # 1) Start everything in grey
     for tr in fig.data:
         if hasattr(tr, "marker"):
             tr.update(marker=dict(color=STORY_COLORS['context']))
         if hasattr(tr, "line"):
             tr.update(line=dict(color=STORY_COLORS['axisline'], width=max(getattr(tr.line, "width", 1), 1)))
 
-    # 2) Emphasize
+    # 2) Emphasize one thing
     if emphasis_trace_idxs:
         for idx in emphasis_trace_idxs:
             if 0 <= idx < len(fig.data):
@@ -102,7 +102,7 @@ def apply_5_step_story(
                     tr.update(line=dict(color=STORY_COLORS['emphasis'], width=3))
                 fig.data += (fig.data.pop(idx),)  # bring to front
 
-    # 3) Declutter
+    # 3) Remove clutter
     fig.update_layout(
         showlegend=show_legend,
         plot_bgcolor=STORY_COLORS['background'],
@@ -125,6 +125,7 @@ def apply_5_step_story(
             title_html += f"<br><sup style='color:{STORY_COLORS['text']}'>{subtitle_text}</sup>"
         fig.update_layout(title={'text': title_html, 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}})
 
+    # 5) 3-second rule is for humans 😉
     return fig
 
 # =========================
@@ -183,7 +184,6 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
                     marker_color=severity_colors.get(sev, NDIS_COLORS['primary'])
                 ))
             fig.update_layout(barmode='stack', height=420)
-            # Story styling (no emphasis here; categorical colors already convey severity)
             fig = apply_5_step_story(fig, title_text="Monthly distribution by severity")
             plotly_chart_safe(fig, name="monthly_by_sev", namespace=ns)
 
@@ -348,7 +348,7 @@ def render_compliance_investigation(filtered_df: pd.DataFrame):
     with c3: st.metric("Overdue Reports", f"{overdue}", "Requires action")
     with c4: st.metric("Investigation Rate", "100%", "All incidents reviewed")
 
-    # Detailed table (keep your styling simple to avoid heavy ID reuse)
+    # Detailed table
     st.subheader("📋 Incident Details")
     cols = ['incident_id','incident_date','incident_type','severity','location','reportable','reporting_delay_hours','medical_attention_required']
     if not filtered_df.empty:
@@ -529,8 +529,8 @@ def render_ml_analytics(filtered_df: pd.DataFrame,
 
     with tab5:
         st.subheader("🎯 Advanced Clustering")
-        st.info("Clustering UI unchanged; wire your existing clustering block here and "
-                "swap all st.plotly_chart(...) with plotly_chart_safe(..., namespace=ns, name=...) for uniqueness.")
+        st.info("Reuse your clustering code here; ensure each chart uses "
+                "plotly_chart_safe(..., namespace=ns, name='cluster_*') for unique keys.")
 
 # ---------- Risk Analysis ----------
 def render_risk_analysis(filtered_df: pd.DataFrame):
@@ -552,12 +552,11 @@ def render_risk_analysis(filtered_df: pd.DataFrame):
 
     with tabs[0]:
         st.subheader("🔍 Machine Learning Risk Clustering")
-        st.info("Reuse your clustering code here; ensure each chart uses plotly_chart_safe(..., namespace=ns, name='cluster_*').")
+        st.info("Plug your clustering charts here, wrapped with plotly_chart_safe for uniqueness.")
 
     with tabs[1]:
         st.subheader("📊 Statistical Analysis")
         if not filtered_df.empty:
-            # Example correlation heatmap
             corr_vars = {}
             if 'reporting_delay_hours' in filtered_df: corr_vars['Reporting Delay (hrs)'] = filtered_df['reporting_delay_hours'].fillna(0)
             if 'age_at_incident' in filtered_df:       corr_vars['Age at Incident']     = filtered_df['age_at_incident'].fillna(0)
