@@ -650,10 +650,10 @@ def risk_analysis_page(filtered_df):
     st.dataframe(filtered_df.head())
 
 PAGE_TO_RENDERER = {
-    "Executive Summary": executive_summary_page,
-    "Operational Performance": operational_performance_page,
-    "Compliance & Investigation": compliance_investigation_page,
-    "🤖 Machine Learning Analytics": ml_analytics_page,
-    "Risk Analysis": risk_analysis_page
+    "Executive Summary": render_executive_summary,
+    "Operational Performance": render_operational_performance,
+    "Compliance & Investigation": render_compliance_investigation,
+    "🤖 Machine Learning Analytics": render_ml_analytics,
+    "Risk Analysis": render_risk_analysis
 }
 
