@@ -6,17 +6,14 @@ import pandas as pd
 import streamlit as st
 
 from dashboard_pages import PAGE_TO_RENDERER
-# If your helpers live here, import them; otherwise they’re defined below.
-# from your_module import (
-#     train_severity_prediction_model, prepare_ml_features, perform_anomaly_detection,
-#     find_association_rules, time_series_forecast,
-#     MLXTEND_AVAILABLE, STATSMODELS_AVAILABLE
-# )
 
-# =========================
-# Page config + Theme
-# =========================
 st.set_page_config(page_title="NDIS Executive Dashboard", page_icon="📊", layout="wide")
+
+page = st.sidebar.radio("Select a page:", list(PAGE_TO_RENDERER.keys()))
+
+renderer = PAGE_TO_RENDERER[page]
+renderer()
+
 
 # Optional minimal CSS tune-up (colors align with your NDIS palette)
 st.markdown("""
