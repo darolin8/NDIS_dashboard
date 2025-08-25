@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from dashboard_pages import PAGE_TO_RENDERER
+from dashboard.py import PAGE_TO_RENDERER
 # If your helpers live here, import them; otherwise they’re defined below.
 # from your_module import (
 #     train_severity_prediction_model, prepare_ml_features, perform_anomaly_detection,
