@@ -614,17 +614,17 @@ def render_risk_analysis(filtered_df: pd.DataFrame):
 # =========================
 # Page router
 # =========================
-def home_page():
+def executive_summary_page(df, filtered_df):
+    import streamlit as st
+    st.write("This is the Executive Summary page.")
+
+def home_page(df, filtered_df):
     import streamlit as st
     st.write("Welcome to the Home Page!")
 
-def about_page():
+def about_page(df, filtered_df):
     import streamlit as st
     st.write("About this dashboard.")
-
-def executive_summary_page():
-    import streamlit as st
-    st.write("This is the Executive Summary page.")
 
 PAGE_TO_RENDERER = {
     "Home": home_page,
