@@ -614,21 +614,46 @@ def render_risk_analysis(filtered_df: pd.DataFrame):
 # =========================
 # Page router
 # =========================
+
 def executive_summary_page(df, filtered_df):
-    import streamlit as st
-    st.write("This is the Executive Summary page.")
+    st.title("Executive Summary")
+    st.markdown("This is the Executive Summary page. Add key metrics and charts here.")
+    st.dataframe(filtered_df.head())
 
-def home_page(df, filtered_df):
-    import streamlit as st
-    st.write("Welcome to the Home Page!")
+def operational_performance_page(filtered_df):
+    st.title("Operational Performance")
+    st.markdown("This is the Operational Performance page.")
+    st.dataframe(filtered_df.head())
 
-def about_page(df, filtered_df):
-    import streamlit as st
-    st.write("About this dashboard.")
+def compliance_investigation_page(filtered_df):
+    st.title("Compliance & Investigation")
+    st.markdown("This is the Compliance & Investigation page.")
+    st.dataframe(filtered_df.head())
+
+def ml_analytics_page(
+    filtered_df,
+    train_severity_prediction_model=None,
+    prepare_ml_features=None,
+    perform_anomaly_detection=None,
+    find_association_rules=None,
+    time_series_forecast=None,
+    MLXTEND_AVAILABLE=None,
+    STATSMODELS_AVAILABLE=None
+):
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown("This is the ML Analytics page.")
+    st.dataframe(filtered_df.head())
+
+def risk_analysis_page(filtered_df):
+    st.title("Risk Analysis")
+    st.markdown("This is the Risk Analysis page.")
+    st.dataframe(filtered_df.head())
 
 PAGE_TO_RENDERER = {
-    "Home": home_page,
-    "About": about_page,
     "Executive Summary": executive_summary_page,
+    "Operational Performance": operational_performance_page,
+    "Compliance & Investigation": compliance_investigation_page,
+    "🤖 Machine Learning Analytics": ml_analytics_page,
+    "Risk Analysis": risk_analysis_page
 }
 
