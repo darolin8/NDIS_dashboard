@@ -4,30 +4,45 @@ warnings.filterwarnings('ignore')
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
+
 from dashboard_pages import PAGE_TO_RENDERER
 
-# Set Streamlit page configuration
 st.set_page_config(page_title="NDIS Executive Dashboard", page_icon="📊", layout="wide")
 
-# Load your CSV data
 @st.cache_data
-def load_data():
-    # Make sure the path matches the one in your repo
-    df = pd.read_csv("text data/ndis_incidents_synthetic.csv")
+def load_incident_data():
+    csv_path = "text data/ndis_incidents_synthetic.csv"
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path)
+    else:
+        st.warning("CSV not found. Using generated sample data.")
+        df = create_sample_data()
     return df
 
-df = load_data()
+def create_sample_data():
+    rng = np.random.default_rng(42)
+    n = 100
+    df = pd.DataFrame({
+        "IncidentID": range(1, n+1),
+        "Category": rng.choice(["Injury", "Complaint", "Other"], size=n),
+        "Severity": rng.choice(["Low", "Medium", "High"], size=n),
+        "Status": rng.choice(["Open", "Closed"], size=n),
+        "Date": pd.date_range("2023-01-01", periods=n, freq="D")
+    })
+    return df
 
-# Example filtered_df (replace with your own filtering logic if needed)
-filtered_df = df  # or: filtered_df = df[df['some_column'] == some_value]
+# Load data
+df = load_incident_data()
 
-# Sidebar for navigation
+# Example filtered_df (customize your filter logic as needed)
+filtered_df = df  # or apply any filter you need
+
+# Sidebar navigation
 page = st.sidebar.radio("Select a page:", list(PAGE_TO_RENDERER.keys()))
 
-# Get the renderer function for the selected page
+# Get the renderer function and call it with data
 renderer = PAGE_TO_RENDERER[page]
-
-# Call the selected page's function with the dataframes
 renderer(df, filtered_df)
 
 # Optional minimal CSS tune-up (colors align with your NDIS palette)
