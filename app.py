@@ -40,6 +40,14 @@ filtered_df = df  # or apply any filter you need
 
 # Sidebar navigation
 page = st.sidebar.radio("Select a page:", list(PAGE_TO_RENDERER.keys()))
+st.write("Page selected:", page)
+st.write("Available pages:", list(PAGE_TO_RENDERER.keys()))
+
+renderer = PAGE_TO_RENDERER.get(page)
+if renderer is None:
+    st.error(f"Selected page '{page}' not found in PAGE_TO_RENDERER!")
+else:
+    renderer(df, filtered_df)
 
 # Get the renderer function and call it with data
 renderer = PAGE_TO_RENDERER[page]
