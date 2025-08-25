@@ -1,19 +1,33 @@
 import warnings
 warnings.filterwarnings('ignore')
 
-import numpy as np
-import pandas as pd
 import streamlit as st
-
+import pandas as pd
 from dashboard_pages import PAGE_TO_RENDERER
 
+# Set Streamlit page configuration
 st.set_page_config(page_title="NDIS Executive Dashboard", page_icon="📊", layout="wide")
 
+# Load your CSV data
+@st.cache_data
+def load_data():
+    # Make sure the path matches the one in your repo
+    df = pd.read_csv("text data/ndis_incidents_synthetic.csv")
+    return df
+
+df = load_data()
+
+# Example filtered_df (replace with your own filtering logic if needed)
+filtered_df = df  # or: filtered_df = df[df['some_column'] == some_value]
+
+# Sidebar for navigation
 page = st.sidebar.radio("Select a page:", list(PAGE_TO_RENDERER.keys()))
 
+# Get the renderer function for the selected page
 renderer = PAGE_TO_RENDERER[page]
-renderer()
 
+# Call the selected page's function with the dataframes
+renderer(df, filtered_df)
 
 # Optional minimal CSS tune-up (colors align with your NDIS palette)
 st.markdown("""
