@@ -2771,6 +2771,7 @@ elif page == "🤖 Machine Learning Analytics":
                                 high_risk_pct = (cluster_data['severity'].isin(['Critical', 'High'])).mean() * 100
                                 avg_delay = cluster_data['reporting_delay_hours'].mean()
                                 medical_rate = (cluster_data['medical_attention_required'] == 'Yes').mean() * 100
+
                                 
                                 st.metric("High-Risk Rate", f"{high_risk_pct:.1f}%")
                                 st.metric("Avg Delay", f"{avg_delay:.1f}h")
