@@ -1416,7 +1416,7 @@ elif page == "🤖 Machine Learning Analytics":
 elif page == "Operational Performance":
     st.title("🎯 Operational Performance & Risk Analysis")
     st.markdown("**Tactical Level - Management Action & Resource Allocation**")
-    st.markdown("---"
+    st.markdown("---")
 
 
 # In[ ]:
