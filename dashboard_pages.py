@@ -622,8 +622,13 @@ def about_page():
     import streamlit as st
     st.write("About this dashboard.")
 
+def executive_summary_page():
+    import streamlit as st
+    st.write("This is the Executive Summary page.")
+
 PAGE_TO_RENDERER = {
     "Home": home_page,
     "About": about_page,
+    "Executive Summary": executive_summary_page,
 }
 
