@@ -3,6 +3,7 @@ warnings.filterwarnings('ignore')
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from dashboard_pages import PAGE_TO_RENDERER
 
 # Set Streamlit page configuration
