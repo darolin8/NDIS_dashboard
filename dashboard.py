@@ -615,10 +615,8 @@ def render_risk_analysis(filtered_df: pd.DataFrame):
 # Page router
 # =========================
 PAGE_TO_RENDERER = {
-    "Executive Summary": render_executive_summary,
-    "Operational Performance": render_operational_performance,
-    "Compliance & Investigation": render_compliance_investigation,
-    "🤖 Machine Learning Analytics": render_ml_analytics,
-    "Risk Analysis": render_risk_analysis,
+    "Home": lambda: print("Home page"),
+    "About": lambda: print("About page"),
 }
+
 
