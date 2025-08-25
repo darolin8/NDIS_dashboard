@@ -8,35 +8,216 @@ import os
 
 from dashboard_pages import PAGE_TO_RENDERER
 
-st.set_page_config(page_title="NDIS Executive Dashboard", page_icon="📊", layout="wide")
+
+# --------------------- Data Loading Functions ---------------------
 
 @st.cache_data
 def load_incident_data():
-    csv_path = "text data/ndis_incidents_synthetic.csv"
-    if os.path.exists(csv_path):
-        df = pd.read_csv(csv_path)
-    else:
-        st.warning("CSV not found. Using generated sample data.")
-        df = create_sample_data()
-    return df
+    """Load and prepare the actual NDIS incident data"""
+    try:
+        possible_paths = [
+            'text data/ndis_incidents_synthetic.csv',
+            'ndis_incidents_synthetic.csv',
+            './ndis_incidents_synthetic.csv',
+            'data/ndis_incidents_synthetic.csv',
+            '../ndis_incidents_synthetic.csv',
+            './text data/ndis_incidents_synthetic.csv'
+        ]
+        df = None
+        for path in possible_paths:
+            try:
+                df = pd.read_csv(path)
+                st.sidebar.success(f"✅ Data loaded from: {path}")
+                break
+            except FileNotFoundError:
+                continue
+        if df is None:
+            st.error("CSV file not found. Please upload your data file below.")
+            return None
 
+        # Clean and prepare the data
+        df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+        df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+        df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
+        df['reporting_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+        df['same_day_reporting'] = df['reporting_delay_hours'] <= 24
+        df['age_at_incident'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+        df['incident_month'] = df['incident_date'].dt.month_name()
+        df['incident_year'] = df['incident_date'].dt.year
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None
+
+@st.cache_data
 def create_sample_data():
-    rng = np.random.default_rng(42)
-    n = 100
-    df = pd.DataFrame({
-        "IncidentID": range(1, n+1),
-        "Category": rng.choice(["Injury", "Complaint", "Other"], size=n),
-        "Severity": rng.choice(["Low", "Medium", "High"], size=n),
-        "Status": rng.choice(["Open", "Closed"], size=n),
-        "Date": pd.date_range("2023-01-01", periods=n, freq="D")
-    })
+    """Create sample NDIS incident data for demonstration"""
+    np.random.seed(42)
+    sample_data = {
+        'incident_id': [f'INC-2024-{i:04d}' for i in range(1, 501)],
+        'participant_name': [f'Participant {i}' for i in range(1, 501)],
+        'ndis_number': np.random.randint(400000000, 500000000, 500),
+        'dob': pd.date_range('1950-01-01', '2010-12-31', periods=500).strftime('%d/%m/%Y'),
+        'incident_date': pd.date_range('2023-01-01', '2024-12-31', periods=500).strftime('%d/%m/%Y'),
+        'incident_time': [f'{np.random.randint(0,24):02d}:{np.random.randint(0,60):02d}' for _ in range(500)],
+        'notification_date': pd.date_range('2023-01-01', '2024-12-31', periods=500).strftime('%d/%m/%Y'),
+        'location': np.random.choice(['Group Home', 'Transport Vehicle', 'Day Program', 'Community Access', 'Therapy Clinic'], 500),
+        'incident_type': np.random.choice(['Injury', 'Missing Person', 'Death', 'Restrictive Practices', 'Transport Incident', 'Medication Error'], 500),
+        'subcategory': np.random.choice(['Fall', 'Unexplained absence', 'Natural causes', 'Unauthorised', 'Vehicle crash', 'Wrong dose'], 500),
+        'severity': np.random.choice(['Critical', 'High', 'Medium', 'Low'], 500, p=[0.1, 0.2, 0.4, 0.3]),
+        'reportable': np.random.choice(['Yes', 'No'], 500, p=[0.7, 0.3]),
+        'description': ['Sample incident description' for _ in range(500)],
+        'immediate_action': ['Immediate action taken' for _ in range(500)],
+        'actions_taken': ['Follow-up actions completed' for _ in range(500)],
+        'contributing_factors': np.random.choice(['Staff error', 'Equipment failure', 'Environmental factors', 'Participant behavior', 'System failure'], 500),
+        'reported_by': [f'Staff Member {i} (Support Worker)' for i in range(1, 501)],
+        'injury_type': np.random.choice(['No physical injury', 'Minor injury', 'Major injury'], 500, p=[0.6, 0.3, 0.1]),
+        'injury_severity': np.random.choice(['None', 'Mild', 'Moderate', 'Severe'], 500, p=[0.5, 0.3, 0.15, 0.05]),
+        'treatment_required': np.random.choice(['Yes', 'No'], 500, p=[0.3, 0.7]),
+        'medical_attention_required': np.random.choice(['Yes', 'No'], 500, p=[0.25, 0.75]),
+        'medical_treatment_type': np.random.choice(['None', 'First aid', 'GP visit', 'Hospital'], 500, p=[0.6, 0.25, 0.1, 0.05]),
+        'medical_outcome': np.random.choice(['No treatment required', 'Treated and released', 'Ongoing monitoring'], 500, p=[0.7, 0.25, 0.05])
+    }
+    df = pd.DataFrame(sample_data)
+    # Convert dates to datetime
+    df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+    df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+    df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
+    df['reporting_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+    df['same_day_reporting'] = df['reporting_delay_hours'] <= 24
+    df['age_at_incident'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+    df['incident_month'] = df['incident_date'].dt.month_name()
+    df['incident_year'] = df['incident_date'].dt.year
     return df
 
-# Load data
+# ----------------------- Data Loading Logic -----------------------
+
 df = load_incident_data()
 
-# Example filtered_df (customize your filter logic as needed)
-filtered_df = df  # or apply any filter you need
+if df is None:
+    st.title("🏥 NDIS Dashboard - Data Loading")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("📁 Upload Your Data")
+        uploaded_file = st.file_uploader(
+            "Choose your NDIS incidents CSV file",
+            type=['csv'],
+            help="Upload your ndis_incidents_synthetic.csv file or any CSV with the same structure"
+        )
+        if uploaded_file is not None:
+            try:
+                df = pd.read_csv(uploaded_file)
+                df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
+                df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
+                df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
+                df['reporting_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+                df['same_day_reporting'] = df['reporting_delay_hours'] <= 24
+                df['age_at_incident'] = (df['incident_date'] - df['dob']).dt.days / 365.25
+                df['incident_month'] = df['incident_date'].dt.month_name()
+                df['incident_year'] = df['incident_date'].dt.year
+                st.success(f"✅ Successfully loaded {len(df)} incidents from uploaded file!")
+            except Exception as e:
+                st.error(f"Error processing uploaded file: {str(e)}")
+                df = None
+
+    with col2:
+        st.subheader("🎯 Use Sample Data")
+        st.info("""
+        Can't find your CSV file? Use our enhanced sample data to explore the dashboard features.
+
+        The sample data includes:
+        - 500 realistic NDIS incidents
+        - All required fields and categories
+        - Proper date formatting
+        - Enhanced for machine learning
+        """)
+        if st.button("🚀 Load Sample Data"):
+            df = create_sample_data()
+            st.success("✅ Sample data loaded successfully!")
+            st.rerun()
+    st.stop()
+
+# ----------------------- Sidebar and Filters -----------------------
+
+st.sidebar.title("🏥 NDIS Dashboard")
+st.sidebar.markdown("---")
+
+page = st.sidebar.selectbox(
+    "Dashboard Pages",
+    ["Executive Summary", "Operational Performance", "Compliance & Investigation", "🤖 Machine Learning Analytics", "Risk Analysis"]
+)
+
+st.sidebar.markdown("### Filters")
+
+min_date = df['incident_date'].min()
+max_date = df['incident_date'].max()
+date_range = st.sidebar.date_input(
+    "Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+locations = ['All'] + sorted(df['location'].dropna().unique().tolist())
+selected_location = st.sidebar.selectbox("Location", locations)
+
+severities = st.sidebar.multiselect(
+    "Severity",
+    df['severity'].dropna().unique().tolist(),
+    default=df['severity'].dropna().unique().tolist()
+)
+
+incident_types = st.sidebar.multiselect(
+    "Incident Type",
+    df['incident_type'].dropna().unique().tolist(),
+    default=df['incident_type'].dropna().unique().tolist()
+)
+
+filtered_df = df.copy()
+if len(date_range) == 2:
+    filtered_df = filtered_df[
+        (filtered_df['incident_date'] >= pd.Timestamp(date_range[0])) &
+        (filtered_df['incident_date'] <= pd.Timestamp(date_range[1]))
+    ]
+if selected_location != 'All':
+    filtered_df = filtered_df[filtered_df['location'] == selected_location]
+if severities:
+    filtered_df = filtered_df[filtered_df['severity'].isin(severities)]
+if incident_types:
+    filtered_df = filtered_df[filtered_df['incident_type'].isin(incident_types)]
+
+# ----------------------- Main Dashboard Content -----------------------
+
+if page == "Executive Summary":
+    st.title("📊 NDIS Executive Dashboard")
+    st.markdown("**Strategic Overview - Incident Analysis & Risk Management**")
+    st.markdown(f"*Showing {len(filtered_df)} incidents from {len(df)} total records*")
+    st.markdown("---")
+    st.dataframe(filtered_df.head())
+
+elif page == "Operational Performance":
+    st.title("📈 Operational Performance")
+    st.markdown(f"*Showing {len(filtered_df)} filtered incidents*")
+    st.info("Operational Performance dashboard coming soon!")
+
+elif page == "Compliance & Investigation":
+    st.title("🕵️ Compliance & Investigation")
+    st.markdown(f"*Showing {len(filtered_df)} filtered incidents*")
+    st.info("Compliance & Investigation dashboard coming soon!")
+
+elif page == "🤖 Machine Learning Analytics":
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown(f"*Showing {len(filtered_df)} filtered incidents*")
+    st.info("Machine Learning Analytics dashboard coming soon!")
+
+elif page == "Risk Analysis":
+    st.title("⚠️ Risk Analysis")
+    st.markdown(f"*Showing {len(filtered_df)} filtered incidents*")
+    st.info("Risk Analysis dashboard coming soon!")
+
+else:
+    st.error("Page not found! Please select a valid dashboard page.")
 
 # Sidebar navigation
 page = st.sidebar.radio("Select a page:", list(PAGE_TO_RENDERER.keys()))
