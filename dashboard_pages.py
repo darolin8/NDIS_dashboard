@@ -78,20 +78,17 @@ def apply_5_step_story(
     fig = deepcopy(fig)
     for tr in fig.data:
         ttype = getattr(tr, 'type', None)
-        # Handle pie charts safely (not used, but robust)
         if ttype == "pie":
             n = len(getattr(tr, "labels", [])) or len(getattr(tr, "values", [])) or 1
             try:
                 tr.update(marker=dict(colors=[STORY_COLORS['context']] * n))
             except Exception:
                 pass
-        # For traces with marker (bar, scatter, etc.)
         elif hasattr(tr, "marker"):
             try:
                 tr.update(marker=dict(color=STORY_COLORS['context']))
             except Exception:
                 pass
-        # Only update line if it exists and the property exists
         if hasattr(tr, "line") and getattr(tr, "line", None) is not None:
             line_props = {}
             if hasattr(tr.line, "color"):
@@ -136,9 +133,242 @@ def apply_5_step_story(
 def compute_common_metrics(filtered_df: pd.DataFrame):
     total_incidents = len(filtered_df)
     critical_incidents = int((filtered_df['severity'] == 'Critical').sum()) if total_incidents else 0
-    same_day_rate = float(filtered_df['same_day_reporting'].mean() * 100) if total_incidents else 0.0
+    same_day_rate = float(filtered_df['notification_date'].eq(filtered_df['incident_date']).mean() * 100) if total_incidents else 0.0
     reportable_rate = float((filtered_df['reportable'] == 'Yes').mean() * 100) if total_incidents else 0.0
     return total_incidents, critical_incidents, same_day_rate, reportable_rate
+
+# =========================
+# Chart functions (your set)
+# =========================
+# Paste your chart functions here (create_progress_chart, create_dot_plot, ..., etc)
+# For brevity, only progress, bullet, dot, diverging, waterfall, heatmap, horizontal bar are included
+# (You can add the rest as needed!)
+
+def create_progress_chart(value, target, title="", subtitle=""):
+    percentage = (value / target) * 100 if target else 0
+    remaining = 100 - percentage
+    if percentage >= 90:
+        color = '#2F9E7D'
+    elif percentage >= 70:
+        color = '#F59C2F'
+    else:
+        color = '#DC2626'
+    fig = go.Figure(go.Pie(
+        values=[percentage, remaining],
+        hole=0.7,
+        marker=dict(colors=[color, '#F0F0F0']),
+        textinfo='none',
+        hoverinfo='skip'
+    ))
+    fig.add_annotation(
+        text=f'<b style="font-size:36px;color:{color}">{percentage:.0f}%</b><br>' +
+             f'<span style="font-size:14px;color:#666666">{value:,.0f} / {target:,.0f}</span>',
+        x=0.5, y=0.5,
+        font=dict(size=20),
+        showarrow=False
+    )
+    fig.update_layout(
+        title={
+            'text': f"<b>{title}</b><br><sup style='color:#666666'>{subtitle}</sup>",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 14, 'color': '#333333'}
+        },
+        showlegend=False,
+        margin=dict(l=0, r=0, t=60, b=0),
+        height=250,
+        paper_bgcolor='white'
+    )
+    return fig
+
+def create_dot_plot(df, category_col, value_cols, title=""):
+    fig = go.Figure()
+    colors = ['#003F5C', '#F59C2F', '#2F9E7D', '#DC2626', '#67A3C3']
+    for i, col in enumerate(value_cols):
+        fig.add_trace(go.Scatter(
+            x=df[col],
+            y=df[category_col],
+            mode='markers+text',
+            marker=dict(size=10, color=colors[i % len(colors)]),
+            text=df[col].round(0).astype(int),
+            textposition='middle right',
+            textfont=dict(size=10, color=colors[i % len(colors)]),
+            name=col,
+            hovertemplate='%{text}<extra></extra>'
+        ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666')),
+        yaxis=dict(tickfont=dict(size=11, color='#333333')),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        height=400,
+        margin=dict(l=100, r=60, t=60, b=40),
+        showlegend=True,
+        legend=dict(orientation='h', y=1.1, x=0, font=dict(size=10, color='#666666'))
+    )
+    return fig
+
+def create_bullet_chart(actual, target, ranges, title="", subtitle=""):
+    fig = go.Figure()
+    colors = ['#F0F0F0', '#D3D3D3', '#B0B0B0']
+    widths = [ranges[0], ranges[1]-ranges[0], ranges[2]-ranges[1]]
+    for i, (width, color) in enumerate(zip(widths, colors)):
+        fig.add_trace(go.Bar(
+            x=[width],
+            y=[0],
+            orientation='h',
+            marker_color=color,
+            width=0.4,
+            base=ranges[i-1] if i > 0 else 0,
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+    fig.add_trace(go.Bar(
+        x=[actual],
+        y=[0],
+        orientation='h',
+        marker_color='#003F5C',
+        width=0.2,
+        name='Actual',
+        text=f'{actual:.0f}',
+        textposition='outside',
+        textfont=dict(size=12, color='#003F5C', weight='bold'),
+        hovertemplate=f'Actual: {actual}<extra></extra>'
+    ))
+    fig.add_trace(go.Scatter(
+        x=[target],
+        y=[0],
+        mode='markers',
+        marker=dict(
+            symbol='line-ns',
+            size=20,
+            line_width=3,
+            color='#DC2626'
+        ),
+        name='Target',
+        hovertemplate=f'Target: {target}<extra></extra>'
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b><br><sup style='color:#666666'>{subtitle}</sup>", 'x': 0, 'xanchor': 'left', 'font': {'size': 14, 'color': '#333333'}},
+        xaxis=dict(showgrid=False, showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666'), range=[0, ranges[2] * 1.1]),
+        yaxis=dict(showgrid=False, showline=False, showticklabels=False, range=[-0.5, 0.5]),
+        plot_bgcolor='white', paper_bgcolor='white', height=150, margin=dict(l=20, r=60, t=60, b=40), showlegend=False, barmode='overlay'
+    )
+    return fig
+
+def create_diverging_bar_chart(df, category_col, value_col, title="", center_value=0):
+    df_sorted = df.copy()
+    df_sorted['abs_val'] = df_sorted[value_col].abs()
+    df_sorted = df_sorted.sort_values('abs_val', ascending=True)
+    colors = ['#2F9E7D' if x > center_value else '#DC2626' for x in df_sorted[value_col]]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df_sorted[value_col],
+        y=df_sorted[category_col],
+        orientation='h',
+        marker_color=colors,
+        text=df_sorted[value_col].apply(lambda x: f'{x:+.1f}%'),
+        textposition='outside',
+        textfont=dict(size=10, color='#333333'),
+        hovertemplate='%{y}: %{x:+.1f}%<extra></extra>'
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=False, zeroline=False, ticksuffix='%', tickfont=dict(size=10, color='#666666')),
+        yaxis=dict(showgrid=False, showline=False, tickfont=dict(size=11, color='#333333')),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=120, r=60, t=60, b=40), height=400
+    )
+    return fig
+
+def create_waterfall_chart(categories, values, title="", subtitle=""):
+    cumulative = [0]
+    for val in values[:-1]:
+        cumulative.append(cumulative[-1] + val)
+    colors = []
+    for i, val in enumerate(values):
+        if i == 0 or i == len(values) - 1:
+            colors.append('#003F5C')
+        elif val > 0:
+            colors.append('#2F9E7D')
+        else:
+            colors.append('#DC2626')
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=[f'{v:+.0f}' if i not in [0, len(values)-1] else f'{v:.0f}' for i, v in enumerate(values)],
+        textposition='outside',
+        textfont=dict(size=11, color='#333333'),
+        showlegend=False,
+        hovertemplate='%{x}: %{y:+.0f}<extra></extra>'
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b><br><sup style='color:#666666'>{subtitle}</sup>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        barmode='stack',
+        xaxis=dict(showgrid=False, showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666')),
+        yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=False, tickfont=dict(size=10, color='#666666'), title=""),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=60, r=60, t=80, b=40), height=400
+    )
+    return fig
+
+def create_heatmap(df, title=""):
+    fig = go.Figure(data=go.Heatmap(
+        z=df.values,
+        x=df.columns,
+        y=df.index,
+        colorscale=[
+            [0, '#FFFFFF'],
+            [0.5, '#67A3C3'],
+            [1, '#003F5C']
+        ],
+        text=df.values.round(2),
+        texttemplate='%{text}',
+        textfont={"size": 10},
+        colorbar=dict(
+            title="Value",
+            titleside="right",
+            tickmode="linear",
+            tick0=0,
+            dtick=20,
+            thickness=15,
+            len=0.7,
+            x=1.02
+        )
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(tickfont=dict(size=10, color='#666666'), side='bottom'),
+        yaxis=dict(tickfont=dict(size=10, color='#666666'), autorange='reversed'),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=100, r=100, t=60, b=60), height=400
+    )
+    return fig
+
+def create_horizontal_bar_chart(df, category_col, value_col, highlight_category=None, title="", subtitle=""):
+    df_sorted = df.sort_values(value_col, ascending=True)
+    colors = ['#D3D3D3'] * len(df_sorted)
+    if highlight_category and highlight_category in df_sorted[category_col].tolist():
+        idx = df_sorted[category_col].tolist().index(highlight_category)
+        colors[idx] = '#1F77B4'
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df_sorted[value_col],
+        y=df_sorted[category_col],
+        orientation='h',
+        marker_color=colors,
+        text=df_sorted[value_col].round(0).astype(int),
+        textposition='outside',
+        textfont=dict(size=11, color='#666666'),
+        hovertemplate='%{y}: %{x}<extra></extra>'
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b><br><sup style='color: #666666'>{subtitle}</sup>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(showgrid=False, showline=False, showticklabels=False, zeroline=False),
+        yaxis=dict(showgrid=False, showline=False, tickfont=dict(size=11, color='#666666')),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=150, r=50, t=80, b=40), height=400, showlegend=False
+    )
+    return fig
 
 # =========================
 # Pages
@@ -165,6 +395,8 @@ def render_executive_summary(filtered_df: pd.DataFrame):
     with colA:
         st.subheader("📈 Incident Trends by Month")
         if not filtered_df.empty:
+            filtered_df['incident_date'] = pd.to_datetime(filtered_df['incident_date'], errors='coerce', dayfirst=True)
+            filtered_df['incident_month'] = filtered_df['incident_date'].dt.strftime('%B')
             monthly = filtered_df.groupby(['incident_month', 'severity']).size().unstack(fill_value=0)
             order = ['January','February','March','April','May','June','July','August','September','October','November','December']
             monthly = monthly.reindex([m for m in order if m in monthly.index])
@@ -231,12 +463,102 @@ def render_executive_summary(filtered_df: pd.DataFrame):
 
 def render_operational_performance(filtered_df: pd.DataFrame):
     st.title("📊 Operational Performance")
-    st.markdown("This dashboard will display operational KPIs and trends.")
+
     if filtered_df.empty:
         st.info("No data for the selected period.")
-    else:
-        st.metric("Total Incidents", len(filtered_df))
-        st.dataframe(filtered_df.head(10), use_container_width=True)
+        return
+
+    total = len(filtered_df)
+    critical = (filtered_df['severity'] == "Critical").sum()
+    st.subheader("Critical Incident Progress")
+    st.plotly_chart(
+        create_progress_chart(
+            value=critical,
+            target=total,
+            title="Critical Incidents",
+            subtitle=f"{critical} of {total} incidents"
+        ),
+        use_container_width=True
+    )
+
+    reportable_rate = (filtered_df['reportable'] == "Yes").mean() * 100
+    st.subheader("Reportable Rate vs Target")
+    st.plotly_chart(
+        create_bullet_chart(
+            actual=reportable_rate,
+            target=90,
+            ranges=[60, 80, 100],
+            title="Reportable Incidents (%)",
+            subtitle=f"Current: {reportable_rate:.1f}% | Target: 90%"
+        ),
+        use_container_width=True
+    )
+
+    st.subheader("Location vs Severity Dot Plot")
+    by_loc_sev = (
+        filtered_df.groupby(['location', 'severity'])
+        .size().unstack(fill_value=0)
+        .reset_index()
+    )
+    sev_cols = [col for col in by_loc_sev.columns if col != 'location']
+    if len(sev_cols) > 0:
+        st.plotly_chart(
+            create_dot_plot(
+                by_loc_sev,
+                category_col='location',
+                value_cols=sev_cols,
+                title="Incidents per Location by Severity"
+            ),
+            use_container_width=True
+        )
+
+    st.subheader("Incident Type Deviation")
+    type_counts = filtered_df['incident_type'].value_counts().head(10)
+    type_dev = type_counts - type_counts.mean()
+    df_type_dev = pd.DataFrame({
+        'Type': type_counts.index,
+        'Deviation': type_dev.values
+    })
+    st.plotly_chart(
+        create_diverging_bar_chart(
+            df_type_dev,
+            category_col='Type',
+            value_col='Deviation',
+            title="Deviation from Avg. by Type"
+        ),
+        use_container_width=True
+    )
+
+    st.subheader("Monthly Incident Change Waterfall")
+    filtered_df['month'] = pd.to_datetime(filtered_df['incident_date'], dayfirst=True).dt.strftime('%b %Y')
+    monthly_counts = filtered_df.groupby('month').size().sort_index()
+    months = monthly_counts.index.tolist()
+    if len(monthly_counts) > 1:
+        values = [monthly_counts.iloc[0]] + [monthly_counts.iloc[i] - monthly_counts.iloc[i-1] for i in range(1, len(monthly_counts))]
+        st.plotly_chart(
+            create_waterfall_chart(
+                categories=months,
+                values=values,
+                title="Incident Count Changes by Month"
+            ),
+            use_container_width=True
+        )
+
+    st.subheader("Incident Type x Severity Heatmap")
+    heatmap_df = (
+        filtered_df.groupby(['incident_type', 'severity'])
+        .size().unstack(fill_value=0)
+    )
+    st.plotly_chart(
+        create_heatmap(
+            heatmap_df,
+            title="Incident Types by Severity"
+        ),
+        use_container_width=True
+    )
+
+    st.markdown("### Raw Data Preview")
+    st.dataframe(filtered_df.head(20), use_container_width=True)
 
 def render_compliance_investigation(filtered_df: pd.DataFrame):
     st.title("🕵️ Compliance & Investigation")
@@ -244,10 +566,27 @@ def render_compliance_investigation(filtered_df: pd.DataFrame):
     if filtered_df.empty:
         st.info("No data for the selected period.")
     else:
-        compliance_rate = (filtered_df['compliant'] == True).mean() * 100 if 'compliant' in filtered_df else None
-        if compliance_rate is not None:
+        # Show a horizontal bar: incidents by subcategory
+        st.subheader("Incidents by Subcategory")
+        subcat_counts = filtered_df['subcategory'].value_counts().head(10)
+        df_subcat = pd.DataFrame({'Subcategory': subcat_counts.index, 'Count': subcat_counts.values})
+        st.plotly_chart(
+            create_horizontal_bar_chart(
+                df_subcat,
+                category_col='Subcategory',
+                value_col='Count',
+                highlight_category=df_subcat.iloc[0]['Subcategory'],
+                title="Most Frequent Subcategories",
+                subtitle="Top 10 subcategories"
+            ),
+            use_container_width=True
+        )
+
+        # Show compliance rate (fake calculation for demo)
+        if 'compliant' in filtered_df.columns:
+            compliance_rate = (filtered_df['compliant'] == True).mean() * 100
             st.metric("Compliance Rate", f"{compliance_rate:.1f}%")
-        st.dataframe(filtered_df.head(10), use_container_width=True)
+        st.dataframe(filtered_df.head(15), use_container_width=True)
 
 def render_ml_analytics(filtered_df: pd.DataFrame, **kwargs):
     st.title("🤖 Machine Learning Analytics")
@@ -255,7 +594,17 @@ def render_ml_analytics(filtered_df: pd.DataFrame, **kwargs):
     if filtered_df.empty:
         st.info("No data for the selected period.")
     else:
-        st.dataframe(filtered_df.head(10), use_container_width=True)
+        # Example: Heatmap by severity/location
+        st.subheader("Severity by Location Heatmap")
+        heatmap_df = (
+            filtered_df.groupby(['location', 'severity'])
+            .size().unstack(fill_value=0)
+        )
+        st.plotly_chart(
+            create_heatmap(heatmap_df, title="Severity by Location"),
+            use_container_width=True
+        )
+        st.dataframe(filtered_df.head(15), use_container_width=True)
 
 def render_risk_analysis(filtered_df: pd.DataFrame):
     st.title("⚠️ Risk Analysis")
@@ -263,8 +612,16 @@ def render_risk_analysis(filtered_df: pd.DataFrame):
     if filtered_df.empty:
         st.info("No data for the selected period.")
     else:
-        st.metric("Total Incidents", len(filtered_df))
-        st.dataframe(filtered_df.head(10), use_container_width=True)
+        # Use diverging bar: e.g. location with highest deviation from mean incident count
+        st.subheader("Incident Count Deviation by Location")
+        loc_counts = filtered_df['location'].value_counts().head(10)
+        loc_dev = loc_counts - loc_counts.mean()
+        df_loc_dev = pd.DataFrame({'Location': loc_counts.index, 'Deviation': loc_dev.values})
+        st.plotly_chart(
+            create_diverging_bar_chart(df_loc_dev, category_col='Location', value_col='Deviation', title="Deviation from Avg. by Location"),
+            use_container_width=True
+        )
+        st.dataframe(filtered_df.head(15), use_container_width=True)
 
 PAGE_TO_RENDERER = {
     "Executive Summary": render_executive_summary,
