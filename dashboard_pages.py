@@ -608,31 +608,36 @@ def render_ml_analytics(
         else:
             st.info("Need at least 30 incidents for time series forecasting.")
 
-    with tab5:
-        st.subheader("🎯 Advanced Clustering")
-        # KMeans clustering demo using numeric ML features
-        try:
-            from sklearn.cluster import KMeans
-            X, feats, _ = prepare_ml_features(filtered_df)
-            if X is not None and len(X) >= 10:
-                n_clusters = st.slider("Number of clusters", 2, min(8, len(X)), 3)
-                kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-                cluster_labels = kmeans.fit_predict(X)
-                cluster_df = filtered_df.copy()
-                cluster_df['cluster'] = cluster_labels
-                fig = px.scatter(
-                    cluster_df, x=feats[0], y=feats[1] if len(feats) > 1 else feats[0],
-                    color='cluster', symbol='severity' if 'severity' in cluster_df.columns else None,
-                    title="Clustering of Incidents", labels={"cluster": "Cluster"}, height=480
-                )
-                fig = apply_5_step_story(fig, title_text="Incident Clustering Visualization")
-                plotly_chart_safe(fig, name="incident_clustering", namespace=ns)
-            else:
-                st.info("Not enough data for clustering.")
-        except Exception as e:
-            st.warning(f"Clustering not available: {e}")
+   with tab5:
+    st.subheader("🎯 Advanced Clustering")
+    try:
+        from sklearn.cluster import KMeans
+        X, feats, _ = prepare_ml_features(filtered_df)
+        if X is not None and len(X) >= 10:
+            n_clusters = st.slider("Number of clusters", 2, min(8, len(X)), 3)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+            cluster_labels = kmeans.fit_predict(X)
+            cluster_df = filtered_df.copy()
+            # Add engineered feature columns to cluster_df so they can be plotted
+            for col in X.columns:
+                cluster_df[col] = X[col].values
+            cluster_df['cluster'] = cluster_labels
+            # Choose columns for plotting
+            x_col = feats[0]
+            y_col = feats[1] if len(feats) > 1 else feats[0]
+            fig = px.scatter(
+                cluster_df, x=x_col, y=y_col,
+                color='cluster', symbol='severity' if 'severity' in cluster_df.columns else None,
+                title="Clustering of Incidents", labels={"cluster": "Cluster"}, height=480
+            )
+            fig = apply_5_step_story(fig, title_text="Incident Clustering Visualization")
+            plotly_chart_safe(fig, name="incident_clustering", namespace=ns)
+        else:
+            st.info("Not enough data for clustering.")
+    except Exception as e:
+        st.warning(f"Clustering not available: {e}")
 
-# ... (rest of your code below, unchanged)
+
 # ---------- Risk Analysis ----------
 def render_risk_analysis(filtered_df: pd.DataFrame):
     ns = "Risk Analysis"
