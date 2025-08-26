@@ -229,19 +229,48 @@ def render_executive_summary(filtered_df: pd.DataFrame):
             fig = apply_5_step_story(fig, title_text="Location risk assessment (critical % vs total)")
             plotly_chart_safe(fig, name="loc_risk", namespace=ns)
 
-# Placeholder stubs for other pages—replace with your actual functions!
 def render_operational_performance(filtered_df: pd.DataFrame):
-    st.write("Operational Performance dashboard goes here.")
+    st.title("📊 Operational Performance")
+    st.markdown("This dashboard will display operational KPIs and trends.")
+    if filtered_df.empty:
+        st.info("No data for the selected period.")
+    else:
+        st.metric("Total Incidents", len(filtered_df))
+        st.dataframe(filtered_df.head(10), use_container_width=True)
 
 def render_compliance_investigation(filtered_df: pd.DataFrame):
-    st.write("Compliance & Investigation dashboard goes here.")
+    st.title("🕵️ Compliance & Investigation")
+    st.markdown("This dashboard will show compliance and investigation metrics.")
+    if filtered_df.empty:
+        st.info("No data for the selected period.")
+    else:
+        compliance_rate = (filtered_df['compliant'] == True).mean() * 100 if 'compliant' in filtered_df else None
+        if compliance_rate is not None:
+            st.metric("Compliance Rate", f"{compliance_rate:.1f}%")
+        st.dataframe(filtered_df.head(10), use_container_width=True)
 
 def render_ml_analytics(filtered_df: pd.DataFrame, **kwargs):
-    st.write("ML Analytics dashboard goes here.")
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown("This dashboard will show ML-based analytics and predictions.")
+    if filtered_df.empty:
+        st.info("No data for the selected period.")
+    else:
+        st.dataframe(filtered_df.head(10), use_container_width=True)
+
+def render_risk_analysis(filtered_df: pd.DataFrame):
+    st.title("⚠️ Risk Analysis")
+    st.markdown("This dashboard is for risk analysis. More analytics will be added here.")
+    if filtered_df.empty:
+        st.info("No data for the selected period.")
+    else:
+        st.metric("Total Incidents", len(filtered_df))
+        st.dataframe(filtered_df.head(10), use_container_width=True)
 
 PAGE_TO_RENDERER = {
     "Executive Summary": render_executive_summary,
     "Operational Performance": render_operational_performance,
     "Compliance & Investigation": render_compliance_investigation,
     "ML Analytics": render_ml_analytics,
+    "🤖 Machine Learning Analytics": render_ml_analytics,
+    "Risk Analysis": render_risk_analysis,
 }
