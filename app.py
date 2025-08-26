@@ -1,6 +1,9 @@
 import warnings
 warnings.filterwarnings('ignore')
 
+import warnings
+warnings.filterwarnings('ignore')
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -85,7 +88,7 @@ def load_incident_data():
     return df
 
 # =========================
-# ML Helper Functions (for ML Analytics tab)
+# ML Helper Functions
 # =========================
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -291,23 +294,53 @@ if renderer is None:
     st.error(f"Selected page '{page}' not found in PAGE_TO_RENDERER!")
 else:
     if page == "🤖 Machine Learning Analytics":
+        # --- Prepare ML results for the dashboard ---
+        # 1. Train severity prediction model
+        model, acc, feature_names = train_severity_prediction_model(filtered_df)
+        feature_importances = pd.Series(model.feature_importances_, index=feature_names) if model else None
+        X, _, _ = prepare_ml_features(filtered_df)
+        preds = model.predict(X) if model is not None and X is not None else None
+
+        # 2. Anomaly detection
+        anomaly_df, _ = perform_anomaly_detection(filtered_df)
+        anomaly_scores = anomaly_df['anomaly_score'] if anomaly_df is not None else None
+        if anomaly_df is not None and 'isolation_forest_anomaly' in anomaly_df:
+            filtered_df['is_anomaly'] = anomaly_df['isolation_forest_anomaly']
+
+        # 3. Association rules
+        association_rules_result = None
+        rules = find_association_rules(filtered_df)[1] if MLXTEND_AVAILABLE else None
+        if rules is not None and not rules.empty:
+            association_rules_result = {
+                'support': rules['support'].tolist(),
+                'confidence': rules['confidence'].tolist(),
+                'labels': rules['consequents'].astype(str).tolist()
+            }
+
+        # 4. Forecast
+        forecast_data = time_series_forecast(filtered_df)[1] if STATSMODELS_AVAILABLE else None
+        forecast_dict = None
+        if forecast_data is not None:
+            forecast_dict = {
+                'dates': forecast_data['date'],
+                'actual': [np.nan]*len(forecast_data['date']),
+                'predicted': forecast_data['forecast']
+            }
+
+        # 5. Clustering columns
+        clustering_cols = ['age_at_incident', 'reporting_delay_hours']
+
         renderer(
             filtered_df,
-            train_severity_prediction_model=train_severity_prediction_model,
-            prepare_ml_features=prepare_ml_features,
-            perform_anomaly_detection=perform_anomaly_detection,
-            find_association_rules=find_association_rules,
-            time_series_forecast=time_series_forecast,
-            MLXTEND_AVAILABLE=MLXTEND_AVAILABLE,
-            STATSMODELS_AVAILABLE=STATSMODELS_AVAILABLE
+            feature_importances=feature_importances,
+            preds=preds,
+            anomaly_scores=anomaly_scores,
+            association_rules=association_rules_result,
+            forecast=forecast_dict,
+            clustering_cols=clustering_cols
         )
     else:
         renderer(filtered_df)
-
-if selected_page == "ML Analytics":
-    render_ml_analytics(filtered_df, ...)
-elif selected_page == "Overview":
-    render_overview(filtered_df, ...)
 
 # =========================
 # Footer & Quick Actions
