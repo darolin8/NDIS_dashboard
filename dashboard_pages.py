@@ -10,9 +10,9 @@ from copy import deepcopy
 # Storytelling Colors & Chart Function
 # =========================
 STORY_COLORS = {
-    'context': '#D3D3D3',     # light grey for de-emphasis
-    'emphasis': '#1F77B4',    # blue for focus
-    'negative': '#DC2626',    # red for negative emphasis
+    'context': '#D3D3D3',
+    'emphasis': '#1F77B4',
+    'negative': '#DC2626',
     'grid': '#F3F3F3',
     'axisline': '#CCCCCC',
     'background': '#FFFFFF',
@@ -62,14 +62,13 @@ def plotly_chart_safe(fig, *, name: str, namespace: str, idx: int | None = None,
     st.plotly_chart(fig_copy(fig), key=unique_chart_key(name, namespace, idx), use_container_width=True, **kwargs)
 
 def _numeric_width(w):
-    """Return a safe, positive numeric width from None / scalar / list-like."""
     import numpy as _np
     if isinstance(w, (list, tuple, _np.ndarray)):
         nums = [v for v in w if isinstance(v, (int, float))]
         return max(nums) if nums else 1
     if isinstance(w, (int, float)):
         try:
-            if _np.isnan(w):  # handles float('nan')
+            if _np.isnan(w):
                 return 1
         except Exception:
             pass
@@ -87,19 +86,14 @@ def apply_5_step_story(
 ) -> go.Figure:
     fig = deepcopy(fig)
     axis_color = STORY_COLORS.get('axisline', '#E0E0E0')
-
-    # 1) Start grey, respecting trace schemas
     for tr in fig.data:
         ttype = getattr(tr, 'type', None)
-
-        # Work out a safe marker line width if marker.line exists
         marker_line_w = 1
         try:
             mlw = getattr(getattr(tr, "marker", None), "line", None)
             marker_line_w = _numeric_width(getattr(mlw, "width", None))
         except Exception:
             pass
-
         if hasattr(tr, "marker"):
             if ttype == "pie":
                 n = 0
@@ -121,12 +115,9 @@ def apply_5_step_story(
                     color=STORY_COLORS['context'],
                     line=dict(color=axis_color, width=marker_line_w),
                 ))
-
         if hasattr(tr, "line") and getattr(tr, "line", None) is not None:
             w = _numeric_width(getattr(tr.line, "width", None))
             tr.update(line=dict(color=axis_color, width=w))
-
-    # 2) Emphasize selected traces + bring to front
     if emphasis_trace_idxs:
         for idx in list(emphasis_trace_idxs):
             if 0 <= idx < len(fig.data):
@@ -155,12 +146,9 @@ def apply_5_step_story(
                         ))
                 if hasattr(tr, "line") and getattr(tr, "line", None) is not None:
                     tr.update(line=dict(color=STORY_COLORS['emphasis'], width=3))
-
                 nd = list(fig.data)
-                nd.append(nd.pop(idx))  # bring to front
+                nd.append(nd.pop(idx))
                 fig.data = tuple(nd)
-
-    # 3) De-clutter
     fig.update_layout(
         showlegend=show_legend,
         plot_bgcolor=STORY_COLORS['background'],
@@ -179,28 +167,16 @@ def apply_5_step_story(
         tickfont=dict(color=STORY_COLORS['text']),
         tickformat=f",.{max(decimals,0)}f" if decimals is not None else None,
     )
-
     if title_text:
         title_html = f"<b>{title_text}</b>"
         if subtitle_text:
             title_html += f"<br><sup style='color:{STORY_COLORS['text']}'>{subtitle_text}</sup>"
         fig.update_layout(title={'text': title_html, 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}})
-
     return fig
 
-# =========================
-# Storytelling Chart Builder
-# =========================
 def create_storytelling_chart(data, chart_type="bar", emphasis_category=None, title_text="", subtitle_text=None):
-    """
-    Create a bar or line chart that follows Storytelling with Data principles:
-    - Everything grey except one highlighted category
-    - No pie charts (convert to bar)
-    - Direct labeling preferred over legends
-    """
     if chart_type == "pie":
         return create_storytelling_chart(data, chart_type="bar", emphasis_category=emphasis_category, title_text=title_text, subtitle_text=subtitle_text)
-
     if chart_type == "bar":
         colors = [STORY_COLORS['context']] * len(data)
         emphasis_idx = None
@@ -218,7 +194,6 @@ def create_storytelling_chart(data, chart_type="bar", emphasis_category=None, ti
             fig = apply_5_step_story(fig, emphasis_trace_idxs=[0], title_text=title_text, subtitle_text=subtitle_text)
         else:
             fig = apply_5_step_story(fig, title_text=title_text, subtitle_text=subtitle_text)
-
     elif chart_type == "line":
         fig = go.Figure()
         emphasis_idx = None
@@ -240,12 +215,7 @@ def create_storytelling_chart(data, chart_type="bar", emphasis_category=None, ti
             fig = apply_5_step_story(fig, emphasis_trace_idxs=[emphasis_idx], title_text=title_text, subtitle_text=subtitle_text)
         else:
             fig = apply_5_step_story(fig, title_text=title_text, subtitle_text=subtitle_text)
-
     return fig
-
-# =========================
-# Example: Executive Summary Dashboard Page
-# =========================
 
 def compute_common_metrics(filtered_df: pd.DataFrame):
     total_incidents = len(filtered_df)
@@ -260,7 +230,6 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
     st.markdown("**Strategic Overview - Incident Analysis & Risk Management**")
     st.markdown(f"*Showing {len(filtered_df)} incidents from {len(df)} total records*")
     st.markdown("---")
-
     c1, c2, c3, c4 = st.columns(4)
     total_incidents, critical_incidents, same_day_rate, reportable_rate = compute_common_metrics(filtered_df)
     with c1:
@@ -272,9 +241,7 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
         st.metric("Same-Day Reporting", f"{same_day_rate:.1f}%")
     with c4:
         st.metric("Reportable Rate", f"{reportable_rate:.1f}%")
-
     colA, colB = st.columns([2, 1])
-
     with colA:
         st.subheader("📈 Incident Trends by Month")
         if not filtered_df.empty:
@@ -292,7 +259,6 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
             fig.update_layout(barmode='stack', height=420)
             fig = apply_5_step_story(fig, title_text="Monthly distribution by severity")
             plotly_chart_safe(fig, name="monthly_by_sev", namespace=ns)
-
     with colB:
         st.subheader("🚨 Recent Critical Incidents")
         crit = filtered_df[filtered_df['severity'] == 'Critical'].sort_values('incident_date', ascending=False).head(5)
@@ -309,7 +275,6 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
                     f"<small style='color:#6c757d;'>{str(r['description'])[:100]}...</small>"
                     "</div>", unsafe_allow_html=True
                 )
-
     colC, colD = st.columns(2)
     with colC:
         st.subheader("📊 Incident Types Distribution")
@@ -323,7 +288,6 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
                 title_text=f"Top incident type: {top_type} ({vc.iloc[0]})" if top_type else "Incident type distribution"
             )
             plotly_chart_safe(fig, name="type_story_bar", namespace=ns)
-
     with colD:
         st.subheader("🎯 Location Risk Analysis")
         if not filtered_df.empty:
@@ -341,9 +305,25 @@ def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
             fig = apply_5_step_story(fig, title_text="Location risk assessment (critical % vs total)")
             plotly_chart_safe(fig, name="loc_risk", namespace=ns)
 
-# =========================
-# PAGE TO RENDERER MAPPING
-# =========================
+def render_operational_performance(df: pd.DataFrame, filtered_df: pd.DataFrame):
+    st.title("Operational Performance")
+    st.markdown("This is the Operational Performance page.")
+    st.dataframe(filtered_df.head())
+
+def render_compliance_investigation(df: pd.DataFrame, filtered_df: pd.DataFrame):
+    st.title("Compliance & Investigation")
+    st.markdown("This is the Compliance & Investigation page.")
+    st.dataframe(filtered_df.head())
+
+def render_ml_analytics(df: pd.DataFrame, filtered_df: pd.DataFrame):
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown("This is the ML Analytics page.")
+    st.dataframe(filtered_df.head())
+
+def render_risk_analysis(df: pd.DataFrame, filtered_df: pd.DataFrame):
+    st.title("Risk Analysis")
+    st.markdown("This is the Risk Analysis page.")
+    st.dataframe(filtered_df.head())
 
 PAGE_TO_RENDERER = {
     "Executive Summary": render_executive_summary,
@@ -352,4 +332,3 @@ PAGE_TO_RENDERER = {
     "🤖 Machine Learning Analytics": render_ml_analytics,
     "Risk Analysis": render_risk_analysis
 }
-
