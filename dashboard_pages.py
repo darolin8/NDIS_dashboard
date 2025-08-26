@@ -138,11 +138,37 @@ def compute_common_metrics(filtered_df: pd.DataFrame):
     return total_incidents, critical_incidents, same_day_rate, reportable_rate
 
 # =========================
-# Chart functions (your set)
+# Chart functions (only valid keys in colorbar!)
 # =========================
-# Paste your chart functions here (create_progress_chart, create_dot_plot, ..., etc)
-# For brevity, only progress, bullet, dot, diverging, waterfall, heatmap, horizontal bar are included
-# (You can add the rest as needed!)
+
+def create_heatmap(df, title=""):
+    fig = go.Figure(data=go.Heatmap(
+        z=df.values,
+        x=df.columns,
+        y=df.index,
+        colorscale=[
+            [0, '#FFFFFF'],
+            [0.5, '#67A3C3'],
+            [1, '#003F5C']
+        ],
+        colorbar=dict(
+            title="Value",
+            thickness=15,
+            tickmode="auto"
+        ),
+        text=df.values.round(2).astype(str),
+        hovertemplate="X: %{x}<br>Y: %{y}<br>Value: %{z}<extra></extra>",
+    ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(tickfont=dict(size=10, color='#666666'), side='bottom'),
+        yaxis=dict(tickfont=dict(size=10, color='#666666'), autorange='reversed'),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin=dict(l=100, r=100, t=60, b=60),
+        height=400
+    )
+    return fig
 
 def create_progress_chart(value, target, title="", subtitle=""):
     percentage = (value / target) * 100 if target else 0
@@ -178,34 +204,6 @@ def create_progress_chart(value, target, title="", subtitle=""):
         margin=dict(l=0, r=0, t=60, b=0),
         height=250,
         paper_bgcolor='white'
-    )
-    return fig
-
-def create_dot_plot(df, category_col, value_cols, title=""):
-    fig = go.Figure()
-    colors = ['#003F5C', '#F59C2F', '#2F9E7D', '#DC2626', '#67A3C3']
-    for i, col in enumerate(value_cols):
-        fig.add_trace(go.Scatter(
-            x=df[col],
-            y=df[category_col],
-            mode='markers+text',
-            marker=dict(size=10, color=colors[i % len(colors)]),
-            text=df[col].round(0).astype(int),
-            textposition='middle right',
-            textfont=dict(size=10, color=colors[i % len(colors)]),
-            name=col,
-            hovertemplate='%{text}<extra></extra>'
-        ))
-    fig.update_layout(
-        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
-        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666')),
-        yaxis=dict(tickfont=dict(size=11, color='#333333')),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        height=400,
-        margin=dict(l=100, r=60, t=60, b=40),
-        showlegend=True,
-        legend=dict(orientation='h', y=1.1, x=0, font=dict(size=10, color='#666666'))
     )
     return fig
 
@@ -254,6 +252,34 @@ def create_bullet_chart(actual, target, ranges, title="", subtitle=""):
         xaxis=dict(showgrid=False, showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666'), range=[0, ranges[2] * 1.1]),
         yaxis=dict(showgrid=False, showline=False, showticklabels=False, range=[-0.5, 0.5]),
         plot_bgcolor='white', paper_bgcolor='white', height=150, margin=dict(l=20, r=60, t=60, b=40), showlegend=False, barmode='overlay'
+    )
+    return fig
+
+def create_dot_plot(df, category_col, value_cols, title=""):
+    fig = go.Figure()
+    colors = ['#003F5C', '#F59C2F', '#2F9E7D', '#DC2626', '#67A3C3']
+    for i, col in enumerate(value_cols):
+        fig.add_trace(go.Scatter(
+            x=df[col],
+            y=df[category_col],
+            mode='markers+text',
+            marker=dict(size=10, color=colors[i % len(colors)]),
+            text=df[col].round(0).astype(int),
+            textposition='middle right',
+            textfont=dict(size=10, color=colors[i % len(colors)]),
+            name=col,
+            hovertemplate='%{text}<extra></extra>'
+        ))
+    fig.update_layout(
+        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
+        xaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666')),
+        yaxis=dict(tickfont=dict(size=11, color='#333333')),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        height=400,
+        margin=dict(l=100, r=60, t=60, b=40),
+        showlegend=True,
+        legend=dict(orientation='h', y=1.1, x=0, font=dict(size=10, color='#666666'))
     )
     return fig
 
@@ -310,38 +336,6 @@ def create_waterfall_chart(categories, values, title="", subtitle=""):
         xaxis=dict(showgrid=False, showline=True, linecolor='#D3D3D3', tickfont=dict(size=10, color='#666666')),
         yaxis=dict(showgrid=True, gridwidth=0.5, gridcolor='#F0F0F0', showline=False, tickfont=dict(size=10, color='#666666'), title=""),
         plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=60, r=60, t=80, b=40), height=400
-    )
-    return fig
-
-def create_heatmap(df, title=""):
-    fig = go.Figure(data=go.Heatmap(
-        z=df.values,
-        x=df.columns,
-        y=df.index,
-        colorscale=[
-            [0, '#FFFFFF'],
-            [0.5, '#67A3C3'],
-            [1, '#003F5C']
-        ],
-        text=df.values.round(2),
-        texttemplate='%{text}',
-        textfont={"size": 10},
-        colorbar=dict(
-            title="Value",
-            titleside="right",
-            tickmode="linear",
-            tick0=0,
-            dtick=20,
-            thickness=15,
-            len=0.7,
-            x=1.02
-        )
-    ))
-    fig.update_layout(
-        title={'text': f"<b>{title}</b>", 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}},
-        xaxis=dict(tickfont=dict(size=10, color='#666666'), side='bottom'),
-        yaxis=dict(tickfont=dict(size=10, color='#666666'), autorange='reversed'),
-        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=100, r=100, t=60, b=60), height=400
     )
     return fig
 
