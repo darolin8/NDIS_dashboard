@@ -4,8 +4,6 @@ warnings.filterwarnings('ignore')
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
-
 from dashboard_pages import PAGE_TO_RENDERER
 
 # =========================
@@ -13,7 +11,7 @@ from dashboard_pages import PAGE_TO_RENDERER
 # =========================
 
 @st.cache_data
-def create_sample_data(n=500):
+def create_sample_data(n=100):
     rng = np.random.default_rng(42)
     sample = {
         'incident_id': [f'INC-2024-{i:04d}' for i in range(1, n+1)],
@@ -41,7 +39,7 @@ def create_sample_data(n=500):
         'medical_outcome': rng.choice(['No treatment required','Treated and released','Ongoing monitoring'], n, p=[0.7,0.25,0.05])
     }
     df = pd.DataFrame(sample)
-    # Parse and enrich
+    # Parse & enrich
     df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
     df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
     df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
@@ -54,6 +52,7 @@ def create_sample_data(n=500):
 
 @st.cache_data
 def load_incident_data():
+    import os
     paths = [
         'text data/ndis_incidents_synthetic.csv',
         'ndis_incidents_synthetic.csv',
@@ -74,7 +73,7 @@ def load_incident_data():
     if df is None:
         st.sidebar.error("CSV not found. Using generated sample data.")
         df = create_sample_data()
-    # Parse and enrich
+    # Parse & enrich
     df['incident_date'] = pd.to_datetime(df['incident_date'], format='%d/%m/%Y', errors='coerce')
     df['notification_date'] = pd.to_datetime(df['notification_date'], format='%d/%m/%Y', errors='coerce')
     df['dob'] = pd.to_datetime(df['dob'], format='%d/%m/%Y', errors='coerce')
@@ -86,73 +85,7 @@ def load_incident_data():
     return df
 
 # =========================
-# Load Data
-# =========================
-
-df = load_incident_data()
-
-# =========================
-# Sidebar and Filters
-# =========================
-
-st.sidebar.title("🏥 NDIS Dashboard")
-st.sidebar.markdown("---")
-
-pages = [
-    "Executive Summary",
-    "Operational Performance",
-    "Compliance & Investigation",
-    "🤖 Machine Learning Analytics",
-    "Risk Analysis"
-]
-
-page = st.sidebar.selectbox(
-    "Dashboard Pages",
-    pages,
-    index=0
-)
-
-st.sidebar.markdown("### Filters")
-
-min_date = df['incident_date'].min()
-max_date = df['incident_date'].max()
-date_range = st.sidebar.date_input(
-    "Date Range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
-)
-
-locations = ['All'] + sorted(df['location'].dropna().unique().tolist())
-selected_location = st.sidebar.selectbox("Location", locations)
-
-severities = st.sidebar.multiselect(
-    "Severity",
-    df['severity'].dropna().unique().tolist(),
-    default=df['severity'].dropna().unique().tolist()
-)
-
-incident_types = st.sidebar.multiselect(
-    "Incident Type",
-    df['incident_type'].dropna().unique().tolist(),
-    default=df['incident_type'].dropna().unique().tolist()
-)
-
-filtered_df = df.copy()
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    filtered_df = filtered_df[
-        (filtered_df['incident_date'] >= pd.Timestamp(date_range[0])) &
-        (filtered_df['incident_date'] <= pd.Timestamp(date_range[1]))
-    ]
-if selected_location != 'All':
-    filtered_df = filtered_df[filtered_df['location'] == selected_location]
-if severities:
-    filtered_df = filtered_df[filtered_df['severity'].isin(severities)]
-if incident_types:
-    filtered_df = filtered_df[filtered_df['incident_type'].isin(incident_types)]
-
-# =========================
-# ML Helper Functions
+# ML Helper Functions (for ML Analytics tab)
 # =========================
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -284,6 +217,72 @@ def time_series_forecast(df: pd.DataFrame, periods=30):
     return daily, fc_df
 
 # =========================
+# Load Data
+# =========================
+
+df = load_incident_data()
+
+# =========================
+# Sidebar and Filters
+# =========================
+
+st.sidebar.title("🏥 NDIS Dashboard")
+st.sidebar.markdown("---")
+
+pages = [
+    "Executive Summary",
+    "Operational Performance",
+    "Compliance & Investigation",
+    "🤖 Machine Learning Analytics",
+    "Risk Analysis"
+]
+
+page = st.sidebar.selectbox(
+    "Dashboard Pages",
+    pages,
+    index=0
+)
+
+st.sidebar.markdown("### Filters")
+
+min_date = df['incident_date'].min()
+max_date = df['incident_date'].max()
+date_range = st.sidebar.date_input(
+    "Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+locations = ['All'] + sorted(df['location'].dropna().unique().tolist())
+selected_location = st.sidebar.selectbox("Location", locations)
+
+severities = st.sidebar.multiselect(
+    "Severity",
+    df['severity'].dropna().unique().tolist(),
+    default=df['severity'].dropna().unique().tolist()
+)
+
+incident_types = st.sidebar.multiselect(
+    "Incident Type",
+    df['incident_type'].dropna().unique().tolist(),
+    default=df['incident_type'].dropna().unique().tolist()
+)
+
+filtered_df = df.copy()
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    filtered_df = filtered_df[
+        (filtered_df['incident_date'] >= pd.Timestamp(date_range[0])) &
+        (filtered_df['incident_date'] <= pd.Timestamp(date_range[1]))
+    ]
+if selected_location != 'All':
+    filtered_df = filtered_df[filtered_df['location'] == selected_location]
+if severities:
+    filtered_df = filtered_df[filtered_df['severity'].isin(severities)]
+if incident_types:
+    filtered_df = filtered_df[filtered_df['incident_type'].isin(incident_types)]
+
+# =========================
 # Page Renderer Dispatch
 # =========================
 
@@ -293,7 +292,6 @@ if renderer is None:
 else:
     if page == "🤖 Machine Learning Analytics":
         renderer(
-            df,
             filtered_df,
             train_severity_prediction_model=train_severity_prediction_model,
             prepare_ml_features=prepare_ml_features,
@@ -304,7 +302,7 @@ else:
             STATSMODELS_AVAILABLE=STATSMODELS_AVAILABLE
         )
     else:
-        renderer(df, filtered_df)
+        renderer(filtered_df)
 
 # =========================
 # Footer & Quick Actions
