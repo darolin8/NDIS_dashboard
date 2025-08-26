@@ -459,6 +459,9 @@ def render_compliance_investigation(filtered_df: pd.DataFrame):
             plotly_chart_safe(fig, name="loc_compliance", namespace=ns)
 
 # ---------- Machine Learning Analytics ----------
+# ... (keep all your code above unchanged)
+
+# ---------- Machine Learning Analytics ----------
 def render_ml_analytics(
     filtered_df: pd.DataFrame,
     train_severity_prediction_model,
@@ -607,8 +610,7 @@ def render_ml_analytics(
 
     with tab5:
         st.subheader("🎯 Advanced Clustering")
-        st.info("Plug your clustering charts here, wrapped with plotly_chart_safe for uniqueness.")
-        # Example: Basic KMeans clustering for demonstration
+        # KMeans clustering demo using numeric ML features
         try:
             from sklearn.cluster import KMeans
             X, feats, _ = prepare_ml_features(filtered_df)
@@ -630,6 +632,7 @@ def render_ml_analytics(
         except Exception as e:
             st.warning(f"Clustering not available: {e}")
 
+# ... (rest of your code below, unchanged)
 # ---------- Risk Analysis ----------
 def render_risk_analysis(filtered_df: pd.DataFrame):
     ns = "Risk Analysis"
