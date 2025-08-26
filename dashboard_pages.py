@@ -77,38 +77,25 @@ def apply_5_step_story(
 ) -> go.Figure:
     fig = deepcopy(fig)
     for tr in fig.data:
-        if hasattr(tr, "marker"):
+        ttype = getattr(tr, 'type', None)
+        if ttype == "pie":
+            n = 0
+            try:
+                n = len(getattr(tr, "labels", []) or [])
+            except Exception:
+                pass
+            if not n:
+                try:
+                    n = len(getattr(tr, "values", []) or [])
+                except Exception:
+                    n = 1
+            tr.update(marker=dict(
+                colors=[STORY_COLORS['context']] * n
+            ))
+        elif hasattr(tr, "marker"):
             tr.update(marker=dict(color=STORY_COLORS['context']))
         if hasattr(tr, "line"):
             tr.update(line=dict(color=STORY_COLORS['axisline'], width=max(getattr(tr.line, "width", 1), 1)))
-    if emphasis_trace_idxs:
-        for idx in emphasis_trace_idxs:
-            if 0 <= idx < len(fig.data):
-                tr = fig.data[idx]
-                if hasattr(tr, "marker"):
-                    tr.update(marker=dict(color=STORY_COLORS['emphasis']))
-                if hasattr(tr, "line"):
-                    tr.update(line=dict(color=STORY_COLORS['emphasis'], width=3))
-                fig.data += (fig.data.pop(idx),)
-    fig.update_layout(
-        showlegend=show_legend,
-        plot_bgcolor=STORY_COLORS['background'],
-        paper_bgcolor=STORY_COLORS['background'],
-        margin=dict(l=60, r=60, t=80, b=40),
-        font=dict(family='Arial', size=11, color=STORY_COLORS['text']),
-    )
-    fig.update_xaxes(showline=False, zeroline=False, showgrid=False,
-                     tickfont=dict(color=STORY_COLORS['text']),
-                     tickformat=f",.{max(decimals,0)}f" if decimals is not None else None)
-    fig.update_yaxes(showline=False, zeroline=False, showgrid=True,
-                     gridcolor=STORY_COLORS['grid'], gridwidth=0.5,
-                     tickfont=dict(color=STORY_COLORS['text']),
-                     tickformat=f",.{max(decimals,0)}f" if decimals is not None else None)
-    if title_text:
-        title_html = f"<b>{title_text}</b>"
-        if subtitle_text:
-            title_html += f"<br><sup style='color:{STORY_COLORS['text']}'>{subtitle_text}</sup>"
-        fig.update_layout(title={'text': title_html, 'x': 0, 'xanchor': 'left', 'font': {'size': 16, 'color': '#333333'}})
     return fig
 
 # =========================
