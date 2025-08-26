@@ -562,6 +562,41 @@ def render_ml_analytics(
             use_container_width=True
         )
 
+def render_executive_summary(filtered_df):
+    st.header("Executive Summary")
+    st.write("This page provides a summary of key metrics.")
+    st.write(filtered_df.head())
+
+def render_operational_performance(filtered_df):
+    st.header("Operational Performance")
+    st.write("This page shows operational performance KPIs.")
+    st.write(filtered_df.head())
+
+def render_compliance_investigation(filtered_df):
+    st.header("Compliance & Investigation")
+    st.write("This page displays compliance and investigation data.")
+    st.write(filtered_df.head())
+
+def render_ml_analytics(
+    filtered_df, 
+    feature_importances=None, 
+    preds=None, 
+    anomaly_scores=None, 
+    association_rules=None, 
+    forecast=None,
+    clustering_cols=None
+):
+    st.header("Machine Learning Analytics")
+    st.write("This page provides advanced ML analytics.")
+    st.write(filtered_df.head())
+    # You can add charts and logic here as per your previous code
+
+def render_risk_analysis(filtered_df):
+    st.header("Risk Analysis")
+    st.write("This page presents risk analytics.")
+    st.write(filtered_df.head())
+
+
 PAGE_TO_RENDERER = {
     "Executive Summary": render_executive_summary,
     "Operational Performance": render_operational_performance,
