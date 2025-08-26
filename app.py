@@ -1,9 +1,6 @@
 import warnings
 warnings.filterwarnings('ignore')
 
-import warnings
-warnings.filterwarnings('ignore')
-
 import streamlit as st
 import pandas as pd
 import numpy as np
