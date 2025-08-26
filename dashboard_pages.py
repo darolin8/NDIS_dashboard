@@ -169,11 +169,17 @@ def render_executive_summary(filtered_df: pd.DataFrame):
         st.subheader("📊 Incident Types Distribution")
         if not filtered_df.empty:
             vc = filtered_df['incident_type'].value_counts()
-            fig = px.pie(values=vc.values, names=vc.index)
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(height=420)
+            # CHANGED: Use a bar chart instead of pie
+            fig = go.Figure(go.Bar(
+                x=vc.index,
+                y=vc.values,
+                marker_color=[NDIS_COLORS['primary']] + [NDIS_COLORS['secondary'], NDIS_COLORS['accent'],
+                                                         NDIS_COLORS['critical'], '#67A3C3', '#8B9DC3'][:len(vc)-1],
+                text=vc.values,
+                textposition='auto'
+            ))
             fig = apply_5_step_story(fig, title_text=f"Top incident type: {vc.index[0]} ({vc.iloc[0]})")
-            plotly_chart_safe(fig, name="type_pie", namespace=ns)
+            plotly_chart_safe(fig, name="type_bar", namespace=ns)
     with colD:
         st.subheader("🎯 Location Risk Analysis")
         if not filtered_df.empty:
