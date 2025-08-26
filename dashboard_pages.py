@@ -1,50 +1,22 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
 import hashlib
 from copy import deepcopy
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import streamlit as st
 
 # =========================
-# Palettes
+# Storytelling Colors & Chart Function
 # =========================
-NDIS_COLORS = {
-    'primary':   '#003F5C',
-    'secondary': '#2F9E7D',
-    'accent':    '#F59C2F',
-    'critical':  '#DC2626',
-    'high':      '#F59C2F',
-    'medium':    '#2F9E7D',
-    'low':       '#67A3C3',
-    'success':   '#2F9E7D',
-    'warning':   '#F59C2F',
-    'error':     '#DC2626',
-}
-
 STORY_COLORS = {
-    'emphasis':   '#1F77B4',   # Blue for main point
-    'positive':   '#2F9E7D',
-    'negative':   '#DC2626',
-    'warning':    '#F59C2F',
-    'context':    '#D3D3D3',
-    'text':       '#666666',
+    'context': '#D3D3D3',     # light grey for de-emphasis
+    'emphasis': '#1F77B4',    # blue for focus
+    'negative': '#DC2626',    # red for negative emphasis
+    'grid': '#F3F3F3',
+    'axisline': '#CCCCCC',
     'background': '#FFFFFF',
-    'grid':       '#F0F0F0',
-    'axisline':   '#E0E0E0',
+    'text': '#333333'
 }
 
-severity_colors = {
-    'Critical': NDIS_COLORS['critical'],
-    'High':     NDIS_COLORS['high'],
-    'Medium':   NDIS_COLORS['medium'],
-    'Low':      NDIS_COLORS['low'],
-}
-
-# =========================
-# Streamlit-safe chart utils (prevents StreamlitDuplicateElementId)
-# =========================
 _KEY_REGISTRY = "_chart_key_registry"
 
 def fig_copy(fig: go.Figure) -> go.Figure:
@@ -70,7 +42,6 @@ def unique_chart_key(name: str, namespace: str = "main", idx: int | None = None)
 def plotly_chart_safe(fig, *, name: str, namespace: str, idx: int | None = None, **kwargs):
     st.plotly_chart(fig_copy(fig), key=unique_chart_key(name, namespace, idx), use_container_width=True, **kwargs)
 
-# 
 def _numeric_width(w):
     """Return a safe, positive numeric width from None / scalar / list-like."""
     import numpy as _np
@@ -203,6 +174,79 @@ def apply_5_step_story(
 
     return fig
 
+# =========================
+# Storytelling Chart Builder
+# =========================
+def create_storytelling_chart(data, chart_type="bar", emphasis_category=None, title_text="", subtitle_text=None):
+    """
+    Create a bar or line chart that follows Storytelling with Data principles:
+    - Everything grey except one highlighted category
+    - No pie charts (convert to bar)
+    - Direct labeling preferred over legends
+    """
+    if chart_type == "pie":
+        # Convert pies to bars!
+        return create_storytelling_chart(data, chart_type="bar", emphasis_category=emphasis_category, title_text=title_text, subtitle_text=subtitle_text)
+
+    if chart_type == "bar":
+        colors = [STORY_COLORS['context']] * len(data)
+        emphasis_idx = None
+        if emphasis_category and emphasis_category in data.index:
+            emphasis_idx = data.index.get_loc(emphasis_category)
+            colors[emphasis_idx] = STORY_COLORS['emphasis']
+        fig = go.Figure(go.Bar(
+            x=data.index,
+            y=data.values,
+            marker_color=colors,
+            text=data.values,
+            textposition='auto'
+        ))
+        if emphasis_idx is not None:
+            fig = apply_5_step_story(fig, emphasis_trace_idxs=[0], title_text=title_text, subtitle_text=subtitle_text)
+        else:
+            fig = apply_5_step_story(fig, title_text=title_text, subtitle_text=subtitle_text)
+
+    elif chart_type == "line":
+        fig = go.Figure()
+        emphasis_idx = None
+        for i, col in enumerate(data.columns):
+            color = STORY_COLORS['emphasis'] if col == emphasis_category else STORY_COLORS['context']
+            width = 3 if col == emphasis_category else 1
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data[col],
+                mode='lines+markers',
+                line=dict(color=color, width=width),
+                name=col,
+                text=data[col] if col == emphasis_category else None,
+                textposition='top center'
+            ))
+            if col == emphasis_category:
+                emphasis_idx = i
+        if emphasis_idx is not None:
+            fig = apply_5_step_story(fig, emphasis_trace_idxs=[emphasis_idx], title_text=title_text, subtitle_text=subtitle_text)
+        else:
+            fig = apply_5_step_story(fig, title_text=title_text, subtitle_text=subtitle_text)
+
+    return fig
+
+# =========================
+# Example Usage in a Dashboard Page
+# =========================
+
+def render_executive_summary(filtered_df):
+    st.header("Executive Summary")
+    # Example: Emphasize top incident type
+    vc = filtered_df['incident_type'].value_counts()
+    top_type = vc.index[0] if not vc.empty else None
+    fig = create_storytelling_chart(
+        vc,
+        chart_type="bar",
+        emphasis_category=top_type,
+        title_text="Most incidents are of type: " + (top_type if top_type else ""),
+        subtitle_text="Emphasis on the most frequent incident type"
+    )
+    plotly_chart_safe(fig, name="incident_type_story_bar", namespace="executive_summary")
 
 # =========================
 # Shared calcs
