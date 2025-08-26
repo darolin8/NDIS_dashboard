@@ -144,7 +144,6 @@ def compute_common_metrics(filtered_df: pd.DataFrame):
 # Pages
 # =========================
 
-# ---------- Executive Summary ----------
 def render_executive_summary(filtered_df: pd.DataFrame):
     ns = "Executive Summary"
     st.title("📊 NDIS Executive Dashboard")
@@ -230,4 +229,19 @@ def render_executive_summary(filtered_df: pd.DataFrame):
             fig = apply_5_step_story(fig, title_text="Location risk assessment (critical % vs total)")
             plotly_chart_safe(fig, name="loc_risk", namespace=ns)
 
-# ...rest of your file unchanged...
+# Placeholder stubs for other pages—replace with your actual functions!
+def render_operational_performance(filtered_df: pd.DataFrame):
+    st.write("Operational Performance dashboard goes here.")
+
+def render_compliance_investigation(filtered_df: pd.DataFrame):
+    st.write("Compliance & Investigation dashboard goes here.")
+
+def render_ml_analytics(filtered_df: pd.DataFrame, **kwargs):
+    st.write("ML Analytics dashboard goes here.")
+
+PAGE_TO_RENDERER = {
+    "Executive Summary": render_executive_summary,
+    "Operational Performance": render_operational_performance,
+    "Compliance & Investigation": render_compliance_investigation,
+    "ML Analytics": render_ml_analytics,
+}
