@@ -293,6 +293,7 @@ if renderer is None:
 else:
     if page == "🤖 Machine Learning Analytics":
         renderer(
+            df,
             filtered_df,
             train_severity_prediction_model=train_severity_prediction_model,
             prepare_ml_features=prepare_ml_features,
@@ -302,10 +303,8 @@ else:
             MLXTEND_AVAILABLE=MLXTEND_AVAILABLE,
             STATSMODELS_AVAILABLE=STATSMODELS_AVAILABLE
         )
-    elif page == "Executive Summary":
-        renderer(df, filtered_df)
     else:
-        renderer(filtered_df)
+        renderer(df, filtered_df)
 
 # =========================
 # Footer & Quick Actions
