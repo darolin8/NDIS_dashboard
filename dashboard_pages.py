@@ -185,9 +185,9 @@ def render_operational_performance(filtered_df):
         st.warning("No data available for the selected filters.")
         return
     if "location" in filtered_df.columns:
-        fig = px.bar(filtered_df["location"].value_counts().reset_index(),
-                     x="index", y="location", labels={"index": "Location", "location": "Count"},
-                     title="Incidents by Location")
+        location_counts = filtered_df["location"].value_counts().reset_index()
+        location_counts.columns = ["Location", "Count"]
+        fig = px.bar(location_counts, x="Location", y="Count", title="Incidents by Location")
         st.plotly_chart(fig, use_container_width=True)
     st.write(filtered_df.head())
 
@@ -208,9 +208,9 @@ def render_risk_analysis(filtered_df):
         return
     if "severity" in filtered_df.columns and "location" in filtered_df.columns:
         crits = filtered_df[filtered_df["severity"] == "Critical"]
-        fig = px.bar(crits["location"].value_counts().reset_index(),
-                     x="index", y="location", labels={"index": "Location", "location": "Critical Count"},
-                     title="Critical Incidents by Location")
+        location_counts = crits["location"].value_counts().reset_index()
+        location_counts.columns = ["Location", "Critical Count"]
+        fig = px.bar(location_counts, x="Location", y="Critical Count", title="Critical Incidents by Location")
         st.plotly_chart(fig, use_container_width=True)
     st.write(filtered_df.head())
 
