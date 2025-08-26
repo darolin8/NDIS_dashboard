@@ -52,7 +52,6 @@ def create_sample_data(n=100):
 
 @st.cache_data
 def load_incident_data():
-    import os
     paths = [
         'text data/ndis_incidents_synthetic.csv',
         'ndis_incidents_synthetic.csv',
@@ -163,11 +162,8 @@ def perform_anomaly_detection(df: pd.DataFrame):
     Xs = scaler.fit_transform(X)
     iso = IsolationForest(contamination=0.1, random_state=42)
     iso_labels = iso.fit_predict(Xs)
-    svm = OneClassSVM(nu=0.1)
-    svm_labels = svm.fit_predict(Xs)
     out = df.copy()
     out['isolation_forest_anomaly'] = iso_labels == -1
-    out['svm_anomaly'] = svm_labels == -1
     out['anomaly_score'] = iso.decision_function(Xs)
     return out, feature_names
 
@@ -292,19 +288,17 @@ if renderer is None:
 else:
     if page == "🤖 Machine Learning Analytics":
         # --- Prepare ML results for the dashboard ---
-        # 1. Train severity prediction model
         model, acc, feature_names = train_severity_prediction_model(filtered_df)
-        feature_importances = pd.Series(model.feature_importances_, index=feature_names) if model else None
+        feature_importances = pd.Series(model.feature_importances_, index=feature_names) if model is not None else None
         X, _, _ = prepare_ml_features(filtered_df)
         preds = model.predict(X) if model is not None and X is not None else None
 
-        # 2. Anomaly detection
         anomaly_df, _ = perform_anomaly_detection(filtered_df)
         anomaly_scores = anomaly_df['anomaly_score'] if anomaly_df is not None else None
         if anomaly_df is not None and 'isolation_forest_anomaly' in anomaly_df:
+            filtered_df = filtered_df.copy()
             filtered_df['is_anomaly'] = anomaly_df['isolation_forest_anomaly']
 
-        # 3. Association rules
         association_rules_result = None
         rules = find_association_rules(filtered_df)[1] if MLXTEND_AVAILABLE else None
         if rules is not None and not rules.empty:
@@ -314,7 +308,6 @@ else:
                 'labels': rules['consequents'].astype(str).tolist()
             }
 
-        # 4. Forecast
         forecast_data = time_series_forecast(filtered_df)[1] if STATSMODELS_AVAILABLE else None
         forecast_dict = None
         if forecast_data is not None:
@@ -324,7 +317,6 @@ else:
                 'predicted': forecast_data['forecast']
             }
 
-        # 5. Clustering columns
         clustering_cols = ['age_at_incident', 'reporting_delay_hours']
 
         renderer(
