@@ -304,6 +304,11 @@ else:
     else:
         renderer(filtered_df)
 
+if selected_page == "ML Analytics":
+    render_ml_analytics(filtered_df, ...)
+elif selected_page == "Overview":
+    render_overview(filtered_df, ...)
+
 # =========================
 # Footer & Quick Actions
 # =========================
