@@ -281,7 +281,7 @@ def time_series_forecast(df: pd.DataFrame, periods=30):
     fc = fitted.forecast(periods)
     fc_dates = pd.date_range(daily.index.max() + pd.Timedelta(days=1), periods=periods, freq='D')
     fc_df = pd.DataFrame({'date': fc_dates, 'forecast': fc})
-    return daily.to_frame(), fc_df
+    return daily, fc_df
 
 # =========================
 # Page Renderer Dispatch
