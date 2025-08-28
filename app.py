@@ -7,6 +7,7 @@ import numpy as np
 import os
 
 from dashboard_pages import PAGE_TO_RENDERER
+from geo_utils import add_lat_lon  # <-- Add this import
 
 # =========================
 # Data Loading Functions
@@ -16,29 +17,69 @@ from dashboard_pages import PAGE_TO_RENDERER
 def create_sample_data(n=500):
     rng = np.random.default_rng(42)
     sample = {
-        'incident_id': [f'INC-2024-{i:04d}' for i in range(1, n+1)],
+        'incident_id': np.arange(1, n+1),
+        'participant_id': rng.integers(1, 700, n),
         'participant_name': [f'Participant {i}' for i in range(1, n+1)],
-        'ndis_number': rng.integers(400000000, 500000000, n),
-        'dob': pd.date_range('1950-01-01', '2010-12-31', periods=n).strftime('%d/%m/%Y'),
-        'incident_date': pd.date_range('2023-01-01', '2024-12-31', periods=n).strftime('%d/%m/%Y'),
-        'incident_time': [f'{rng.integers(0,24):02d}:{rng.integers(0,60):02d}' for _ in range(n)],
-        'notification_date': pd.date_range('2023-01-02', '2025-01-31', periods=n).strftime('%d/%m/%Y'),
-        'location': rng.choice(['Group Home','Transport Vehicle','Day Program','Community Access','Therapy Clinic'], n),
-        'incident_type': rng.choice(['Injury','Missing Person','Death','Restrictive Practices','Transport Incident','Medication Error'], n),
-        'subcategory': rng.choice(['Fall','Unexplained absence','Natural causes','Unauthorised','Vehicle crash','Wrong dose'], n),
-        'severity': rng.choice(['Critical','High','Medium','Low'], n, p=[0.1,0.2,0.4,0.3]),
-        'reportable': rng.choice(['Yes','No'], n, p=[0.7,0.3]),
+        'ndis_number': rng.integers(100000000, 999999999, n),
+        'dob': pd.to_datetime(
+            rng.integers(
+                pd.Timestamp('1940-01-01').value // 10**9,
+                pd.Timestamp('2018-12-31').value // 10**9, n
+            ), unit='s'
+        ).strftime('%d/%m/%Y'),
+        'incident_date': pd.to_datetime(
+            rng.integers(
+                pd.Timestamp('2023-01-01').value // 10**9,
+                pd.Timestamp('2025-08-28').value // 10**9, n
+            ), unit='s'
+        ).strftime('%d/%m/%Y'),
+        'incident_time': [f"{rng.integers(0,24):02d}:{rng.integers(0,60):02d}" for _ in range(n)],
+        'notification_date': pd.to_datetime(
+            rng.integers(
+                pd.Timestamp('2023-01-02').value // 10**9,
+                pd.Timestamp('2025-09-01').value // 10**9, n
+            ), unit='s'
+        ).strftime('%d/%m/%Y'),
+        'location': rng.choice(
+            ['Group Home','Transport Vehicle','Day Program','Community Access','Therapy Clinic'] +
+            [f'Care Home {i}' for i in range(1,6)] +
+            [f"{rng.integers(10,1000)} {street}, {suburb} NSW {rng.integers(2000,2999)}"
+                for street, suburb in zip(
+                    rng.choice(['George St','King St','Pitt St','Oxford St','Bridge Rd','Victoria Rd','Queen St'], n),
+                    rng.choice(['Newtown','Surry Hills','Blacktown','Burwood','Chatswood','Bondi','Parramatta','Manly'], n)
+                )][:5]
+        , n),
+        'incident_type': rng.choice([
+            'Behavioural Incident','Transport Incident','Unethical Staff Behaviour','Infectious Disease Exposure',
+            'Medical Incident (Non-Injury)','Environmental Hazard','Near Miss','Equipment Failure','Verbal Abuse / Argument',
+            'Self-Harm / Suicide','Neglect (Expanded)','Abuse or Neglect','Service Complaint','Death','Restrictive Practices (Unauthorised)',
+            'Serious Injury','Financial Misconduct / Error','Missing Person / Unexplained Absence','Assault (Unlawful Contact)',
+            'Sexual Misconduct'
+        ], n),
+        'subcategory': rng.choice([
+            'Aggression','Vehicle crash','Breach of duty of care','Flu outbreaks','Seizure','Flooding','Medication nearly administered incorrectly',
+            'Hoist malfunction','Threatening language','Cutting','Lack of supervision','Neglect of care','Delays','Palliative cases','Chemical restraint',
+            'Fractures','Theft','No contact during outing','Physical assault (hitting, kicking)','Harassment','Withholding food/water','Unsafe chemicals',
+            'Intimidation','Head injury','Burns','Sudden illness onset','Hostile disagreements','Door not secured','Bed rail collapse','Exposure due to isolation breach',
+            'Participant not returning','Fire alarm','Wounds requiring medical treatment','Hospital-related','Sharing sexual images without consent',
+            'Exhibitionism','Mechanical restraint','Sexual assault','Ongoing monitoring'
+        ], n),
+        'severity': rng.choice(['Minor','Major','Critical'], n, p=[0.7, 0.25, 0.05]),
+        'reportable': rng.choice(['Reportable','Non-Reportable'], n, p=[0.2, 0.8]),
         'description': ['Sample incident description' for _ in range(n)],
-        'immediate_action': ['Immediate action taken' for _ in range(n)],
-        'actions_taken': ['Follow-up actions completed' for _ in range(n)],
-        'contributing_factors': rng.choice(['Staff error','Equipment failure','Environmental factors','Participant behavior','System failure'], n),
+        'immediate_action': ['Safety of the participant was assessed. Action taken.' for _ in range(n)],
+        'actions_taken': ['Incident was documented. Supervisor review.' for _ in range(n)],
+        'contributing_factors': rng.choice([
+            'human factors; environmental factors',
+            'underlying health complexity; rapid clinical deterioration'
+        ], n),
         'reported_by': [f'Staff Member {i} (Support Worker)' for i in range(1, n+1)],
-        'injury_type': rng.choice(['No physical injury','Minor injury','Major injury'], n, p=[0.6,0.3,0.1]),
-        'injury_severity': rng.choice(['None','Mild','Moderate','Severe'], n, p=[0.5,0.3,0.15,0.05]),
-        'treatment_required': rng.choice(['Yes','No'], n, p=[0.3,0.7]),
-        'medical_attention_required': rng.choice(['Yes','No'], n, p=[0.25,0.75]),
-        'medical_treatment_type': rng.choice(['None','First aid','GP visit','Hospital'], n, p=[0.6,0.25,0.1,0.05]),
-        'medical_outcome': rng.choice(['No treatment required','Treated and released','Ongoing monitoring'], n, p=[0.7,0.25,0.05])
+        'injury_type': rng.choice(['','Minor injury','Major injury','No injury','First Aid','Hospital Visit','GP Visit','Specialist Consultation'], n),
+        'injury_severity': rng.choice(['','Mild','Moderate','Severe','Critical'], n, p=[0.5, 0.2, 0.15, 0.1, 0.05]),
+        'treatment_required': rng.choice(['Yes','No'], n, p=[0.25, 0.75]),
+        'medical_attention_required': rng.choice(['Yes','No'], n, p=[0.18, 0.82]),
+        'medical_treatment_type': rng.choice(['','First Aid','GP Visit','Hospital Visit','Specialist Consultation'], n),
+        'medical_outcome': rng.choice(['','Recovered','Stable','Ongoing Care','Fatal'], n)
     }
     df = pd.DataFrame(sample)
     # Parse and enrich
@@ -90,6 +131,7 @@ def load_incident_data():
 # =========================
 
 df = load_incident_data()
+df = add_lat_lon(df)  # <-- Add this line to enrich with lat/lon
 
 # =========================
 # Sidebar and Filters
@@ -207,7 +249,7 @@ def train_severity_prediction_model(df: pd.DataFrame):
     X, feature_names, _ = prepare_ml_features(df)
     if X is None:
         return None, None, None
-    sev_map = {'Low':0,'Medium':1,'High':2,'Critical':3}
+    sev_map = {'Low':0,'Medium':1,'High':2,'Critical':3,'Minor':0,'Major':2}
     y = df['severity'].map(sev_map)
     mask = ~y.isna()
     X, y = X[mask], y[mask]
@@ -250,7 +292,7 @@ def find_association_rules(df: pd.DataFrame):
         if pd.notna(row.get('severity')): t.append(f"severity_{row['severity']}")
         if pd.notna(row.get('contributing_factors')): t.append(f"factor_{row['contributing_factors']}")
         if row.get('medical_attention_required') == 'Yes': t.append('medical_required')
-        if row.get('reportable') == 'Yes': t.append('reportable')
+        if row.get('reportable') == 'Yes' or row.get('reportable') == 'Reportable': t.append('reportable')
         if bool(row.get('same_day_reporting', False)): t.append('same_day_reported')
         if t: transactions.append(t)
     if not transactions:
