@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from dashboard import (
+from dashboard_pages import (
     plot_metric,
     plot_gauge,
     plot_incident_trends,
@@ -18,7 +18,6 @@ from dashboard import (
     plot_monthly_trends,
     plot_medical_outcomes
 )
-
 #######################################
 # PAGE SETUP
 #######################################
