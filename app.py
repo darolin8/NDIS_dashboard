@@ -96,6 +96,7 @@ def create_sample_data(n=500):
 @st.cache_data
 def load_incident_data():
     paths = [
+        'text data/incidents_1000.csv',  # <-- Your actual data file
         'text data/ndis_incidents_synthetic.csv',
         'ndis_incidents_synthetic.csv',
         './ndis_incidents_synthetic.csv',
@@ -125,7 +126,6 @@ def load_incident_data():
     df['incident_month'] = df['incident_date'].dt.month_name()
     df['incident_year'] = df['incident_date'].dt.year
     return df
-
 # =========================
 # Load Data
 # =========================
