@@ -158,16 +158,16 @@ page = st.sidebar.radio("Go to", ["📊 Dashboard", "🤖 ML Analytics"])
 with st.sidebar:
     st.header("Configuration")
     uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'])
-    if uploaded_file is not None and page == "📊 Dashboard":
-        st.subheader("Filters")
+    # Default GitHub CSV URL as fallback
+    GITHUB_CSV_URL = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incidents_1000.csv"
 
-if uploaded_file is None:
-    st.info("📤 Upload a CSV file through the sidebar", icon="ℹ️")
-    st.stop()
+    # If no file is uploaded, show a message but allow fallback
+    if uploaded_file is None:
+        st.info("No file uploaded. Loading default dataset from GitHub.", icon="ℹ️")
 
 @st.cache_data
-def load_data(uploaded_file):
-    df = pd.read_csv(uploaded_file)
+def load_data(file_or_url):
+    df = pd.read_csv(file_or_url)
     df['incident_date'] = pd.to_datetime(df['incident_date'])
     df['notification_date'] = pd.to_datetime(df['notification_date'])
     df['incident_year'] = df['incident_date'].dt.year
@@ -179,7 +179,11 @@ def load_data(uploaded_file):
     df['medical_attention_required'] = df['medical_attention_required'].astype(str).str.lower().isin(['true', '1', 'yes'])
     return df
 
-df = load_data(uploaded_file)
+# Use uploaded file or fallback to GitHub CSV
+if uploaded_file is not None:
+    df = load_data(uploaded_file)
+else:
+    df = load_data(GITHUB_CSV_URL)
 
 if page == "📊 Dashboard":
     with st.sidebar:
