@@ -7,9 +7,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-# NEW: Import mapping for geospatial visualization
-import pydeck as pdk
-
 # =========================
 # Palettes
 # =========================
@@ -73,7 +70,6 @@ def unique_chart_key(name: str, namespace: str = "main", idx: int | None = None)
 def plotly_chart_safe(fig, *, name: str, namespace: str, idx: int | None = None, **kwargs):
     st.plotly_chart(fig_copy(fig), key=unique_chart_key(name, namespace, idx), use_container_width=True, **kwargs)
 
-# 
 def _numeric_width(w):
     """Return a safe, positive numeric width from None / scalar / list-like."""
     import numpy as _np
@@ -217,151 +213,42 @@ def compute_common_metrics(filtered_df: pd.DataFrame):
     return total_incidents, critical_incidents, same_day_rate, reportable_rate
 
 # =========================
-# Pages
+# Pages (STUBS)
 # =========================
 
-# ---------- Executive Summary ----------
 def render_executive_summary(df: pd.DataFrame, filtered_df: pd.DataFrame):
-    ns = "Executive Summary"
-    st.title("📊 NDIS Executive Dashboard")
-    st.markdown("**Strategic Overview - Incident Analysis & Risk Management**")
-    st.markdown(f"*Showing {len(filtered_df)} incidents from {len(df)} total records*")
-    st.markdown("---")
+    st.title("Executive Summary")
+    st.markdown("This is the Executive Summary page. Add key metrics and charts here.")
+    st.dataframe(filtered_df.head())
 
-    # Metrics
-    c1, c2, c3, c4 = st.columns(4)
-    total_incidents, critical_incidents, same_day_rate, reportable_rate = compute_common_metrics(filtered_df)
-    with c1:
-        st.metric("Total Incidents", f"{total_incidents}")
-    with c2:
-        pct = (critical_incidents/total_incidents*100) if total_incidents else 0
-        st.metric("Critical Incidents", f"{critical_incidents}", f"{pct:.1f}% of total")
-    with c3:
-        st.metric("Same-Day Reporting", f"{same_day_rate:.1f}%")
-    with c4:
-        st.metric("Reportable Rate", f"{reportable_rate:.1f}%")
+def render_operational_performance(filtered_df: pd.DataFrame):
+    st.title("Operational Performance")
+    st.markdown("This is the Operational Performance page.")
+    st.dataframe(filtered_df.head())
 
-    # Row: Monthly trends (stacked) + Recent critical list
-    colA, colB = st.columns([2, 1])
+def render_compliance_investigation(filtered_df: pd.DataFrame):
+    st.title("Compliance & Investigation")
+    st.markdown("This is the Compliance & Investigation page.")
+    st.dataframe(filtered_df.head())
 
-    with colA:
-        st.subheader("📈 Incident Trends by Month")
-        if not filtered_df.empty:
-            monthly = filtered_df.groupby(['incident_month', 'severity']).size().unstack(fill_value=0)
+def render_ml_analytics(
+    filtered_df,
+    train_severity_prediction_model=None,
+    prepare_ml_features=None,
+    perform_anomaly_detection=None,
+    find_association_rules=None,
+    time_series_forecast=None,
+    MLXTEND_AVAILABLE=None,
+    STATSMODELS_AVAILABLE=None
+):
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown("This is the ML Analytics page.")
+    st.dataframe(filtered_df.head())
 
-            # Order month names if present
-            order = ['January','February','March','April','May','June','July','August','September','October','November','December']
-            monthly = monthly.reindex([m for m in order if m in monthly.index])
-
-            fig = go.Figure()
-            for sev in monthly.columns:
-                fig.add_trace(go.Bar(
-                    x=monthly.index,
-                    y=monthly[sev],
-                    name=sev,
-                    marker_color=severity_colors.get(sev, NDIS_COLORS['primary'])
-                ))
-            fig.update_layout(barmode='stack', height=420)
-            fig = apply_5_step_story(fig, title_text="Monthly distribution by severity")
-            plotly_chart_safe(fig, name="monthly_by_sev", namespace=ns)
-
-    with colB:
-        st.subheader("🚨 Recent Critical Incidents")
-        crit = filtered_df[filtered_df['severity'] == 'Critical'].sort_values('incident_date', ascending=False).head(5)
-        if crit.empty:
-            st.info("No critical incidents in selected period")
-        else:
-            for _, r in crit.iterrows():
-                date_str = r['incident_date'].strftime('%d/%m/%Y') if pd.notna(r['incident_date']) else 'Unknown'
-                st.markdown(
-                    f"<div style='border-left:4px solid {NDIS_COLORS['critical']};"
-                    "background:#FEF2F2;padding:.6rem .8rem;border-radius:.5rem;margin-bottom:.5rem;'>"
-                    f"<b>🔴 {r['incident_type']}</b><br>"
-                    f"<small>📍 {r['location']} | 📅 {date_str}</small><br>"
-                    f"<small style='color:#6c757d;'>{str(r['description'])[:100]}...</small>"
-                    "</div>", unsafe_allow_html=True
-                )
-
-    # Row: Incident type pie + Location risk scatter
-    colC, colD = st.columns(2)
-    with colC:
-        st.subheader("📊 Incident Types Distribution")
-        if not filtered_df.empty:
-            vc = filtered_df['incident_type'].value_counts()
-            fig = px.pie(values=vc.values, names=vc.index)
-            fig.update_traces(textposition='inside', textinfo='percent+label',
-                              marker=dict(colors=[NDIS_COLORS['primary'], NDIS_COLORS['secondary'],
-                                                  NDIS_COLORS['accent'], NDIS_COLORS['critical'],
-                                                  '#67A3C3', '#8B9DC3']))
-            fig.update_layout(height=420)
-            fig = apply_5_step_story(fig, title_text=f"Top incident type: {vc.index[0]} ({vc.iloc[0]})")
-            plotly_chart_safe(fig, name="type_pie", namespace=ns)
-
-    with colD:
-        st.subheader("🎯 Location Risk Analysis")
-        if not filtered_df.empty:
-            loc = filtered_df.groupby('location').agg(
-                total=('incident_id','count'),
-                critical=('severity', lambda x: (x=='Critical').sum())
-            ).reset_index()
-            loc['critical_pct'] = np.where(loc['total']>0, loc['critical']/loc['total']*100, 0)
-            fig = px.scatter(loc, x='total', y='critical_pct', size='critical', color='critical_pct',
-                             hover_name='location',
-                             color_continuous_scale=[[0, NDIS_COLORS['success']],
-                                                     [0.5, NDIS_COLORS['accent']],
-                                                     [1, NDIS_COLORS['critical']]])
-            fig.update_layout(height=420)
-            fig = apply_5_step_story(fig, title_text="Location risk assessment (critical % vs total)")
-            plotly_chart_safe(fig, name="loc_risk", namespace=ns)
-
-    # NEW: Map visualization for incident locations (if lat/lon present)
-    if 'lat' in filtered_df.columns and 'lon' in filtered_df.columns:
-        st.subheader("🗺️ Incident Location Map")
-        map_df = filtered_df[['lat','lon','location','incident_type','severity']].dropna(subset=['lat','lon'])
-        if not map_df.empty:
-            st.map(map_df, latitude='lat', longitude='lon', size=None, color=None)
-            # Optionally, for more advanced mapping:
-            # st.pydeck_chart(
-            #     pdk.Deck(
-            #         initial_view_state=pdk.ViewState(
-            #             latitude=map_df['lat'].mean(),
-            #             longitude=map_df['lon'].mean(),
-            #             zoom=10
-            #         ),
-            #         layers=[
-            #             pdk.Layer(
-            #                 "ScatterplotLayer",
-            #                 data=map_df,
-            #                 get_position='[lon, lat]',
-            #                 get_color='[200, 30, 0, 160]',
-            #                 get_radius=100,
-            #             ),
-            #         ],
-            #     )
-            # )
-
-    # Contributing factors + Medical attention by type
-    st.subheader("⚠️ Contributing Factors Analysis")
-    colE, colF = st.columns(2)
-    with colE:
-        if 'contributing_factors' in filtered_df.columns and not filtered_df.empty:
-            factors = filtered_df['contributing_factors'].value_counts().head(10)
-            fig = px.bar(x=factors.values, y=factors.index, orientation='h')
-            fig.update_layout(height=420)
-            fig = apply_5_step_story(fig, title_text="Top 10 contributing factors")
-            plotly_chart_safe(fig, name="factors_bar", namespace=ns)
-
-    with colF:
-        if not filtered_df.empty:
-            med = filtered_df.groupby('incident_type')['medical_attention_required'].apply(
-                lambda s: (s=='Yes').mean()*100
-            ).sort_values(ascending=False)
-            fig = px.bar(x=med.index, y=med.values)
-            fig.update_layout(height=420)
-            fig = apply_5_step_story(fig, title_text="Medical attention required by incident type (%)")
-            plotly_chart_safe(fig, name="med_by_type", namespace=ns)
-
-# ... rest of the code remains unchanged (Operational Performance, Compliance, ML, Risk Analysis, router, etc.) ...
+def render_risk_analysis(filtered_df):
+    st.title("Risk Analysis")
+    st.markdown("This is the Risk Analysis page.")
+    st.dataframe(filtered_df.head())
 
 PAGE_TO_RENDERER = {
     "Executive Summary": render_executive_summary,
