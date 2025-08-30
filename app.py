@@ -96,7 +96,7 @@ def create_sample_data(n=500):
 @st.cache_data
 def load_incident_data():
     paths = [
-        'text data/incidents_1000.csv',  # <-- Your actual data file
+        'text data/incidents_1000.csv',  # Your actual file first!
         'text data/ndis_incidents_synthetic.csv',
         'ndis_incidents_synthetic.csv',
         './ndis_incidents_synthetic.csv',
@@ -111,7 +111,8 @@ def load_incident_data():
             df = pd.read_csv(p)
             st.sidebar.success(f"✅ Data loaded from: {p}")
             break
-        except Exception:
+        except Exception as e:
+            st.sidebar.write(f"DEBUG: Could not load {p}: {e}")
             continue
     if df is None:
         st.sidebar.error("CSV not found. Using generated sample data.")
@@ -126,12 +127,13 @@ def load_incident_data():
     df['incident_month'] = df['incident_date'].dt.month_name()
     df['incident_year'] = df['incident_date'].dt.year
     return df
+
 # =========================
 # Load Data
 # =========================
 
 df = load_incident_data()
-df = add_lat_lon(df)  # <-- Add this line to enrich with lat/lon
+df = add_lat_lon(df)
 
 # =========================
 # Sidebar and Filters
@@ -158,6 +160,14 @@ st.sidebar.markdown("### Filters")
 
 min_date = df['incident_date'].min()
 max_date = df['incident_date'].max()
+# Debugging: Show min and max date
+st.sidebar.write(f"DEBUG: min_date = {min_date}, max_date = {max_date}")
+
+if pd.isnull(min_date) or pd.isnull(max_date):
+    min_date = pd.Timestamp("2023-01-01")
+    max_date = pd.Timestamp("2025-12-31")
+    st.sidebar.warning(f"Date columns invalid or empty, using defaults: {min_date} to {max_date}")
+
 date_range = st.sidebar.date_input(
     "Date Range",
     value=(min_date, max_date),
