@@ -1,129 +1,34 @@
-"""
-Incident Management Dashboard
-Run with `streamlit run app.py`
-"""
-
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, silhouette_score
+from sklearn.svm import OneClassSVM
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.decomposition import PCA
+
+# --------------- Dashboard Plotting Functions ----------------
 from dashboard_pages import (
     plot_metric,
     plot_gauge,
-    plot_incident_trends,
     plot_severity_distribution,
-    plot_location_analysis,
     plot_incident_types_bar,
+    plot_location_analysis,
     plot_monthly_trends,
-    plot_medical_outcomes
-)
-#######################################
-# PAGE SETUP
-#######################################
-
-st.set_page_config(
-    page_title="Incident Management Dashboard", 
-    page_icon="🚨", 
-    layout="wide"
+    plot_medical_outcomes,
+    plot_incident_trends,
+    plot_weekday_analysis,
+    plot_time_analysis,
+    plot_reportable_analysis,
 )
 
-st.title("🚨 Incident Management Dashboard")
-st.markdown("_Real-time incident tracking and analysis_")
-
-with st.sidebar:
-    st.header("Configuration")
-    uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'])
-    
-    # Date range filter
-    st.subheader("Filters")
-
-#######################################
-# DATA LOADING
-#######################################
-
-RAW_CSV_URL = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incidents_1000.csv"
-
-@st.cache_data
-def load_data(uploaded_file):
-    """Load and preprocess incident data"""
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_csv(RAW_CSV_URL)
-    
-    # Convert date columns
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-    
-    # Extract additional date features
-    df['incident_year'] = df['incident_date'].dt.year
-    df['incident_month'] = df['incident_date'].dt.month
-    df['incident_month_name'] = df['incident_date'].dt.strftime('%B')
-    df['incident_weekday'] = df['incident_date'].dt.day_name()
-    
-    # Clean boolean columns
-    for col in ['reportable', 'treatment_required', 'medical_attention_required']:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.lower().isin(['true', '1', 'yes'])
-        else:
-            df[col] = False
-    
-    return df
-
-df = load_data(uploaded_file)
-
-if df is None or df.empty or df['incident_date'].isnull().all():
-    st.info("No data available. Please upload a valid CSV.", icon="ℹ️")
-    st.stop()
-
-# Sidebar filters
-with st.sidebar:
-    # Date range
-    min_date = df['incident_date'].min().date()
-    max_date = df['incident_date'].max().date()
-    
-    start_date = st.date_input("Start Date", min_date)
-    end_date = st.date_input("End Date", max_date)
-    
-    # Severity filter
-    severities = ['All'] + sorted([s for s in df['severity'].dropna().unique()])
-    selected_severity = st.selectbox("Severity Level", severities)
-    
-    # Location filter
-    locations = ['All'] + sorted([l for l in df['location'].dropna().unique()])
-    selected_location = st.selectbox("Location", locations)
-    
-    # Incident type filter
-    incident_types = ['All'] + sorted([i for i in df['incident_type'].dropna().unique()])
-    selected_type = st.selectbox("Incident Type", incident_types)
-
-# Apply filters
-filtered_df = df[
-    (df['incident_date'].dt.date >= start_date) & 
-    (df['incident_date'].dt.date <= end_date)
-]
-
-if selected_severity != 'All':
-    filtered_df = filtered_df[filtered_df['severity'] == selected_severity]
-    
-if selected_location != 'All':
-    filtered_df = filtered_df[filtered_df['location'] == selected_location]
-    
-if selected_type != 'All':
-    filtered_df = filtered_df[filtered_df['incident_type'] == selected_type]
-
-with st.expander("📊 Data Preview"):
-    st.dataframe(
-        filtered_df.head(100),
-        column_config={
-            "incident_date": st.column_config.DateColumn("Incident Date"),
-            "notification_date": st.column_config.DateColumn("Notification Date"),
-            "reportable": st.column_config.CheckboxColumn("Reportable"),
-            "treatment_required": st.column_config.CheckboxColumn("Treatment Required"),
-            "medical_attention_required": st.column_config.CheckboxColumn("Medical Attention Required"),
-        },
-    )
+# --------------- ML Helper Functions ----------------
 
 @st.cache_data
 def prepare_ml_features(df: pd.DataFrame):
@@ -239,161 +144,231 @@ def analyze_cluster_characteristics(clustered_df: pd.DataFrame):
         cluster_analysis[cluster_id] = analysis
     return cluster_analysis
 
+# --------------- PAGE SETUP & DATA LOADING ---------------
 
-#######################################
-# METRICS CALCULATIONS
-#######################################
+st.set_page_config(
+    page_title="Incident Management Dashboard", 
+    page_icon="🚨", 
+    layout="wide"
+)
 
-total_incidents = len(filtered_df)
-high_severity_count = len(filtered_df[filtered_df['severity'] == 'High'])
-reportable_count = len(filtered_df[filtered_df['reportable'] == True])
-medical_attention_count = len(filtered_df[filtered_df['medical_attention_required'] == True])
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["📊 Dashboard", "🤖 ML Analytics"])
 
-# Calculate percentages
-high_severity_pct = (high_severity_count / total_incidents * 100) if total_incidents > 0 else 0
-reportable_pct = (reportable_count / total_incidents * 100) if total_incidents > 0 else 0
-medical_pct = (medical_attention_count / total_incidents * 100) if total_incidents > 0 else 0
+with st.sidebar:
+    st.header("Configuration")
+    uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'])
+    if uploaded_file is not None and page == "📊 Dashboard":
+        st.subheader("Filters")
 
-# Recent trends (last 30 days)
-thirty_days_ago = datetime.now() - timedelta(days=30)
-recent_incidents = filtered_df[filtered_df['incident_date'] >= thirty_days_ago]
-recent_count = len(recent_incidents)
+if uploaded_file is None:
+    st.info("📤 Upload a CSV file through the sidebar", icon="ℹ️")
+    st.stop()
 
-#######################################
-# DASHBOARD LAYOUT
-#######################################
+@st.cache_data
+def load_data(uploaded_file):
+    df = pd.read_csv(uploaded_file)
+    df['incident_date'] = pd.to_datetime(df['incident_date'])
+    df['notification_date'] = pd.to_datetime(df['notification_date'])
+    df['incident_year'] = df['incident_date'].dt.year
+    df['incident_month'] = df['incident_date'].dt.month
+    df['incident_month_name'] = df['incident_date'].dt.strftime('%B')
+    df['incident_weekday'] = df['incident_date'].dt.day_name()
+    df['reportable'] = df['reportable'].astype(str).str.lower().isin(['true', '1', 'yes'])
+    df['treatment_required'] = df['treatment_required'].astype(str).str.lower().isin(['true', '1', 'yes'])
+    df['medical_attention_required'] = df['medical_attention_required'].astype(str).str.lower().isin(['true', '1', 'yes'])
+    return df
 
-# Top metrics row
-top_left_column, top_right_column = st.columns((3, 1))
+df = load_data(uploaded_file)
 
-with top_left_column:
-    col1, col2, col3, col4 = st.columns(4)
-    
+if page == "📊 Dashboard":
+    with st.sidebar:
+        min_date = df['incident_date'].min().date()
+        max_date = df['incident_date'].max().date()
+        start_date = st.date_input("Start Date", min_date)
+        end_date = st.date_input("End Date", max_date)
+        severities = ['All'] + list(df['severity'].unique())
+        selected_severity = st.selectbox("Severity Level", severities)
+        locations = ['All'] + list(df['location'].unique())
+        selected_location = st.selectbox("Location", locations)
+        incident_types = ['All'] + list(df['incident_type'].unique())
+        selected_type = st.selectbox("Incident Type", incident_types)
+
+    filtered_df = df[
+        (df['incident_date'].dt.date >= start_date) & 
+        (df['incident_date'].dt.date <= end_date)
+    ]
+    if selected_severity != 'All':
+        filtered_df = filtered_df[filtered_df['severity'] == selected_severity]
+    if selected_location != 'All':
+        filtered_df = filtered_df[filtered_df['location'] == selected_location]
+    if selected_type != 'All':
+        filtered_df = filtered_df[filtered_df['incident_type'] == selected_type]
+else:
+    filtered_df = df
+
+# --------------- DASHBOARD PAGE ---------------
+
+if page == "📊 Dashboard":
+    st.title("🚨 Incident Management Dashboard")
+    st.markdown("_Real-time incident tracking and analysis_")
+    with st.expander("📊 Data Preview"):
+        st.dataframe(
+            filtered_df.head(100),
+            column_config={
+                "incident_date": st.column_config.DateColumn("Incident Date"),
+                "notification_date": st.column_config.DateColumn("Notification Date"),
+                "reportable": st.column_config.CheckboxColumn("Reportable"),
+                "treatment_required": st.column_config.CheckboxColumn("Treatment Required"),
+                "medical_attention_required": st.column_config.CheckboxColumn("Medical Attention Required"),
+            },
+        )
+
+    total_incidents = len(filtered_df)
+    high_severity_count = len(filtered_df[filtered_df['severity'] == 'High'])
+    reportable_count = len(filtered_df[filtered_df['reportable'] == True])
+    medical_attention_count = len(filtered_df[filtered_df['medical_attention_required'] == True])
+    high_severity_pct = (high_severity_count / total_incidents * 100) if total_incidents > 0 else 0
+    reportable_pct = (reportable_count / total_incidents * 100) if total_incidents > 0 else 0
+    medical_pct = (medical_attention_count / total_incidents * 100) if total_incidents > 0 else 0
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    recent_incidents = filtered_df[filtered_df['incident_date'] >= thirty_days_ago]
+    recent_count = len(recent_incidents)
+    # Top metrics row
+    top_left_column, top_right_column = st.columns((3, 1))
+    with top_left_column:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            plot_metric("Total Incidents", total_incidents, show_graph=True, color_graph="rgba(0, 104, 201, 0.2)")
+            plot_gauge(high_severity_pct, "#FF2B2B", "%", "High Severity", 100)
+        with col2:
+            plot_metric("High Severity", high_severity_count, show_graph=True, color_graph="rgba(255, 43, 43, 0.2)")
+            plot_gauge(reportable_pct, "#FF8700", "%", "Reportable", 100)
+        with col3:
+            plot_metric("Reportable Cases", reportable_count, show_graph=False)
+            plot_gauge(medical_pct, "#29B09D", "%", "Medical Attention", 100)
+        with col4:
+            plot_metric("Recent (30 days)", recent_count, show_graph=False)
+            avg_response_hours = 2.4
+            plot_gauge(avg_response_hours, "#0068C9", "hrs", "Avg Response", 24)
+    with top_right_column:
+        plot_severity_distribution(filtered_df)
+    middle_left_column, middle_right_column = st.columns(2)
+    with middle_left_column:
+        plot_incident_types_bar(filtered_df)
+    with middle_right_column:
+        plot_location_analysis(filtered_df)
+    bottom_left_column, bottom_right_column = st.columns(2)
+    with bottom_left_column:
+        plot_monthly_trends(filtered_df)
+    with bottom_right_column:
+        plot_medical_outcomes(filtered_df)
+    st.markdown("---")
+    st.subheader("📈 Key Insights")
+    col1, col2, col3 = st.columns(3)
     with col1:
-        plot_metric(
-            "Total Incidents",
-            total_incidents,
-            prefix="",
-            suffix="",
-            show_graph=True,
-            color_graph="rgba(0, 104, 201, 0.2)",
-        )
-        plot_gauge(high_severity_pct, "#FF2B2B", "%", "High Severity", 100)
-    
-    with col2:
-        plot_metric(
-            "High Severity",
-            high_severity_count,
-            prefix="",
-            suffix="",
-            show_graph=True,
-            color_graph="rgba(255, 43, 43, 0.2)",
-        )
-        plot_gauge(reportable_pct, "#FF8700", "%", "Reportable", 100)
-    
-    with col3:
-        plot_metric(
-            "Reportable Cases",
-            reportable_count,
-            prefix="",
-            suffix="",
-            show_graph=False
-        )
-        plot_gauge(medical_pct, "#29B09D", "%", "Medical Attention", 100)
-    
-    with col4:
-        plot_metric(
-            "Recent (30 days)",
-            recent_count,
-            prefix="",
-            suffix="",
-            show_graph=False
-        )
-        # Average response time gauge (mock data for now)
-        avg_response_hours = 2.4
-        plot_gauge(avg_response_hours, "#0068C9", "hrs", "Avg Response", 24)
-
-with top_right_column:
-    plot_severity_distribution(filtered_df)
-
-# Middle row - charts
-middle_left_column, middle_right_column = st.columns(2)
-
-with middle_left_column:
-    plot_incident_types_bar(filtered_df)
-
-with middle_right_column:
-    plot_location_analysis(filtered_df)
-
-# Bottom row - trends and medical outcomes
-bottom_left_column, bottom_right_column = st.columns(2)
-
-with bottom_left_column:
-    plot_monthly_trends(filtered_df)
-
-with bottom_right_column:
-    plot_medical_outcomes(filtered_df)
-
-#######################################
-# ADDITIONAL INSIGHTS
-#######################################
-
-st.markdown("---")
-st.subheader("📈 Key Insights")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric(
-        label="Most Common Incident Type",
-        value=filtered_df['incident_type'].mode().iloc[0] if len(filtered_df) > 0 else "N/A",
-        delta=f"{len(filtered_df[filtered_df['incident_type'] == filtered_df['incident_type'].mode().iloc[0]])} cases" if len(filtered_df) > 0 else "0 cases"
-    )
-
-with col2:
-    st.metric(
-        label="Highest Risk Location",
-        value=filtered_df['location'].mode().iloc[0] if len(filtered_df) > 0 else "N/A",
-        delta=f"{len(filtered_df[filtered_df['location'] == filtered_df['location'].mode().iloc[0]])} incidents" if len(filtered_df) > 0 else "0 incidents"
-    )
-
-with col3:
-    # Calculate average days between incident and notification
-    if len(filtered_df) > 0:
-        avg_notification_delay = (filtered_df['notification_date'] - filtered_df['incident_date']).dt.days.mean()
         st.metric(
-            label="Avg Notification Delay",
-            value=f"{avg_notification_delay:.1f} days",
-            delta="Target: Same day"
+            label="Most Common Incident Type",
+            value=filtered_df['incident_type'].mode().iloc[0] if len(filtered_df) > 0 else "N/A",
+            delta=f"{len(filtered_df[filtered_df['incident_type'] == filtered_df['incident_type'].mode().iloc[0]])} cases" if len(filtered_df) > 0 else "0 cases"
         )
-    else:
-        st.metric(label="Avg Notification Delay", value="N/A", delta="No data")
+    with col2:
+        st.metric(
+            label="Highest Risk Location",
+            value=filtered_df['location'].mode().iloc[0] if len(filtered_df) > 0 else "N/A",
+            delta=f"{len(filtered_df[filtered_df['location'] == filtered_df['location'].mode().iloc[0]])} incidents" if len(filtered_df) > 0 else "0 incidents"
+        )
+    with col3:
+        if len(filtered_df) > 0:
+            avg_notification_delay = (filtered_df['notification_date'] - filtered_df['incident_date']).dt.days.mean()
+            st.metric(
+                label="Avg Notification Delay",
+                value=f"{avg_notification_delay:.1f} days",
+                delta="Target: Same day"
+            )
+        else:
+            st.metric(label="Avg Notification Delay", value="N/A", delta="No data")
+    st.markdown("---")
+    st.subheader("📤 Export Data")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📊 Generate Summary Report"):
+            summary_stats = {
+                'Total Incidents': total_incidents,
+                'High Severity': high_severity_count,
+                'Reportable Cases': reportable_count,
+                'Medical Attention Required': medical_attention_count,
+                'Date Range': f"{start_date} to {end_date}"
+            }
+            st.json(summary_stats)
+    with col2:
+        csv = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="⬇️ Download Filtered Data",
+            data=csv,
+            file_name=f'filtered_incidents_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+            mime='text/csv'
+        )
 
-#######################################
-# EXPORT FUNCTIONALITY
-#######################################
+# --------------- ML ANALYTICS PAGE ---------------
+if page == "🤖 ML Analytics":
+    st.title("🤖 Machine Learning Analytics")
+    st.markdown("_Predictive insights and anomaly detection_")
+    st.markdown("Select an ML analysis below:")
+
+    tab1, tab2, tab3 = st.tabs(["Severity Prediction", "Anomaly Detection", "Clustering Analysis"])
+
+    with tab1:
+        st.header("Severity Prediction")
+        model, acc, features = train_severity_prediction_model(filtered_df)
+        if model is not None:
+            st.info(f"Model trained with accuracy: {acc*100:.1f}%")
+            # Show feature importances
+            importances = model.feature_importances_
+            feat_df = pd.DataFrame({'Feature': features, 'Importance': importances})
+            feat_df = feat_df.sort_values('Importance', ascending=False)
+            st.bar_chart(feat_df.set_index('Feature'))
+            st.markdown("**Predict Severity on New Data:**")
+            input_dict = {}
+            for f in features:
+                input_dict[f] = st.number_input(f, value=0.0)
+            if st.button("Predict Severity"):
+                arr = np.array([list(input_dict.values())]).reshape(1, -1)
+                pred = model.predict(arr)[0]
+                sev_map_reverse = {0: "Low", 1: "Moderate", 2: "High"}
+                st.success(f"Predicted severity: {sev_map_reverse[pred]}")
+        else:
+            st.warning("Not enough data for model training.")
+
+    with tab2:
+        st.header("Anomaly Detection")
+        adf, features = perform_anomaly_detection(filtered_df)
+        if adf is not None:
+            st.write("Anomalies detected using Isolation Forest and OneClassSVM")
+            st.write(adf[['incident_date', 'incident_type', 'location', 'isolation_forest_anomaly', 'svm_anomaly']].head(20))
+            st.markdown("**Visualize anomaly scores**")
+            fig = px.histogram(adf, x='anomaly_score', nbins=20, title="Anomaly Score Distribution")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Not enough data for anomaly detection.")
+
+    with tab3:
+        st.header("Clustering Analysis")
+        n_clusters = st.slider("Number of clusters", 2, 8, 3)
+        clustered_df, features, sil_score, pca = perform_clustering_analysis(filtered_df, n_clusters=n_clusters)
+        if clustered_df is not None:
+            st.success(f"Clustering done. Silhouette score: {sil_score:.2f}" if sil_score else "Clustering complete.")
+            fig = px.scatter(
+                clustered_df, x="pca_x", y="pca_y", color=clustered_df["cluster"].astype(str),
+                hover_data=["incident_type", "location", "severity"],
+                title="Incident Clusters (PCA 2D projection)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.markdown("**Cluster Characteristics**")
+            cluster_info = analyze_cluster_characteristics(clustered_df)
+            st.write(cluster_info)
+        else:
+            st.warning("Not enough data for clustering.")
 
 st.markdown("---")
-st.subheader("📤 Export Data")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("📊 Generate Summary Report"):
-        summary_stats = {
-            'Total Incidents': total_incidents,
-            'High Severity': high_severity_count,
-            'Reportable Cases': reportable_count,
-            'Medical Attention Required': medical_attention_count,
-            'Date Range': f"{start_date} to {end_date}"
-        }
-        st.json(summary_stats)
-
-with col2:
-    csv = filtered_df.to_csv(index=False)
-    st.download_button(
-        label="⬇️ Download Filtered Data",
-        data=csv,
-        file_name=f'filtered_incidents_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-        mime='text/csv'
-    )
+st.markdown("_Incident Management Dashboard - Powered by Streamlit & Machine Learning_")
