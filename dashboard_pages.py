@@ -4,6 +4,31 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from dashboard_pages import (
+    plot_metric,
+    plot_gauge,
+    plot_severity_distribution,
+    plot_incident_types_bar,
+    plot_location_analysis,
+    plot_monthly_trends,
+    plot_medical_outcomes,
+    apply_investigation_rules,
+    plot_reporter_type_metric,
+    plot_reporter_performance_scatter,
+    plot_incident_heatmap,
+    plot_avg_reporting_day_by_role,
+    plot_medical_attention_vs_total,
+    plot_temporal_patterns,
+    plot_reporting_delay_by_date,
+    plot_24h_compliance_rate_by_location,
+    plot_investigation_pipeline,
+    plot_serious_injury_age_severity,
+    plot_contributing_factors_by_month,
+    plot_compliance_metrics,
+    plot_reporting_delay_by_incident_date,
+    plot_24hr_compliance_by_location,
+)
+
 # ----------------- DASHBOARD PLOTS -------------------
 
 def plot_metric(label, value, show_graph=False, color_graph="rgba(0, 104, 201, 0.2)"):
