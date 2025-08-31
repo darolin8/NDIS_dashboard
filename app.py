@@ -204,4 +204,20 @@ elif page == "ML Insights":
     else:
         st.warning("Not enough data for anomaly detection.")
 
-  
+   # ---------- Clustering ----------
+    st.subheader("Clustering Analysis")
+    clustered, cluster_features, sil_score, pca = perform_clustering_analysis(filtered_df)
+    if clustered is not None and cluster_features is not None:
+        st.write(f"Silhouette Score: {sil_score}")
+        fig = px.scatter(
+            clustered, x="pca_x", y="pca_y", color=clustered['cluster'].astype(str),
+            hover_data=["incident_date", "location", "incident_type", "severity"],
+            title="Incident Clusters (PCA View)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Cluster Characteristics")
+        cluster_info = analyze_cluster_characteristics(clustered)
+        if cluster_info:
+            st.write(pd.DataFrame(cluster_info).T)
+    else:
+        st.warning("Not enough data for clustering.")
