@@ -333,14 +333,17 @@ def plot_compliance_metrics_poly(df):
     inv_required = int(df['investigation_required'].sum()) if 'investigation_required' in df.columns else 0
     inv_rate = inv_required / total * 100 if total > 0 else 0
     action_complete = int(df['action_complete'].sum()) if 'action_complete' in df.columns else 0
-    action_progress = f"{action_complete}/{inv_required}" if inv_required > 0 else "0/0"
     breach_count = overdue_count
+
+    # Fixed: show percent complete and x/y in suffix for "Investigation Status"
+    inv_status_pct = (action_complete / inv_required * 100) if inv_required > 0 else 0
+    inv_status_suffix = f" ({action_complete}/{inv_required})"
 
     plot_metric("Reportable Incidents", reportable_count, color_graph="#5B8FF9")
     plot_metric("24hr Compliance", compliance_24h_count, suffix=f" ({compliance_24h_count/total*100:.1f}%)" if total else "", color_graph="#5AD8A6")
     plot_metric("Overdue Reports", overdue_count, color_graph="#F6BD16")
     plot_metric("Investigation Rate", inv_rate, suffix="%", color_graph="#E86452")
-    plot_metric("Investigation Status", action_progress, color_graph="#6DC8EC")
+    plot_metric("Investigation Status", inv_status_pct, suffix=inv_status_suffix, color_graph="#6DC8EC")
     plot_metric("Compliance Breach", breach_count, color_graph="#FF2B2B")
 
 def plot_reporting_delay_by_date(df):
