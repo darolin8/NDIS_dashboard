@@ -10,7 +10,7 @@ from sklearn.metrics import accuracy_score, silhouette_score
 from sklearn.svm import OneClassSVM
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.decomposition import PCA
-
+import os
 from dashboard_pages import (
     plot_metric,
     plot_gauge,
@@ -34,10 +34,13 @@ from dashboard_pages import (
     plot_contributing_factors_by_month,
 )
 
-# ---- DATA LOADING SECTION ----
 @st.cache_data
 def load_data():
-    df = pd.read_csv("incident_data.csv", parse_dates=["incident_date", "notification_date"])
+    file_path = "text data/ndis_incidents_1000.csv"
+    if not os.path.exists(file_path):
+        st.error(f"File '{file_path}' not found. Please upload or place it in the app directory.")
+        st.stop()
+    df = pd.read_csv(file_path, parse_dates=["incident_date", "notification_date"])
     if "incident_weekday" not in df.columns and "incident_date" in df.columns:
         df["incident_weekday"] = df["incident_date"].dt.day_name()
     return df
@@ -45,7 +48,6 @@ def load_data():
 df = load_data()
 df = apply_investigation_rules(df)
 
-# ---- SIDEBAR FILTERS ----
 st.sidebar.header("Filters")
 if "incident_date" in df.columns:
     min_date, max_date = df["incident_date"].min(), df["incident_date"].max()
@@ -54,7 +56,6 @@ if "incident_date" in df.columns:
 else:
     filtered_df = df.copy()
 
-# ---- PAGE NAVIGATION ----
 page = st.sidebar.radio(
     "Select Dashboard Page",
     [
@@ -64,7 +65,6 @@ page = st.sidebar.radio(
     ],
 )
 
-# ---- EXECUTIVE SUMMARY PAGE ----
 if page == "Executive Summary":
     st.title("Executive Summary")
 
@@ -106,7 +106,6 @@ if page == "Executive Summary":
     st.subheader("Reportable Analysis")
     plot_reportable_analysis(filtered_df)
 
-# ---- PAGE 2: OPERATIONAL PERFORMANCE & RISK ANALYSIS ----
 elif page == "Operational Performance & Risk Analysis":
     st.title("Operational Performance & Risk Analysis")
 
@@ -116,7 +115,6 @@ elif page == "Operational Performance & Risk Analysis":
     st.subheader("Reporter Performance Analysis")
     plot_reporter_performance_scatter(filtered_df)
 
-# ---- PAGE 3: COMPLIANCE & INVESTIGATION ----
 elif page == "Compliance & Investigation":
     st.title("Compliance & Investigation")
 
