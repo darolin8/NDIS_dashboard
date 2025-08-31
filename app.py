@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
-
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
@@ -13,7 +11,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.decomposition import PCA
 
-# --------------- Dashboard Plotting Functions ----------------
+
 from dashboard_pages import (
     plot_metric,
     plot_gauge,
@@ -22,13 +20,26 @@ from dashboard_pages import (
     plot_location_analysis,
     plot_monthly_trends,
     plot_medical_outcomes,
-    plot_incident_trends,
-    plot_weekday_analysis,
-    plot_time_analysis,
-    plot_reportable_analysis,
+    # Operational performance functions:
+    apply_investigation_rules,
+    plot_reporter_type_metric,
+    plot_reporter_performance_scatter,
+    plot_incident_heatmap,
+    plot_avg_reporting_day_by_role,
+    plot_medical_attention_vs_total,
+    plot_temporal_patterns,
+    plot_reporting_delay_by_date,
+    plot_24h_compliance_rate_by_location,
+    plot_investigation_pipeline,
+    plot_serious_injury_age_severity,
+    plot_contributing_factors_by_month,
+    plot_compliance_metrics,
+    plot_reporting_delay_by_incident_date,
+    plot_24hr_compliance_by_location,
+    plot_investigation_pipeline,
+    plot_serious_injury_age_severity,
+    plot_contributing_factors_by_month,
 )
-
-# --------------- ML Helper Functions ----------------
 
 @st.cache_data
 def prepare_ml_features(df: pd.DataFrame):
@@ -153,7 +164,7 @@ st.set_page_config(
 )
 
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["📊 Dashboard", "🤖 ML Analytics"])
+page = st.sidebar.radio("Go to", ["📊 Dashboard", "🤖 ML Analytics", "⚙️ Operational Performance & Risk Analysis"])
 
 with st.sidebar:
     st.header("Configuration")
@@ -177,6 +188,9 @@ def load_data(file_or_url):
     df['reportable'] = df['reportable'].astype(str).str.lower().isin(['true', '1', 'yes'])
     df['treatment_required'] = df['treatment_required'].astype(str).str.lower().isin(['true', '1', 'yes'])
     df['medical_attention_required'] = df['medical_attention_required'].astype(str).str.lower().isin(['true', '1', 'yes'])
+    if 'dob' in df.columns and 'incident_date' in df.columns:
+        # If dob exists, calculate participant_age
+        df['participant_age'] = ((df['incident_date'] - pd.to_datetime(df['dob'])).dt.days / 365.25).round().astype('Int64')
     return df
 
 # Use uploaded file or fallback to GitHub CSV
@@ -185,6 +199,9 @@ if uploaded_file is not None:
 else:
     df = load_data(GITHUB_CSV_URL)
 
+df = apply_investigation_rules(df)  # Apply investigation/action logic globally
+
+# --------------- FILTERING ---------------
 if page == "📊 Dashboard":
     with st.sidebar:
         min_date = df['incident_date'].min().date()
@@ -211,6 +228,8 @@ if page == "📊 Dashboard":
 else:
     filtered_df = df
 
+filtered_df = apply_investigation_rules(filtered_df)
+
 # --------------- DASHBOARD PAGE ---------------
 
 if page == "📊 Dashboard":
@@ -225,11 +244,12 @@ if page == "📊 Dashboard":
                 "reportable": st.column_config.CheckboxColumn("Reportable"),
                 "treatment_required": st.column_config.CheckboxColumn("Treatment Required"),
                 "medical_attention_required": st.column_config.CheckboxColumn("Medical Attention Required"),
+                "participant_age": st.column_config.NumberColumn("Age (years)")
             },
         )
 
     total_incidents = len(filtered_df)
-    high_severity_count = len(filtered_df[filtered_df['severity'] == 'High'])
+    high_severity_count = len(filtered_df[filtered_df['severity'].str.lower() == 'high'])
     reportable_count = len(filtered_df[filtered_df['reportable'] == True])
     medical_attention_count = len(filtered_df[filtered_df['medical_attention_required'] == True])
     high_severity_pct = (high_severity_count / total_incidents * 100) if total_incidents > 0 else 0
@@ -253,8 +273,11 @@ if page == "📊 Dashboard":
             plot_gauge(medical_pct, "#29B09D", "%", "Medical Attention", 100)
         with col4:
             plot_metric("Recent (30 days)", recent_count, show_graph=False)
-            avg_response_hours = 2.4
-            plot_gauge(avg_response_hours, "#0068C9", "hrs", "Avg Response", 24)
+            if len(filtered_df) > 0:
+                avg_response_hours = (filtered_df['notification_date'] - filtered_df['incident_date']).dt.total_seconds().mean()/3600
+                plot_gauge(avg_response_hours, "#0068C9", "hrs", "Avg Response", 24)
+            else:
+                plot_gauge(0, "#0068C9", "hrs", "Avg Response", 24)
     with top_right_column:
         plot_severity_distribution(filtered_df)
     middle_left_column, middle_right_column = st.columns(2)
@@ -373,6 +396,54 @@ if page == "🤖 ML Analytics":
             st.write(cluster_info)
         else:
             st.warning("Not enough data for clustering.")
+
+# --------------- OPERATIONAL PERFORMANCE & RISK ANALYSIS ---------------
+if page == "⚙️ Operational Performance & Risk Analysis":
+    st.title("⚙️ Operational Performance & Risk Analysis")
+    st.markdown("Key operational and risk indicators, compliance and role-based insights.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        plot_reporter_type_metric(filtered_df)
+    with col2:
+        st.metric("Required Investigation", int(filtered_df['investigation_required'].sum()))
+    with col3:
+        st.metric("Actions Completed", int(filtered_df['action_complete'].sum()))
+    st.markdown("### Reporter Performance Analysis")
+    plot_reporter_performance_scatter(filtered_df)
+    st.markdown("### Heatmap: Incident Type & Severity")
+    plot_incident_heatmap(filtered_df)
+    st.markdown("### Average Reporting Day by Role")
+    plot_avg_reporting_day_by_role(filtered_df)
+    st.markdown("### Medical Attention Requirements vs Total Incidents")
+    plot_medical_attention_vs_total(filtered_df)
+    st.markdown("### Temporal Patterns Analysis")
+    plot_temporal_patterns(filtered_df)
+    st.markdown("### Compliance & Investigation")
+    plot_reporting_delay_by_date(filtered_df)
+    plot_24h_compliance_rate_by_location(filtered_df)
+    plot_investigation_pipeline(filtered_df)
+    st.markdown("### Serious Injury Incident Analysis")
+    plot_serious_injury_age_severity(filtered_df)
+    st.markdown("### Contributing Factors by Month-Year")
+    plot_contributing_factors_by_month(filtered_df)
+
+# --- COMPLIANCE & INVESTIGATION METRICS ---
+
+if page == "⚙️ Operational Performance & Risk Analysis":
+    st.title("⚙️ Compliance & Investigation")
+    
+    plot_compliance_metrics(filtered_df)
+    st.markdown("### Reporting Delay by Incident Date")
+    plot_reporting_delay_by_incident_date(filtered_df)
+    st.markdown("### 24hr Compliance Rate by Location")
+    plot_24hr_compliance_by_location(filtered_df)
+    st.markdown("### Investigation Pipeline")
+    plot_investigation_pipeline(filtered_df)
+    st.markdown("### Serious Injury Incident Analysis")
+    plot_serious_injury_age_severity(filtered_df)
+    st.markdown("### Contributing Factors by Month-Year")
+    plot_contributing_factors_by_month(filtered_df)
+
 
 st.markdown("---")
 st.markdown("_Incident Management Dashboard - Powered by Streamlit & Machine Learning_")
