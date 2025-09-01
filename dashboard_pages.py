@@ -817,3 +817,109 @@ def display_executive_summary_section(df):
     with col1:
         plot_weekday_analysis(df)
     with col2:
+        plot_time_analysis(df)
+    plot_reportable_analysis(df)
+
+def display_operational_performance_section(df):
+    st.header("📈 Operational Performance & Risk Analysis")
+    display_operational_performance_cards(df)
+    st.markdown("---")
+    plot_reporter_type_metrics(df)
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        plot_incident_types_bar(df)
+    with col2:
+        plot_medical_outcomes(df)
+    plot_monthly_trends(df)
+    plot_reporter_performance_scatter(df)
+    plot_serious_injury_age_severity(df)
+
+def display_compliance_investigation_section(df):
+    st.header("📋 Compliance & Investigation")
+    display_compliance_investigation_cards(df)
+    st.markdown("---")
+    st.subheader("Compliance Overview")
+    plot_compliance_metrics_poly(df)
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        plot_reporting_delay_by_date(df)
+    with col2:
+        plot_24h_compliance_rate_by_location(df)
+    plot_investigation_pipeline(df)
+    plot_contributing_factors_by_month(df)
+
+def display_ml_insights_section(df):
+    st.header("🤖 ML Insights & Anomaly Detection")
+    # Import ML helpers here so you can run the dashboard without circular import issues
+    from ml_helpers import train_severity_prediction_model, perform_anomaly_detection, perform_clustering_analysis, analyze_cluster_characteristics
+
+    # ---------- Severity Prediction Model ----------
+    st.subheader("Severity Prediction Model")
+    model, acc, features = train_severity_prediction_model(df)
+    if model is not None and features is not None:
+        st.write(f"Model accuracy: {acc:.2%}")
+        st.write(f"Features used: {features}")
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            importance_df = pd.DataFrame({
+                "Feature": features,
+                "Importance": importances
+            }).sort_values("Importance", ascending=False)
+            fig = px.bar(
+                importance_df, x="Feature", y="Importance",
+                title="Feature Importances"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Not enough data to train severity prediction model.")
+
+    # ---------- Anomaly Detection ----------
+    st.subheader("Anomaly Detection (Isolation Forest & SVM)")
+    out, features = perform_anomaly_detection(df)
+    if out is not None and features is not None:
+        try:
+            if "pca_x" not in out.columns or "pca_y" not in out.columns:
+                from sklearn.decomposition import PCA
+                X = out[features]
+                if X.shape[1] >= 2:
+                    pca = PCA(n_components=2)
+                    X_pca = pca.fit_transform(X)
+                    out['pca_x'], out['pca_y'] = X_pca[:, 0], X_pca[:, 1]
+        except Exception as e:
+            st.info("Skipping PCA visualization: " + str(e))
+
+        st.dataframe(out[['incident_date', 'location', 'incident_type', 'isolation_forest_anomaly', 'svm_anomaly', 'anomaly_score']].head(20))
+
+        if "pca_x" in out.columns and "pca_y" in out.columns:
+            fig = px.scatter(
+                out,
+                x='pca_x',
+                y='pca_y',
+                color=out['isolation_forest_anomaly'].map({True: "Anomaly", False: "Normal"}),
+                symbol=out['svm_anomaly'].map({True: "Anomaly", False: "Normal"}),
+                title="Isolation Forest & SVM Anomalies (PCA View)",
+                hover_data=["incident_date", "location", "incident_type", "severity"]
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Not enough data for anomaly detection.")
+
+    # ---------- Clustering ----------
+    st.subheader("Clustering Analysis")
+    clustered, cluster_features, sil_score, pca = perform_clustering_analysis(df)
+    if clustered is not None and cluster_features is not None:
+        st.write(f"Silhouette Score: {sil_score}")
+        fig = px.scatter(
+            clustered, x="pca_x", y="pca_y", color=clustered['cluster'].astype(str),
+            hover_data=["incident_date", "location", "incident_type", "severity"],
+            title="Incident Clusters (PCA View)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Cluster Characteristics")
+        cluster_info = analyze_cluster_characteristics(clustered)
+        if cluster_info:
+            st.write(pd.DataFrame(cluster_info).T)
+    else:
+        st.warning("Not enough data for clustering.")
