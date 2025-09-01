@@ -13,26 +13,10 @@ from sklearn.decomposition import PCA
 import os
 
 from dashboard_pages import (
-    plot_metric,
-    plot_gauge,
-    plot_severity_distribution,
-    plot_incident_types_bar,
-    plot_location_analysis,
-    plot_monthly_trends,
-    plot_medical_outcomes,
-    plot_incident_trends,
-    plot_weekday_analysis,
-    plot_time_analysis,
-    plot_reportable_analysis,
-    plot_reporter_type_metrics,
-    plot_reporter_performance_scatter,
-    apply_investigation_rules,
-    plot_compliance_metrics_poly,
-    plot_reporting_delay_by_date,
-    plot_24h_compliance_rate_by_location,
-    plot_investigation_pipeline,
-    plot_serious_injury_age_severity,
-    plot_contributing_factors_by_month,
+    display_executive_summary_section,
+    display_operational_performance_section,
+    display_compliance_investigation_section,
+    display_ml_insights_section,
 )
 
 from ml_helpers import (
@@ -40,6 +24,12 @@ from ml_helpers import (
     perform_anomaly_detection,
     perform_clustering_analysis,
     analyze_cluster_characteristics,
+)
+st.set_page_config(
+    page_title="Incident Management Dashboard",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 @st.cache_data
