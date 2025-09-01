@@ -999,8 +999,6 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
-    display_recent_critical_incidents_card(df)
-    st.markdown("---")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         total_incidents = len(df)
