@@ -73,17 +73,15 @@ def perform_anomaly_detection(df: pd.DataFrame):
     out['anomaly_score'] = iso.decision_function(Xs)
     return out, feature_names
 
-
-def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly"):
+def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly", axis_labels=None):
     """
     Plots a scatter plot of anomalies vs normal points in the dataset using the specified columns.
-
     Parameters:
     - anomaly_df: pd.DataFrame with your anomaly detection results.
     - x_col: Feature name for x-axis.
     - y_col: Feature name for y-axis.
     - anomaly_column: Name of the column indicating anomalies (default: 'isolation_forest_anomaly').
-
+    - axis_labels: Optional dict mapping column names to display names for axes.
     Returns:
     - fig: A matplotlib figure object.
     """
@@ -95,18 +93,22 @@ def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_for
     ):
         raise ValueError("Required columns are missing in the DataFrame.")
 
+    # Use friendly axis labels if provided
+    display_x = axis_labels[x_col] if axis_labels and x_col in axis_labels else x_col
+    display_y = axis_labels[y_col] if axis_labels and y_col in axis_labels else y_col
+
     fig, ax = plt.subplots(figsize=(8, 5))
     normal = anomaly_df[anomaly_df[anomaly_column] == False]
     anomaly = anomaly_df[anomaly_df[anomaly_column] == True]
     ax.scatter(normal[x_col], normal[y_col], c='blue', label='Normal', alpha=0.5)
     ax.scatter(anomaly[x_col], anomaly[y_col], c='red', label='Anomaly', alpha=0.7)
-    ax.set_xlabel(x_col)
-    ax.set_ylabel(y_col)
+    ax.set_xlabel(display_x)
+    ax.set_ylabel(display_y)
     ax.set_title("Anomaly Detection Scatter Plot")
     ax.legend()
     fig.tight_layout()
     return fig
-    
+
 @st.cache_data
 def perform_clustering_analysis(df: pd.DataFrame, n_clusters=5, algorithm='kmeans'):
     if df.empty or len(df) < 10:
