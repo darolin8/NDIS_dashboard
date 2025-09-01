@@ -1510,19 +1510,8 @@ def display_ml_insights_section(df):
     st.subheader("Anomaly Detection (Isolation Forest & SVM)")
     out, features = perform_anomaly_detection(df)
     if out is not None and features is not None:
-        try:
-            if "pca_x" not in out.columns or "pca_y" not in out.columns:
-                from sklearn.decomposition import PCA
-                X = out[features]
-                if X.shape[1] >= 2:
-                    pca = PCA(n_components=2)
-                    X_pca = pca.fit_transform(X)
-                    out['pca_x'], out['pca_y'] = X_pca[:, 0], X_pca[:, 1]
-        except Exception as e:
-            st.info("Skipping PCA visualization: " + str(e))
-
         st.dataframe(out[['incident_date', 'location', 'incident_type', 'isolation_forest_anomaly', 'svm_anomaly', 'anomaly_score']].head(20))
-
+        
         if "pca_x" in out.columns and "pca_y" in out.columns:
             fig = px.scatter(
                 out,
