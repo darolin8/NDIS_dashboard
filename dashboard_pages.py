@@ -359,105 +359,146 @@ def plot_serious_injury_age_severity(df):
         st.info("No high severity incidents found for age analysis")
 
 def display_executive_summary_section(df):
-    st.title("Executive Summary")
+    import calendar
 
-    # Cards Section with light border and increased font size
-    st.markdown(
-        """
-        <style>
-        .card-container {
-            display: flex;
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .dashboard-card {
-            background: white;
-            border: 1px solid #e3e3e3;
-            border-radius: 12px;
-            box-shadow: none;
-            padding: 1.5rem 1.5rem 1rem 1.5rem;
-            min-width: 180px;
-            text-align: center;
-        }
-        .dashboard-card-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: #222;
-        }
-        .dashboard-card-value {
-            font-size: 2.2rem;
-            font-weight: 700;
-            color: #1769aa;
-            margin-bottom: 0.25rem;
-        }
-        .dashboard-card-desc {
-            font-size: 0.93rem;
-            color: #444;
-            margin-bottom: 0.1rem;
-        }
-        </style>
-        """, unsafe_allow_html=True
-    )
+    st.markdown("""
+    <style>
+    .main-container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 18px 24px;
+    }
+    .card-container {
+        display: flex;
+        gap: 2rem;
+        margin-bottom: 2.5rem;
+        justify-content: flex-start;
+    }
+    .dashboard-card {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        padding: 1.6rem 1.2rem 1.2rem 1.2rem;
+        min-width: 170px;
+        max-width: 220px;
+        text-align: center;
+        flex: 1;
+    }
+    .dashboard-card-title {
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin-bottom: 0.6rem;
+        color: #222;
+    }
+    .dashboard-card-value {
+        font-size: 2.1rem;
+        font-weight: 700;
+        color: #1769aa;
+        margin-bottom: 0.3rem;
+    }
+    .dashboard-card-desc {
+        font-size: 0.97rem;
+        color: #444;
+        margin-bottom: 0.1rem;
+    }
+    .section-title {
+        font-size: 1.35rem;
+        font-weight: 700;
+        margin: 2rem 0 1rem 0;
+    }
+    .divider {
+        margin: 2rem 0 2rem 0;
+        border-top: 1px solid #eee;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    total_incidents = len(df)
+    # ---- CARD DATA ----
+    # Top Incident Type
+    top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
+    # Latest Month Incident
+    if 'incident_date' in df.columns and not df.empty:
+        latest_month = df['incident_date'].max().to_period('M')
+        latest_month_str = latest_month.strftime('%B %Y')
+        latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
+    else:
+        latest_month_str = "N/A"
+        latest_month_count = 0
+    # Previous Month Incident
+    if 'incident_date' in df.columns and not df.empty:
+        prev_month = latest_month - 1
+        prev_month_str = prev_month.strftime('%B %Y')
+        prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
+    else:
+        prev_month_str = "N/A"
+        prev_month_count = 0
+    # High Severity
     high_severity_count = int((df['severity'].str.lower() == 'high').sum()) if 'severity' in df.columns else 0
+    # Reportable Incidents
     reportable_count = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
-    avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else 0
 
-    st.markdown(
-        f"""
-        <div class="card-container">
-          <div class="dashboard-card">
-            <div class="dashboard-card-title">Total Incidents</div>
-            <div class="dashboard-card-value">{total_incidents}</div>
-            <div class="dashboard-card-desc">All incidents reported</div>
-          </div>
-          <div class="dashboard-card">
-            <div class="dashboard-card-title">High Severity</div>
-            <div class="dashboard-card-value">{high_severity_count}</div>
-            <div class="dashboard-card-desc">Critical severity cases</div>
-          </div>
-          <div class="dashboard-card">
-            <div class="dashboard-card-title">Reportable Incidents</div>
-            <div class="dashboard-card-value">{reportable_count}</div>
-            <div class="dashboard-card-desc">Reportable events</div>
-          </div>
-          <div class="dashboard-card">
-            <div class="dashboard-card-title">Avg Age</div>
-            <div class="dashboard-card-value">{avg_age:.1f} yrs</div>
-            <div class="dashboard-card-desc">Avg participant age</div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True
-    )
+    st.markdown('<div class="main-container">', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="card-container">
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Top Incident Type</div>
+        <div class="dashboard-card-value">{top_type}</div>
+        <div class="dashboard-card-desc">Most frequent</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Latest Month Incidents</div>
+        <div class="dashboard-card-value">{latest_month_count}</div>
+        <div class="dashboard-card-desc">{latest_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Previous Month Incidents</div>
+        <div class="dashboard-card-value">{prev_month_count}</div>
+        <div class="dashboard-card-desc">{prev_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">High Severity Incidents</div>
+        <div class="dashboard-card-value">{high_severity_count}</div>
+        <div class="dashboard-card-desc">Critical cases</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Reportable Incidents</div>
+        <div class="dashboard-card-value">{reportable_count}</div>
+        <div class="dashboard-card-desc">Regulatory events</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    st.subheader("Severity Distribution")
+    # --- Your other summary plots/sections below as needed ---
+    st.markdown('<div class="section-title">Severity Distribution</div>', unsafe_allow_html=True)
     plot_severity_distribution(df)
 
-    st.subheader("Top 10 Incident Types")
+    st.markdown('<div class="section-title">Top 10 Incident Types</div>', unsafe_allow_html=True)
     plot_incident_types_bar(df)
 
-    st.subheader("Location Analysis")
+    st.markdown('<div class="section-title">Location Analysis</div>', unsafe_allow_html=True)
     plot_location_analysis(df)
 
-    st.subheader("Monthly Trends")
+    st.markdown('<div class="section-title">Monthly Trends</div>', unsafe_allow_html=True)
     plot_monthly_incidents_by_severity(df)
 
-    st.subheader("Medical Outcomes")
+    st.markdown('<div class="section-title">Medical Outcomes</div>', unsafe_allow_html=True)
     plot_medical_outcomes(df)
 
-    st.subheader("Daily Incident Trends")
+    st.markdown('<div class="section-title">Daily Incident Trends</div>', unsafe_allow_html=True)
     plot_incident_trends(df)
 
-    st.subheader("Incidents by Day of Week")
+    st.markdown('<div class="section-title">Incidents by Day of Week</div>', unsafe_allow_html=True)
     plot_weekday_analysis(df)
 
-    st.subheader("Incidents by Hour of Day")
+    st.markdown('<div class="section-title">Incidents by Hour of Day</div>', unsafe_allow_html=True)
     plot_time_analysis(df)
 
-    st.subheader("Reportable Analysis")
+    st.markdown('<div class="section-title">Reportable Analysis</div>', unsafe_allow_html=True)
     plot_reportable_analysis(df)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # Close main-container
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
@@ -999,19 +1040,45 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    # Top Incident Type
     with col1:
-        total_incidents = len(df)
-        plot_metric("Total Incidents", total_incidents, show_graph=True, color_graph="rgba(0,104,201,0.2)")
+        top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
+        plot_metric("Top Incident Type", top_type, show_graph=False)
+
+    # Latest Month Incidents
     with col2:
+        if 'incident_date' in df.columns and not df.empty:
+            latest_month = df['incident_date'].max().to_period('M')
+            latest_month_str = latest_month.strftime('%b %Y')
+            latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
+        else:
+            latest_month_str = "N/A"
+            latest_month_count = 0
+        plot_metric("Latest Month Incidents", latest_month_count, suffix=f" ({latest_month_str})", show_graph=True, color_graph="rgba(0,104,201,0.2)")
+
+    # Previous Month Incidents
+    with col3:
+        if 'incident_date' in df.columns and not df.empty:
+            prev_month = latest_month - 1
+            prev_month_str = prev_month.strftime('%b %Y')
+            prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
+        else:
+            prev_month_str = "N/A"
+            prev_month_count = 0
+        plot_metric("Previous Month Incidents", prev_month_count, suffix=f" ({prev_month_str})", show_graph=True, color_graph="rgba(0,104,201,0.12)")
+
+    # High Severity Incidents
+    with col4:
         high_severity = len(df[df['severity'].str.lower() == 'high']) if 'severity' in df.columns else 0
         plot_metric("High Severity Incidents", high_severity, show_graph=True, color_graph="rgba(255,43,43,0.2)")
-    with col3:
+
+    # Reportable Incidents
+    with col5:
         reportable = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
         plot_metric("Reportable Incidents", reportable, show_graph=True, color_graph="rgba(255,135,0,0.2)")
-    with col4:
-        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else 0
-        plot_metric("Avg Participant Age", avg_age, suffix=" yrs", show_graph=True, color_graph="rgba(90,216,166,0.2)")
+
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
@@ -1027,6 +1094,7 @@ def display_executive_summary_section(df):
     with col2:
         plot_time_analysis(df)
     plot_reportable_analysis(df)
+
 
 def display_operational_performance_section(df):
     st.header("📈 Operational Performance & Risk Analysis")
