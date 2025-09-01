@@ -1044,46 +1044,32 @@ def plot_investigation_pipeline(df):
 
 
 def plot_contributing_factors_by_month(df):
-    # Show columns for debugging
-    st.write("DataFrame columns:", df.columns.tolist())
-
-    # 1. Find the column with contributing factor text
-    factor_col = None
-    for col in df.columns:
-        if "contributing" in col.lower() and "factor" in col.lower():
-            factor_col = col
-            break
-    if not factor_col:
-        st.error("No column with 'Contributing Factor' found. Columns: " + str(df.columns.tolist()))
-        return
-
-    # 2. Create 'Incident Type Keyword'
-    def extract_keyword(s):
-        m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
-        if m:
-            return m.group(1).strip()
-        m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
-        if m2:
-            return m2.group(1).strip()
-        m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
-        if m3:
-            return m3.group(1).strip()
-        words = s.split()
-        if len(words) > 2:
-            return " ".join(words[-3:-1])
-        return s
-
-    df['Incident Type Keyword'] = df[factor_col].apply(extract_keyword)
-
-    # 3. Check for 'Month-Year' and 'Count'
+    # --- Create necessary columns ---
+    # Incident Type Keyword
+    if 'Incident Type Keyword' not in df.columns:
+        def extract_keyword(s):
+            m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
+            if m2:
+                return m2.group(1).strip()
+            m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
+            if m3:
+                return m3.group(1).strip()
+            words = s.split()
+            if len(words) > 2:
+                return " ".join(words[-3:-1])
+            return s
+        df['Incident Type Keyword'] = df['contributing_factors'].apply(extract_keyword)
+    # Month-Year
     if 'Month-Year' not in df.columns:
-        st.error("No 'Month-Year' column found. Columns: " + str(df.columns.tolist()))
-        return
+        df['Month-Year'] = pd.to_datetime(df['incident_date'], errors='coerce').dt.strftime('%b %Y')
+    # Count
     if 'Count' not in df.columns:
-        st.error("No 'Count' column found. Columns: " + str(df.columns.tolist()))
-        return
+        df['Count'] = 1
 
-    # 4. Pivot table and plot
+    # --- Pivot and plot ---
     heatmap_data = df.pivot_table(
         index='Incident Type Keyword',
         columns='Month-Year',
@@ -1091,7 +1077,6 @@ def plot_contributing_factors_by_month(df):
         aggfunc='sum',
         fill_value=0
     )
-
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(heatmap_data, annot=True, fmt="d", cmap="Blues", ax=ax)
     ax.set_ylabel("Incident Type")
