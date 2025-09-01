@@ -148,7 +148,6 @@ elif page == "Compliance & Investigation":
 elif page == "ML Insights":
     st.title("ML Insights & Anomaly Detection")
 
-
     # ---------- Severity Prediction Model ----------
     st.subheader("Severity Prediction Model")
     model, acc, features = train_severity_prediction_model(filtered_df)
@@ -163,6 +162,7 @@ elif page == "ML Insights":
                 "Feature": features,
                 "Importance": importances
             }).sort_values("Importance", ascending=False)
+            import plotly.express as px
             fig = px.bar(
                 importance_df, x="Feature", y="Importance",
                 title="Feature Importances"
@@ -191,6 +191,7 @@ elif page == "ML Insights":
 
         # Anomaly scatter plot
         if "pca_x" in out.columns and "pca_y" in out.columns:
+            import plotly.express as px
             fig = px.scatter(
                 out,
                 x='pca_x',
@@ -204,11 +205,12 @@ elif page == "ML Insights":
     else:
         st.warning("Not enough data for anomaly detection.")
 
-   # ---------- Clustering ----------
+    # ---------- Clustering ----------
     st.subheader("Clustering Analysis")
     clustered, cluster_features, sil_score, pca = perform_clustering_analysis(filtered_df)
     if clustered is not None and cluster_features is not None:
         st.write(f"Silhouette Score: {sil_score}")
+        import plotly.express as px
         fig = px.scatter(
             clustered, x="pca_x", y="pca_y", color=clustered['cluster'].astype(str),
             hover_data=["incident_date", "location", "incident_type", "severity"],
