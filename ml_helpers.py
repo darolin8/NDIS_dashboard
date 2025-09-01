@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
@@ -72,6 +73,40 @@ def perform_anomaly_detection(df: pd.DataFrame):
     out['anomaly_score'] = iso.decision_function(Xs)
     return out, feature_names
 
+
+def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly"):
+    """
+    Plots a scatter plot of anomalies vs normal points in the dataset using the specified columns.
+
+    Parameters:
+    - anomaly_df: pd.DataFrame with your anomaly detection results.
+    - x_col: Feature name for x-axis.
+    - y_col: Feature name for y-axis.
+    - anomaly_column: Name of the column indicating anomalies (default: 'isolation_forest_anomaly').
+
+    Returns:
+    - fig: A matplotlib figure object.
+    """
+    if (
+        anomaly_df is None
+        or x_col not in anomaly_df.columns
+        or y_col not in anomaly_df.columns
+        or anomaly_column not in anomaly_df.columns
+    ):
+        raise ValueError("Required columns are missing in the DataFrame.")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    normal = anomaly_df[anomaly_df[anomaly_column] == False]
+    anomaly = anomaly_df[anomaly_df[anomaly_column] == True]
+    ax.scatter(normal[x_col], normal[y_col], c='blue', label='Normal', alpha=0.5)
+    ax.scatter(anomaly[x_col], anomaly[y_col], c='red', label='Anomaly', alpha=0.7)
+    ax.set_xlabel(x_col)
+    ax.set_ylabel(y_col)
+    ax.set_title("Anomaly Detection Scatter Plot")
+    ax.legend()
+    fig.tight_layout()
+    return fig
+    
 @st.cache_data
 def perform_clustering_analysis(df: pd.DataFrame, n_clusters=5, algorithm='kmeans'):
     if df.empty or len(df) < 10:
