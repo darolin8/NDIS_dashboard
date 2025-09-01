@@ -1042,34 +1042,41 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-
 def plot_contributing_factors_by_month(df):
-    """
-    Plots a heatmap of contributing factors by month-year using incident type keywords on the y-axis.
-    """
+    import re
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import streamlit as st
+
+    # Try to auto-detect the column containing 'Contributing factor' text
+    factor_col = None
+    for col in df.columns:
+        if "contributing" in col.lower() and "factor" in col.lower():
+            factor_col = col
+            break
+
+    if not factor_col:
+        st.error("No 'Contributing Factor' column found! Available columns: " + str(df.columns.tolist()))
+        return
+
     # Extract a keyword for each contributing factor for the y-axis
     def extract_keyword(s):
-        # Try to get text between 'for the' and 'incident'
         m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
         if m:
             return m.group(1).strip()
-        # Try to get text between 'for the' and 'Incident'
         m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
         if m2:
             return m2.group(1).strip()
-        # Try to get text between 'for the' and 'event'
         m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
         if m3:
             return m3.group(1).strip()
-        # Fallback: return last few words
         words = s.split()
         if len(words) > 2:
             return " ".join(words[-3:-1])
         return s
 
-    df['Incident Type Keyword'] = df['Contributing Factor'].apply(extract_keyword)
+    df['Incident Type Keyword'] = df[factor_col].apply(extract_keyword)
 
-    # Create a pivot table for the heatmap
     heatmap_data = df.pivot_table(
         index='Incident Type Keyword',
         columns='Month-Year',
@@ -1084,8 +1091,6 @@ def plot_contributing_factors_by_month(df):
     ax.set_xlabel("Month-Year")
     ax.set_title("Contributing Factors by Month-Year")
     st.pyplot(fig)
-#
-# plot_contributing_factors_heatmap(df)
 # ================= PAGE SECTIONS =================
 
 def display_executive_summary_section(df):
