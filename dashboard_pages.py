@@ -1366,14 +1366,92 @@ def display_operational_performance_section(df):
     plot_monthly_incidents_by_severity(df)  # <--- FIXED HERE!
     plot_reporter_performance_scatter(df)
     plot_serious_injury_age_severity(df)
+import streamlit as st
 
 def display_compliance_investigation_section(df):
-    st.header("📋 Compliance & Investigation")
-    display_compliance_investigation_cards(df)
+    st.header("📝 Incident Management Dashboard")
+    st.subheader("📋 Compliance & Investigation")
     st.markdown("---")
-    st.subheader("Compliance Overview")
-    plot_compliance_metrics_poly(df)
+
+    # Calculate metrics (replace logic if needed)
+    reportable_incidents = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
+    compliance_24hr = int(df['compliance_24hr'].sum()) if 'compliance_24hr' in df.columns else 0
+    overdue_reports = int(df['overdue_report'].sum()) if 'overdue_report' in df.columns else 0
+    investigation_rate = (
+        100 * df['investigation_completed'].sum() / len(df)
+        if 'investigation_completed' in df.columns and len(df) > 0
+        else 0.0
+    )
+
+    # Display all cards in one line
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px; 
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Reportable Incidents
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {reportable_incidents}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col2:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px; 
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  24hr Compliance
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#5ad8a6;">
+                  {compliance_24hr}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col3:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px; 
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Overdue Reports
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#d9534f;">
+                  {overdue_reports}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col4:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px; 
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Investigation Rate
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#f0ad4e;">
+                  {investigation_rate:.1f}%
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
     st.markdown("---")
+ 
     col1, col2 = st.columns(2)
     with col1:
         plot_reporting_delay_by_date(df)
