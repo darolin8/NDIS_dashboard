@@ -1257,9 +1257,10 @@ def display_executive_summary_section(df):
 
 
 def display_operational_performance_section(df):
-    st.header("📝 Incident Management Dashboard")
+    st.header(" Operational Performance & Risk Analysis Metrics")
     st.markdown("---")
-    # Calculate metrics
+
+    # Calculate Average Participant Age
     if 'dob' in df.columns:
         df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
         today = pd.to_datetime('today')
@@ -1269,15 +1270,28 @@ def display_operational_performance_section(df):
     else:
         avg_age_txt = "N/A"
     
-    # Example metrics (replace with your actual logic):
-    location_reportable_rate = 0.0  # Put your calculation here
-    medical_attention_rate = 0.0    # Put your calculation here
-    medical_attention_required = int(df['medical_attention_required'].sum()) if 'medical_attention_required' in df.columns else 0
+    # Calculate Location Reportable Rate
+    if 'reportable' in df.columns and len(df) > 0:
+        location_reportable_rate = 100 * df['reportable'].sum() / len(df)
+    else:
+        location_reportable_rate = 0.0
 
-    # Show all cards in one line
+    # Calculate Medical Attention Rate
+    if 'medical_attention_required' in df.columns and len(df) > 0:
+        medical_attention_rate = 100 * df['medical_attention_required'].sum() / len(df)
+    else:
+        medical_attention_rate = 0.0
+
+    # Medical Attention Required Count
+    medical_attention_required = (
+        int(df['medical_attention_required'].sum())
+        if 'medical_attention_required' in df.columns
+        else 0
+    )
+
+    # Display cards in one row
     col1, col2, col3, col4 = st.columns(4)
 
-    # Location Reportable Rate
     with col1:
         st.markdown(
             f"""
@@ -1293,7 +1307,7 @@ def display_operational_performance_section(df):
             """,
             unsafe_allow_html=True
         )
-    # Medical Attention Rate
+
     with col2:
         st.markdown(
             f"""
@@ -1309,7 +1323,7 @@ def display_operational_performance_section(df):
             """,
             unsafe_allow_html=True
         )
-    # Medical Attention Required
+
     with col3:
         st.markdown(
             f"""
@@ -1325,7 +1339,7 @@ def display_operational_performance_section(df):
             """,
             unsafe_allow_html=True
         )
-    # Average Participant Age
+
     with col4:
         st.markdown(
             f"""
