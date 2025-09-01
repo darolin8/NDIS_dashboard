@@ -1042,25 +1042,40 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
+import pandas as pd
+import re
+import seaborn as sns
+import matplotlib.pyplot as plt
+import streamlit as st
+
 def extract_keyword(s):
-    # Example: pull out incident type between "for the" and "incident"
+    """
+    Extracts the incident type keyword from a descriptive string.
+    Example: "Contributing factors are being reviewed for the Abuse or Neglect incident..."
+    Returns: "Abuse or Neglect"
+    """
+    # Try to get text between 'for the' and 'incident'
     m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
     if m:
         return m.group(1).strip()
-    # fallback for other patterns, e.g. "revisited:" prefix
+    # Try to get text between 'for the' and 'Incident'
     m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
     if m2:
         return m2.group(1).strip()
-    # fallback: last 2 words
+    # Try to get text between 'for the' and 'event'
+    m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
+    if m3:
+        return m3.group(1).strip()
+    # Fallback: return last 2 words (usually not needed)
     return ' '.join(s.split()[-3:-1])
 
 def plot_contributing_factors_heatmap(df):
-    # Add a column for the y-axis keywords
-    df['Incident Keyword'] = df['Contributing Factor'].apply(extract_keyword)
+    # Create a new column with extracted incident type keyword
+    df['Incident Type Keyword'] = df['Contributing Factor'].apply(extract_keyword)
 
-    # Create a pivot table for the heatmap
+    # Create the pivot table for the heatmap
     heatmap_data = df.pivot_table(
-        index='Incident Keyword',
+        index='Incident Type Keyword',    # <-- Use the keyword column for y-axis
         columns='Month-Year',
         values='Count',
         aggfunc='sum',
@@ -1069,11 +1084,13 @@ def plot_contributing_factors_heatmap(df):
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(heatmap_data, annot=True, fmt="d", cmap="Blues", ax=ax)
-    plt.ylabel("Incident Type")
-    plt.xlabel("Month-Year")
-    plt.title("Contributing Factors by Month-Year")
+    ax.set_ylabel("Incident Type")
+    ax.set_xlabel("Month-Year")
+    ax.set_title("Contributing Factors by Month-Year")
     st.pyplot(fig)
 
+# Example usage in your Streamlit app:
+# plot_contributing_factors_heatmap(df)
 # ================= PAGE SECTIONS =================
 
 def display_executive_summary_section(df):
