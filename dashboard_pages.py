@@ -832,7 +832,6 @@ def plot_contributing_factors_by_month(df):
 
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
-    display_executive_kpi_cards(df)
     st.markdown("---")
     display_recent_critical_incidents_card(df)
     st.markdown("---")
