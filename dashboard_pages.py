@@ -1040,18 +1040,28 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
-    # Five columns for your five metrics
     col1, col2, col3, col4, col5 = st.columns(5)
 
-    # Top Incident Type (display as styled markdown, NOT plot_metric)
+    # Top Incident Type (string)
     with col1:
-        top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
+        top_type = (
+            df['incident_type'].value_counts().idxmax()
+            if 'incident_type' in df.columns and not df.empty
+            else "N/A"
+        )
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;padding:1.2rem 0.5rem;text-align:center;">
-                <span style="font-size:1.15rem;font-weight:600;color:#222;">Top Incident Type</span><br>
-                <span style="font-size:2.1rem;font-weight:700;color:#1769aa;">{top_type}</span><br>
-                <span style="font-size:0.97rem;color:#444;">Most frequent</span>
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Top Incident Type
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {top_type}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  Most frequent
+                </span>
             </div>
             """,
             unsafe_allow_html=True
@@ -1066,7 +1076,23 @@ def display_executive_summary_section(df):
         else:
             latest_month_str = "N/A"
             latest_month_count = 0
-        plot_metric("Latest Month Incidents", latest_month_count, suffix=f" ({latest_month_str})", show_graph=True, color_graph="rgba(0,104,201,0.2)")
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Latest Month Incidents
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {latest_month_count}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  {latest_month_str}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Previous Month Incidents
     with col3:
@@ -1077,19 +1103,76 @@ def display_executive_summary_section(df):
         else:
             prev_month_str = "N/A"
             prev_month_count = 0
-        plot_metric("Previous Month Incidents", prev_month_count, suffix=f" ({prev_month_str})", show_graph=True, color_graph="rgba(0,104,201,0.12)")
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Previous Month Incidents
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {prev_month_count}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  {prev_month_str}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # High Severity Incidents
     with col4:
-        high_severity = len(df[df['severity'].str.lower() == 'high']) if 'severity' in df.columns else 0
-        plot_metric("High Severity Incidents", high_severity, show_graph=True, color_graph="rgba(255,43,43,0.2)")
+        high_severity = (
+            len(df[df['severity'].str.lower() == 'high'])
+            if 'severity' in df.columns
+            else 0
+        )
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  High Severity Incidents
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#d9534f;">
+                  {high_severity}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  Critical cases
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Reportable Incidents
     with col5:
-        reportable = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
-        plot_metric("Reportable Incidents", reportable, show_graph=True, color_graph="rgba(255,135,0,0.2)")
+        reportable = (
+            int(df['reportable'].sum())
+            if 'reportable' in df.columns
+            else 0
+        )
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Reportable Incidents
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#f0ad4e;">
+                  {reportable}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  Regulatory events
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     st.markdown("---")
+    # Keep your section plotting logic below
     col1, col2 = st.columns(2)
     with col1:
         plot_severity_distribution(df)
