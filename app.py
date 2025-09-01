@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 
-# Import dashboard page functions
 from dashboard_pages import (
     display_executive_summary_section,
     display_operational_performance_section,
@@ -37,11 +36,22 @@ def main():
     df = load_data()
     df = apply_investigation_rules(df)
 
-    # Sidebar navigation and filters
     st.sidebar.header("📊 Dashboard Navigation")
-    filtered_df = df.copy()
 
-    # Date Filter
+    # ---- Move Dashboard Page Selector to Top of Sidebar ----
+    page = st.sidebar.radio(
+        "Select Dashboard Page",
+        [
+            "📊 Executive Summary",
+            "📈 Operational Performance & Risk Analysis",
+            "📋 Compliance & Investigation",
+            "🤖 ML Insights",
+        ],
+    )
+
+    # ---- Date Filter ----
+    st.sidebar.header("Filters")
+    filtered_df = df.copy()
     if "incident_date" in df.columns:
         min_date, max_date = df["incident_date"].min(), df["incident_date"].max()
         date_range = st.sidebar.date_input(
@@ -55,7 +65,7 @@ def main():
                 (filtered_df["incident_date"] <= pd.to_datetime(date_range[1]))
             ]
 
-    # Age Filter
+    # ---- Age Filter ----
     if "participant_age" in df.columns:
         age_min = int(df["participant_age"].min())
         age_max = int(df["participant_age"].max())
@@ -71,53 +81,57 @@ def main():
             (filtered_df["participant_age"] <= age_range[1])
         ]
 
-    # Location Filter
+    # ---- Location Filter with "All" option ----
     if "location" in df.columns:
         locations = sorted(df["location"].dropna().unique())
-        selected_locations = st.sidebar.multiselect(
+        locations_with_all = ["All"] + locations
+        selected_location = st.sidebar.selectbox(
             "🏢 Location",
-            options=locations,
-            default=locations,
-            help="Select specific locations"
+            options=locations_with_all,
+            index=0,
+            help="Select specific location or 'All'"
         )
-        if selected_locations:
-            filtered_df = filtered_df[filtered_df["location"].isin(selected_locations)]
+        if selected_location != "All":
+            filtered_df = filtered_df[filtered_df["location"] == selected_location]
 
-    # Severity Filter
+    # ---- Severity Filter with "All" option ----
     if "severity" in df.columns:
         severities = sorted(df["severity"].dropna().unique())
-        selected_severities = st.sidebar.multiselect(
+        severities_with_all = ["All"] + severities
+        selected_severity = st.sidebar.selectbox(
             "⚠️ Severity",
-            options=severities,
-            default=severities,
-            help="Filter by incident severity"
+            options=severities_with_all,
+            index=0,
+            help="Filter by incident severity or 'All'"
         )
-        if selected_severities:
-            filtered_df = filtered_df[filtered_df["severity"].isin(selected_severities)]
+        if selected_severity != "All":
+            filtered_df = filtered_df[filtered_df["severity"] == selected_severity]
 
-    # Incident Type Filter
+    # ---- Incident Type Filter with "All" option ----
     if "incident_type" in df.columns:
         incident_types = sorted(df["incident_type"].dropna().unique())
-        selected_incident_types = st.sidebar.multiselect(
+        incident_types_with_all = ["All"] + incident_types
+        selected_incident_type = st.sidebar.selectbox(
             "📋 Incident Type",
-            options=incident_types,
-            default=incident_types,
-            help="Select incident types"
+            options=incident_types_with_all,
+            index=0,
+            help="Select incident type or 'All'"
         )
-        if selected_incident_types:
-            filtered_df = filtered_df[filtered_df["incident_type"].isin(selected_incident_types)]
+        if selected_incident_type != "All":
+            filtered_df = filtered_df[filtered_df["incident_type"] == selected_incident_type]
 
-    # Reporter Type Filter
+    # ---- Reporter Type Filter with "All" option ----
     if "reported_by" in df.columns:
         reporter_types = sorted(df["reported_by"].dropna().unique())
-        selected_reporter_types = st.sidebar.multiselect(
+        reporter_types_with_all = ["All"] + reporter_types
+        selected_reporter_type = st.sidebar.selectbox(
             "👤 Reporter Type",
-            options=reporter_types,
-            default=reporter_types,
-            help="Filter by who reported the incident"
+            options=reporter_types_with_all,
+            index=0,
+            help="Filter by who reported the incident or 'All'"
         )
-        if selected_reporter_types:
-            filtered_df = filtered_df[filtered_df["reported_by"].isin(selected_reporter_types)]
+        if selected_reporter_type != "All":
+            filtered_df = filtered_df[filtered_df["reported_by"] == selected_reporter_type]
 
     # Filter summary
     if len(filtered_df) != len(df):
@@ -147,15 +161,7 @@ def main():
 
     # Page navigation
     st.sidebar.markdown("---")
-    page = st.sidebar.radio(
-        "Select Dashboard Page",
-        [
-            "📊 Executive Summary",
-            "📈 Operational Performance & Risk Analysis",
-            "📋 Compliance & Investigation",
-            "🤖 ML Insights",
-        ],
-    )
+    # Already moved to top
 
     # Display selected page
     if page == "📊 Executive Summary":
