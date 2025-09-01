@@ -1040,12 +1040,22 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
+    # Five columns for your five metrics
     col1, col2, col3, col4, col5 = st.columns(5)
 
-    # Top Incident Type
+    # Top Incident Type (display as styled markdown, NOT plot_metric)
     with col1:
         top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
-        plot_metric("Top Incident Type", top_type, show_graph=False)
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;padding:1.2rem 0.5rem;text-align:center;">
+                <span style="font-size:1.15rem;font-weight:600;color:#222;">Top Incident Type</span><br>
+                <span style="font-size:2.1rem;font-weight:700;color:#1769aa;">{top_type}</span><br>
+                <span style="font-size:0.97rem;color:#444;">Most frequent</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Latest Month Incidents
     with col2:
@@ -1094,7 +1104,6 @@ def display_executive_summary_section(df):
     with col2:
         plot_time_analysis(df)
     plot_reportable_analysis(df)
-
 
 def display_operational_performance_section(df):
     st.header("📈 Operational Performance & Risk Analysis")
