@@ -1042,40 +1042,36 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-import pandas as pd
-import re
-import seaborn as sns
-import matplotlib.pyplot as plt
-import streamlit as st
 
-def extract_keyword(s):
+def plot_contributing_factors_by_month(df):
     """
-    Extracts the incident type keyword from a descriptive string.
-    Example: "Contributing factors are being reviewed for the Abuse or Neglect incident..."
-    Returns: "Abuse or Neglect"
+    Plots a heatmap of contributing factors by month-year using incident type keywords on the y-axis.
     """
-    # Try to get text between 'for the' and 'incident'
-    m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    # Try to get text between 'for the' and 'Incident'
-    m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
-    if m2:
-        return m2.group(1).strip()
-    # Try to get text between 'for the' and 'event'
-    m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
-    if m3:
-        return m3.group(1).strip()
-    # Fallback: return last 2 words (usually not needed)
-    return ' '.join(s.split()[-3:-1])
+    # Extract a keyword for each contributing factor for the y-axis
+    def extract_keyword(s):
+        # Try to get text between 'for the' and 'incident'
+        m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        # Try to get text between 'for the' and 'Incident'
+        m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
+        if m2:
+            return m2.group(1).strip()
+        # Try to get text between 'for the' and 'event'
+        m3 = re.search(r'for the (.+?) event', s, re.IGNORECASE)
+        if m3:
+            return m3.group(1).strip()
+        # Fallback: return last few words
+        words = s.split()
+        if len(words) > 2:
+            return " ".join(words[-3:-1])
+        return s
 
-def plot_contributing_factors_heatmap(df):
-    # Create a new column with extracted incident type keyword
     df['Incident Type Keyword'] = df['Contributing Factor'].apply(extract_keyword)
 
-    # Create the pivot table for the heatmap
+    # Create a pivot table for the heatmap
     heatmap_data = df.pivot_table(
-        index='Incident Type Keyword',    # <-- Use the keyword column for y-axis
+        index='Incident Type Keyword',
         columns='Month-Year',
         values='Count',
         aggfunc='sum',
@@ -1088,8 +1084,7 @@ def plot_contributing_factors_heatmap(df):
     ax.set_xlabel("Month-Year")
     ax.set_title("Contributing Factors by Month-Year")
     st.pyplot(fig)
-
-# Example usage in your Streamlit app:
+#
 # plot_contributing_factors_heatmap(df)
 # ================= PAGE SECTIONS =================
 
