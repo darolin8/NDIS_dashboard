@@ -609,6 +609,89 @@ def display_operational_performance_cards(df):
                 delta_color="inverse",
                 help="Percentage of incidents requiring medical attention"
             )
+
+def display_operational_performance_section(df):
+    st.header("📈 Operational Performance & Risk Analysis")
+    display_operational_performance_cards(df)
+    st.markdown("---")
+    plot_reporter_type_metrics(df)
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        plot_incident_types_bar(df)
+    with col2:
+        plot_medical_outcomes(df)
+    plot_monthly_incidents_by_severity(df)
+    plot_reporter_performance_scatter(df)
+    plot_serious_injury_age_severity(df)
+
+# ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
+
+def display_operational_performance_cards(df):
+    """Display operational performance cards with trend indicators"""
+    if df.empty or 'incident_date' not in df.columns:
+        st.warning("No data available for operational performance cards")
+        return
+    
+    # Calculate current month and previous month data
+    current_date = df['incident_date'].max()
+    current_month = current_date.to_period('M')
+    previous_month = current_month - 1
+    
+    current_df = df[df['incident_date'].dt.to_period('M') == current_month]
+    previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
+    
+    st.markdown("### 📈 Operational Performance Metrics")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Location Reportable Rate
+        if 'location' in df.columns and 'reportable' in df.columns:
+            current_reportable_rate = (current_df['reportable'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
+            previous_reportable_rate = (previous_df['reportable'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
+            
+            trend_pct, trend_arrow = calculate_trend(current_reportable_rate, previous_reportable_rate)
+            
+            st.metric(
+                label="🏢 Location Reportable Rate",
+                value=f"{current_reportable_rate:.1f}%",
+                delta=f"{trend_arrow} {trend_pct:.1f}%",
+                delta_color="inverse",
+                help="Percentage of incidents that are reportable by location"
+            )
+    
+    with col2:
+        # Average Participant Age
+        if 'participant_age' in df.columns:
+            current_avg_age = current_df['participant_age'].mean() if len(current_df) > 0 else 0
+            previous_avg_age = previous_df['participant_age'].mean() if len(previous_df) > 0 else 0
+            
+            trend_pct, trend_arrow = calculate_trend(current_avg_age, previous_avg_age)
+            
+            st.metric(
+                label="👥 Average Participant Age",
+                value=f"{current_avg_age:.1f} yrs",
+                delta=f"{trend_arrow} {trend_pct:.1f}%",
+                delta_color="normal",
+                help="Average age of participants involved in incidents"
+            )
+    
+    with col3:
+        # Medical Attention Rate
+        if 'medical_attention_required' in df.columns:
+            current_medical_rate = (current_df['medical_attention_required'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
+            previous_medical_rate = (previous_df['medical_attention_required'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
+            
+            trend_pct, trend_arrow = calculate_trend(current_medical_rate, previous_medical_rate)
+            
+            st.metric(
+                label="🏥 Medical Attention Rate",
+                value=f"{current_medical_rate:.1f}%",
+                delta=f"{trend_arrow} {trend_pct:.1f}%",
+                delta_color="inverse",
+                help="Percentage of incidents requiring medical attention"
+            )
 def display_operational_performance_section(df):
     st.header("📈 Operational Performance & Risk Analysis")
     display_operational_performance_cards(df)
