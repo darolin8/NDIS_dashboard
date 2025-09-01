@@ -4,6 +4,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 import random
 from datetime import datetime, timedelta
+import re
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 
 # ================= UTILITY FUNCTIONS =================
 
@@ -1038,29 +1042,37 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-def plot_contributing_factors_by_month(df):
-    if df.empty or 'contributing_factors' not in df.columns or 'incident_date' not in df.columns:
-        st.warning("No data available for contributing factors analysis")
-        return
-    df = df.copy()
-    df['month_year'] = df['incident_date'].dt.to_period('M').astype(str)
-    try:
-        fac_df = df.groupby(['month_year', 'contributing_factors']).size().unstack(fill_value=0)
-        if not fac_df.empty:
-            fig = px.imshow(
-                fac_df.T,
-                text_auto=True,
-                aspect="auto",
-                labels=dict(x="Month-Year", y="Contributing Factor", color="Count"),
-                title="Contributing Factors by Month-Year",
-                color_continuous_scale='Blues'
-            )
-            fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True, key="contributing_factors_month")
-        else:
-            st.info("No contributing factors data available for heatmap")
-    except Exception as e:
-        st.warning(f"Unable to create contributing factors heatmap: {str(e)}")
+def extract_keyword(s):
+    # Example: pull out incident type between "for the" and "incident"
+    m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # fallback for other patterns, e.g. "revisited:" prefix
+    m2 = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
+    if m2:
+        return m2.group(1).strip()
+    # fallback: last 2 words
+    return ' '.join(s.split()[-3:-1])
+
+def plot_contributing_factors_heatmap(df):
+    # Add a column for the y-axis keywords
+    df['Incident Keyword'] = df['Contributing Factor'].apply(extract_keyword)
+
+    # Create a pivot table for the heatmap
+    heatmap_data = df.pivot_table(
+        index='Incident Keyword',
+        columns='Month-Year',
+        values='Count',
+        aggfunc='sum',
+        fill_value=0
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.heatmap(heatmap_data, annot=True, fmt="d", cmap="Blues", ax=ax)
+    plt.ylabel("Incident Type")
+    plt.xlabel("Month-Year")
+    plt.title("Contributing Factors by Month-Year")
+    st.pyplot(fig)
 
 # ================= PAGE SECTIONS =================
 
