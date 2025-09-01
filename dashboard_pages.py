@@ -495,7 +495,21 @@ def display_operational_performance_cards(df):
                 delta_color="inverse",
                 help="Percentage of incidents requiring medical attention"
             )
-
+def display_operational_performance_section(df):
+    st.header("📈 Operational Performance & Risk Analysis")
+    display_operational_performance_cards(df)
+    st.markdown("---")
+    plot_reporter_type_metrics(df)
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        plot_incident_types_bar(df)
+    with col2:
+        plot_medical_outcomes(df)
+    plot_monthly_incidents_by_severity(df)  # <--- FIXED HERE
+    plot_reporter_performance_scatter(df)
+    plot_serious_injury_age_severity(df)
+    
 def plot_reporter_type_metrics(df):
     """Display reporter type related metrics"""
     col1, col2, col3 = st.columns(3)
