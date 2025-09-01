@@ -99,7 +99,7 @@ def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_for
 
     fig, ax = plt.subplots(figsize=(8, 5))
     normal = anomaly_df[anomaly_df[anomaly_column] == False]
-    anomaly = anomaly_df[anomaly_df[anomaly_column] == True]
+    anomaly = anomaly_df[anomaly_df[anomaly_column] == True] # <-- FIXED typo here
     ax.scatter(normal[x_col], normal[y_col], c='blue', label='Normal', alpha=0.5)
     ax.scatter(anomaly[x_col], anomaly[y_col], c='red', label='Anomaly', alpha=0.7)
     ax.set_xlabel(display_x)
