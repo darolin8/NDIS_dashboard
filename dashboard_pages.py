@@ -1042,24 +1042,22 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-def plot_contributing_factors_by_month(df):
-    import re
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import streamlit as st
 
-    # Try to auto-detect the column containing 'Contributing factor' text
+def plot_contributing_factors_by_month(df):
+    # Show columns for debugging
+    st.write("DataFrame columns:", df.columns.tolist())
+
+    # 1. Find the column with contributing factor text
     factor_col = None
     for col in df.columns:
         if "contributing" in col.lower() and "factor" in col.lower():
             factor_col = col
             break
-
     if not factor_col:
-        st.error("No 'Contributing Factor' column found! Available columns: " + str(df.columns.tolist()))
+        st.error("No column with 'Contributing Factor' found. Columns: " + str(df.columns.tolist()))
         return
 
-    # Extract a keyword for each contributing factor for the y-axis
+    # 2. Create 'Incident Type Keyword'
     def extract_keyword(s):
         m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
         if m:
@@ -1077,6 +1075,15 @@ def plot_contributing_factors_by_month(df):
 
     df['Incident Type Keyword'] = df[factor_col].apply(extract_keyword)
 
+    # 3. Check for 'Month-Year' and 'Count'
+    if 'Month-Year' not in df.columns:
+        st.error("No 'Month-Year' column found. Columns: " + str(df.columns.tolist()))
+        return
+    if 'Count' not in df.columns:
+        st.error("No 'Count' column found. Columns: " + str(df.columns.tolist()))
+        return
+
+    # 4. Pivot table and plot
     heatmap_data = df.pivot_table(
         index='Incident Type Keyword',
         columns='Month-Year',
