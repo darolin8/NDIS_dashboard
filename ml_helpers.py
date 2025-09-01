@@ -67,10 +67,17 @@ def perform_anomaly_detection(df: pd.DataFrame):
     iso_labels = iso.fit_predict(Xs)
     svm = OneClassSVM(nu=0.1)
     svm_labels = svm.fit_predict(Xs)
+    
+    # Add PCA coordinates for visualization
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(Xs)
+    
     out = df.copy()
     out['isolation_forest_anomaly'] = iso_labels == -1
     out['svm_anomaly'] = svm_labels == -1
     out['anomaly_score'] = iso.decision_function(Xs)
+    out['pca_x'] = X_pca[:, 0]
+    out['pca_y'] = X_pca[:, 1]
     return out, feature_names
 
 def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly", axis_labels=None):
