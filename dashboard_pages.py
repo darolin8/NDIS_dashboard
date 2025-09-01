@@ -1255,12 +1255,95 @@ def display_executive_summary_section(df):
         plot_time_analysis(df)
     plot_reportable_analysis(df)
 
+
 def display_operational_performance_section(df):
-    st.header("📈 Operational Performance & Risk Analysis")
-    display_operational_performance_cards(df)
+    st.header("📝 Incident Management Dashboard")
     st.markdown("---")
-    plot_reporter_type_metrics(df)
+    # Calculate metrics
+    if 'dob' in df.columns:
+        df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
+        today = pd.to_datetime('today')
+        df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
+        avg_age = df['participant_age'].mean()
+        avg_age_txt = f"{avg_age:.1f} yrs" if pd.notnull(avg_age) else "N/A"
+    else:
+        avg_age_txt = "N/A"
+    
+    # Example metrics (replace with your actual logic):
+    location_reportable_rate = 0.0  # Put your calculation here
+    medical_attention_rate = 0.0    # Put your calculation here
+    medical_attention_required = int(df['medical_attention_required'].sum()) if 'medical_attention_required' in df.columns else 0
+
+    # Show all cards in one line
+    col1, col2, col3, col4 = st.columns(4)
+
+    # Location Reportable Rate
+    with col1:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Location Reportable Rate
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {location_reportable_rate:.1f}%
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    # Medical Attention Rate
+    with col2:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Medical Attention Rate
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#d9534f;">
+                  {medical_attention_rate:.1f}%
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    # Medical Attention Required
+    with col3:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Medical Attention Required
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#f0ad4e;">
+                  {medical_attention_required}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    # Average Participant Age
+    with col4:
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Average Participant Age
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#5ad8a6;">
+                  {avg_age_txt}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
     st.markdown("---")
+    
     col1, col2 = st.columns(2)
     with col1:
         plot_incident_types_bar(df)
