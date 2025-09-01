@@ -358,75 +358,106 @@ def plot_serious_injury_age_severity(df):
     else:
         st.info("No high severity incidents found for age analysis")
 
-def display_executive_kpi_cards(df):
-    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns or 'incident_date' not in df.columns:
-        st.warning("No data available for KPI cards")
-        return
-    top_incident_type = df['incident_type'].value_counts().index[0] if len(df) > 0 else "N/A"
-    most_common_severity = df['severity'].value_counts().index[0] if len(df) > 0 else "N/A"
-    current_date = df['incident_date'].max()
-    current_month = current_date.to_period('M')
-    previous_month = current_month - 1
-    latest_month_incidents = len(df[df['incident_date'].dt.to_period('M') == current_month])
-    previous_month_incidents = len(df[df['incident_date'].dt.to_period('M') == previous_month])
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Top Incident Type", top_incident_type, help="Most frequently occurring incident type")
-    with col2:
-        change = latest_month_incidents - previous_month_incidents
-        delta_color = "inverse" if change > 0 else "normal"
-        st.metric(f"Latest Month ({current_month})", latest_month_incidents, delta=change, delta_color=delta_color, help="Number of incidents in the current month")
-    with col3:
-        st.metric(f"Previous Month ({previous_month})", previous_month_incidents, help="Number of incidents in the previous month")
-    with col4:
-        st.metric("Most Common Severity", most_common_severity, help="Most frequently occurring severity level")
+def display_executive_summary_section(df):
+    st.title("Executive Summary")
 
-def display_recent_critical_incidents_card(df):
-    if df.empty or 'severity' not in df.columns or 'incident_date' not in df.columns:
-        st.warning("No data available for recent critical incidents")
-        return
-    thirty_days_ago = datetime.now() - timedelta(days=30)
-    critical_incidents = df[
-        (df['severity'].str.lower() == 'high') &
-        (df['incident_date'] >= thirty_days_ago)
-    ].sort_values('incident_date', ascending=False).head(5)
-    st.markdown("### 🚨 Recent Critical Incidents")
-    if critical_incidents.empty:
-        st.info("No critical incidents in the last 30 days")
-        return
-    for idx, incident in critical_incidents.iterrows():
-        with st.container():
-            col1, col2, col3 = st.columns([1, 6, 1])
-            with col1:
-                st.markdown(
-                    """
-                    <div style="display: flex; align-items: center; height: 60px;">
-                        <div style="width: 20px; height: 20px; background-color: #FF2B2B;
-                                    border-radius: 50%; margin-right: 10px;"></div>
-                        <div style="width: 2px; height: 40px; background-color: #FF2B2B;
-                                    margin-left: 9px;"></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with col2:
-                incident_date = incident['incident_date'].strftime('%b %d')
-                incident_type = incident.get('incident_type', 'Unknown')
-                location = incident.get('location', 'Unknown')
-                description = incident.get('description', 'Sample incident description...')
-                st.markdown(f"**{incident_type}** - {location}")
-                st.markdown(f"<small>{description[:80]}...</small>", unsafe_allow_html=True)
-            with col3:
-                st.markdown(
-                    f"""
-                    <div style="text-align: center; padding: 10px;">
-                        <div style="font-size: 12px; color: #666;">📅</div>
-                        <div style="font-weight: bold; font-size: 14px;">{incident_date}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            st.markdown("---")
+    # Cards Section with light border and increased font size
+    st.markdown(
+        """
+        <style>
+        .card-container {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .dashboard-card {
+            background: white;
+            border: 1px solid #e3e3e3;
+            border-radius: 12px;
+            box-shadow: none;
+            padding: 1.5rem 1.5rem 1rem 1.5rem;
+            min-width: 180px;
+            text-align: center;
+        }
+        .dashboard-card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #222;
+        }
+        .dashboard-card-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #1769aa;
+            margin-bottom: 0.25rem;
+        }
+        .dashboard-card-desc {
+            font-size: 0.93rem;
+            color: #444;
+            margin-bottom: 0.1rem;
+        }
+        </style>
+        """, unsafe_allow_html=True
+    )
+
+    total_incidents = len(df)
+    high_severity_count = int((df['severity'].str.lower() == 'high').sum()) if 'severity' in df.columns else 0
+    reportable_count = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
+    avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else 0
+
+    st.markdown(
+        f"""
+        <div class="card-container">
+          <div class="dashboard-card">
+            <div class="dashboard-card-title">Total Incidents</div>
+            <div class="dashboard-card-value">{total_incidents}</div>
+            <div class="dashboard-card-desc">All incidents reported</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-card-title">High Severity</div>
+            <div class="dashboard-card-value">{high_severity_count}</div>
+            <div class="dashboard-card-desc">Critical severity cases</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-card-title">Reportable Incidents</div>
+            <div class="dashboard-card-value">{reportable_count}</div>
+            <div class="dashboard-card-desc">Reportable events</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-card-title">Avg Age</div>
+            <div class="dashboard-card-value">{avg_age:.1f} yrs</div>
+            <div class="dashboard-card-desc">Avg participant age</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+    st.subheader("Severity Distribution")
+    plot_severity_distribution(df)
+
+    st.subheader("Top 10 Incident Types")
+    plot_incident_types_bar(df)
+
+    st.subheader("Location Analysis")
+    plot_location_analysis(df)
+
+    st.subheader("Monthly Trends")
+    plot_monthly_incidents_by_severity(df)
+
+    st.subheader("Medical Outcomes")
+    plot_medical_outcomes(df)
+
+    st.subheader("Daily Incident Trends")
+    plot_incident_trends(df)
+
+    st.subheader("Incidents by Day of Week")
+    plot_weekday_analysis(df)
+
+    st.subheader("Incidents by Hour of Day")
+    plot_time_analysis(df)
+
+    st.subheader("Reportable Analysis")
+    plot_reportable_analysis(df)
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
