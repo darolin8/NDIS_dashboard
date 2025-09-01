@@ -358,6 +358,33 @@ def plot_serious_injury_age_severity(df):
     else:
         st.info("No high severity incidents found for age analysis")
 
+def add_age_and_age_range_columns(df):
+    # Assumes df['dob'] is in YYYY-MM-DD format
+    if 'dob' in df.columns:
+        df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
+        today = pd.to_datetime('today')
+        df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
+        # You can round or convert to int if you wish
+        df['participant_age'] = df['participant_age'].astype('Int64')
+
+    def get_age_range(age):
+        if pd.isnull(age):
+            return "Unknown"
+        if age < 18:
+            return "Under 18"
+        elif age < 30:
+            return "18-29"
+        elif age < 45:
+            return "30-44"
+        elif age < 60:
+            return "45-59"
+        else:
+            return "60+"
+
+    if 'participant_age' in df.columns:
+        df['age_range'] = df['participant_age'].apply(get_age_range)
+    return df
+
 def display_executive_summary_section(df):
     import calendar
 
@@ -1040,9 +1067,10 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    df = add_age_and_age_range_columns(df)
 
-    # Top Incident Type (string)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+
     with col1:
         top_type = (
             df['incident_type'].value_counts().idxmax()
@@ -1067,7 +1095,6 @@ def display_executive_summary_section(df):
             unsafe_allow_html=True
         )
 
-    # Latest Month Incidents
     with col2:
         if 'incident_date' in df.columns and not df.empty:
             latest_month = df['incident_date'].max().to_period('M')
@@ -1094,7 +1121,6 @@ def display_executive_summary_section(df):
             unsafe_allow_html=True
         )
 
-    # Previous Month Incidents
     with col3:
         if 'incident_date' in df.columns and not df.empty:
             prev_month = latest_month - 1
@@ -1121,7 +1147,6 @@ def display_executive_summary_section(df):
             unsafe_allow_html=True
         )
 
-    # High Severity Incidents
     with col4:
         high_severity = (
             len(df[df['severity'].str.lower() == 'high'])
@@ -1146,7 +1171,6 @@ def display_executive_summary_section(df):
             unsafe_allow_html=True
         )
 
-    # Reportable Incidents
     with col5:
         reportable = (
             int(df['reportable'].sum())
@@ -1165,6 +1189,49 @@ def display_executive_summary_section(df):
                 </span><br>
                 <span style="font-size:0.93rem;color:#444;">
                   Regulatory events
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Average Age card (calculated from DOB)
+    with col6:
+        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
+        avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Average Age
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#5ad8a6;">
+                  {avg_age_txt}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  Average participant age
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Most common age range card
+    with col7:
+        common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                <span style="font-size:1rem;font-weight:600;color:#222;">
+                  Most Common Age Range
+                </span><br>
+                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                  {common_range}
+                </span><br>
+                <span style="font-size:0.93rem;color:#444;">
+                  Age group with most participants
                 </span>
             </div>
             """,
