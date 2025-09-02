@@ -264,3 +264,30 @@ def profile_location_risk(df):
         labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
     )
     return risk_df, fig
+
+def profile_incident_type_risk(df):
+    """
+    Analyzes risk by incident type: computes incident counts and severity rates,
+    returns a DataFrame and a Plotly bar chart.
+    """
+    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+
+    # Count incidents per type
+    type_counts = df['incident_type'].value_counts().rename('incident_count')
+    # Severity rate (proportion high severity)
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    type_severity = df.groupby('incident_type')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([type_counts, type_severity], axis=1).sort_values('incident_count', ascending=False)
+
+    # Make the plot
+    import plotly.express as px
+    plot_df = risk_df.reset_index().rename(columns={'index':'incident_type'})
+    fig = px.bar(
+        plot_df, x='incident_type', y='incident_count', color='avg_severity',
+        title='Incident Risk by Type',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
+
