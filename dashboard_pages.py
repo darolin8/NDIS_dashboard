@@ -394,58 +394,59 @@ def add_age_and_age_range_columns(df):
 def display_executive_summary_section(df):
     import calendar
 
-    st.markdown("""
+   st.markdown("""
     <style>
-    .main-container {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 18px 24px;
-    }
     .card-container {
         display: flex;
-        gap: 2rem;
-        margin-bottom: 2.5rem;
-        justify-content: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 24px;
     }
-    .dashboard-card {
+    .card {
         background: #fff;
-        border: 1px solid #e3e3e3;
-        border-radius: 14px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-        padding: 1.6rem 1.2rem 1.2rem 1.2rem;
-        min-width: 170px;
-        max-width: 220px;
-        text-align: center;
-        flex: 1;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        padding: 18px 12px;
+        width: 160px;
+        height: 90px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        transition: font-size 0.2s;
+        overflow: hidden;
     }
-    .dashboard-card-title {
-        font-size: 1.15rem;
+    .card .card-title {
+        font-size: 1.02rem;
         font-weight: 600;
-        margin-bottom: 0.6rem;
-        color: #222;
+        margin-bottom: 2px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
-    .dashboard-card-value {
-        font-size: 2.1rem;
-        font-weight: 700;
-        color: #1769aa;
-        margin-bottom: 0.3rem;
+    .card .card-value {
+        font-size: 1.7rem;
+        font-weight: bold;
+        margin-bottom: 2px;
+        color: #1a73e8;
     }
-    .dashboard-card-desc {
-        font-size: 0.97rem;
+    .card .card-desc {
+        font-size: 0.9rem;
         color: #444;
-        margin-bottom: 0.1rem;
+        text-align: center;
+        max-width: 95%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
-    .section-title {
-        font-size: 1.35rem;
-        font-weight: 700;
-        margin: 2rem 0 1rem 0;
-    }
-    .divider {
-        margin: 2rem 0 2rem 0;
-        border-top: 1px solid #eee;
+    /* Reduce font size if content overflows */
+    .card:has(.card-title[style*="font-size:0.9rem"]), 
+    .card:has(.card-desc[style*="font-size:0.8rem"]) {
+        font-size: 0.95rem;
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
     # ---- CARD DATA ----
     # Top Incident Type
