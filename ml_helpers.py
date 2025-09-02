@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
 from scipy.stats import chi2_contingency, f_oneway
+from sklearn.preprocessing import StandardScaler
 
 # Constants
 SEVERITY_MAP = {'Low': 0, 'Moderate': 1, 'High': 2}
@@ -540,6 +541,57 @@ def plot_correlation_heatmap(df):
         plt.tight_layout()
         return fig
 
+def get_monthly_incident_heatmap(df):
+    heatmap_data = df.groupby(['month', 'day_of_week']).size().reset_index(name='incident_count')
+    pivot_heatmap = heatmap_data.pivot(index='day_of_week', columns='month', values='incident_count')
+    fig = px.imshow(
+        pivot_heatmap,
+        labels=dict(x="Month", y="Day of Week", color="Incident Count"),
+        title="Incident Patterns: Month vs Day of Week Heatmap",
+        color_continuous_scale="Reds"
+    )
+    fig.update_yaxes(
+        tickmode='array',
+        tickvals=list(range(7)),
+        ticktext=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    )
+    return fig
+
+def get_average_severity_by_month(df):
+    severity_by_month = df.groupby('month')['severity_numeric'].mean().reset_index()
+    fig = px.line(
+        severity_by_month, x='month', y='severity_numeric',
+        title="Average Incident Severity by Month",
+        labels={'severity_numeric': 'Average Severity', 'month': 'Month'}
+    )
+    return fig
+
+def get_daily_volume_clusters(df, n_clusters=4):
+    daily_counts = df.groupby(df['incident_date'].dt.date).size().reset_index()
+    daily_counts.columns = ['date', 'incident_count']
+    daily_counts['month'] = pd.to_datetime(daily_counts['date']).dt.month
+    daily_counts['day_of_week'] = pd.to_datetime(daily_counts['date']).dt.dayofweek
+    daily_counts['month_sin'] = np.sin(2 * np.pi * daily_counts['month'] / 12)
+    daily_counts['month_cos'] = np.cos(2 * np.pi * daily_counts['month'] / 12)
+    daily_counts['day_sin'] = np.sin(2 * np.pi * daily_counts['day_of_week'] / 7)
+    daily_counts['day_cos'] = np.cos(2 * np.pi * daily_counts['day_of_week'] / 7)
+
+    features = ['incident_count', 'month_sin', 'month_cos', 'day_sin', 'day_cos']
+    X = daily_counts[features].fillna(0)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    daily_counts['pattern_cluster'] = kmeans.fit_predict(X_scaled)
+
+    fig = px.scatter(
+        daily_counts,
+        x='date',
+        y='incident_count',
+        color=daily_counts['pattern_cluster'].astype(str),
+        title="Daily Incident Volume Patterns (ML Clusters)",
+        labels={'incident_count': 'Daily Incident Count', 'date': 'Date'}
+    )
+    return fig
 # ---------------------------
 # Input Validation Helper
 # ---------------------------
