@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 import plotly.express as px
+import seaborn as sns
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier, IsolationForest, GradientBoostingClassifier
@@ -207,20 +208,17 @@ def plot_3d_clusters(clustered_df):
     )
     return fig
 
+
+
 def plot_correlation_heatmap(df):
     """
     Plots a correlation heatmap for all numeric columns in the dataframe.
     Warns if there are not enough numeric columns for a meaningful heatmap.
-    Returns a matplotlib Figure, or None if not enough data.
+    Returns a matplotlib Figure.
     """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import numpy as np
-
-    # Select only numeric columns
-    numeric_df = df.select_dtypes(include=[np.number])
+    numeric_df = df.select_dtypes(include=['number'])
     if numeric_df.shape[1] < 2:
-        # Not enough numeric columns for a heatmap
+        st.warning("Not enough numeric columns for correlation heatmap. Please check your data or add more numeric features.")
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.text(0.5, 0.5, "Not enough numeric columns for correlation heatmap", 
                 fontsize=14, ha='center', va='center')
@@ -229,10 +227,26 @@ def plot_correlation_heatmap(df):
         return fig
 
     corr = numeric_df.corr()
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
     plt.tight_layout()
     return fig
+
+st.title("Correlation Heatmap for NDIS Incidents")
+
+csv_url = "https://github.com/darolin8/NDIS_dashboard/raw/main/text%20data/ndis_incidents_1000.csv"
+
+st.write(f"Loading data from: {csv_url}")
+df = pd.read_csv(csv_url)
+
+st.write("Data preview:")
+st.write(df.head())
+
+numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+st.write("Numeric columns detected:", numeric_cols)
+
+fig = plot_correlation_heatmap(df)
+st.pyplot(fig)
 
 def forecast_incident_volume(df, periods=6):
     """
