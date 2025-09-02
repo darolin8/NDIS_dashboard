@@ -35,6 +35,51 @@ def prepare_ml_features(df: pd.DataFrame):
     X = features_df[num_cols].fillna(0)
     return X, num_cols, label_encoders
 
+import pandas as pd
+import plotly.graph_objs as go
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, roc_curve, auc
+
+def compare_models(df):
+    # Prepare features
+    from ml_helpers import prepare_ml_features
+    X, feature_names, _ = prepare_ml_features(df)
+    if X is None or 'severity' not in df.columns:
+        return pd.DataFrame(), go.Figure()
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    y = df['severity'].map(sev_map)
+    mask = ~y.isna()
+    X, y = X[mask], y[mask]
+    if len(X) < 10:
+        return pd.DataFrame(), go.Figure()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+    models = {
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+        'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+        'Neural Network': MLPClassifier(hidden_layer_sizes=(64,), max_iter=300, random_state=42)
+    }
+    metrics = []
+    roc_fig = go.Figure()
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test)
+            # For multiclass, show ROC for each class
+            for i in range(y_prob.shape[1]):
+                fpr, tpr, _ = roc_curve(y_test == i, y_prob[:, i])
+                roc_auc = auc(fpr, tpr)
+                roc_fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f"{name} class {i} (AUC={roc_auc:.2f})"))
+        metrics.append({'Model': name, 'Accuracy': acc})
+    metrics_df = pd.DataFrame(metrics)
+    roc_fig.update_layout(title="ROC Curves", xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
+
+    return metrics_df, roc_fig
+
 @st.cache_data
 def train_severity_prediction_model(df: pd.DataFrame):
     if df.empty or len(df) < 20:
