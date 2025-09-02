@@ -1,56 +1,63 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, IsolationForest
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score, roc_curve, auc, silhouette_score
+from sklearn.model_selection import train_test_split
+from sklearn.svm import OneClassSVM
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 import plotly.graph_objs as go
 import plotly.express as px
-import seaborn as sns
+import matplotlib.pyplot as plt
+import streamlit as st
 
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, IsolationForest, GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, silhouette_score, roc_curve, auc
-from sklearn.svm import OneClassSVM
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-from sklearn.decomposition import PCA
+# ---------------------------
+# Feature Preparation
+# ---------------------------
+def prepare_ml_features(df):
+    usable_cols = [col for col in df.columns if col != 'severity' and df[col].dtype in ['float64', 'int64']]
+    categorical_cols = [col for col in df.columns if df[col].dtype == 'object' and col != 'severity']
+    all_feature_cols = usable_cols + categorical_cols
 
-@st.cache_data
-def prepare_ml_features(df: pd.DataFrame):
-    if df.empty:
-        return None, None, None
-    features_df = df.copy()
-    label_encoders = {}
-    categorical_cols = ['location', 'incident_type', 'contributing_factors', 'reported_by']
-    for col in categorical_cols:
-        if col in features_df.columns:
-            le = LabelEncoder()
-            features_df[f'{col}_encoded'] = le.fit_transform(features_df[col].fillna('Unknown'))
-            label_encoders[col] = le
-    if 'incident_date' in features_df.columns:
-        features_df['day_of_week'] = features_df['incident_date'].dt.dayofweek
-        features_df['month'] = features_df['incident_date'].dt.month
-        if 'incident_time' in features_df.columns:
-            features_df['hour'] = pd.to_datetime(features_df['incident_time'], format='%H:%M', errors='coerce').dt.hour
-    num_cols = [c for c in [
-        'day_of_week','month','hour',
-        'location_encoded','incident_type_encoded','contributing_factors_encoded','reported_by_encoded'
-    ] if c in features_df.columns]
-    if not num_cols:
-        return None, None, None
-    X = features_df[num_cols].fillna(0)
-    return X, num_cols, label_encoders
+    if len(all_feature_cols) == 0:
+        return None, [], None
 
+    feature_df = df[all_feature_cols].copy()
+    encoder = None
+    if categorical_cols:
+        encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+        encoded = encoder.fit_transform(feature_df[categorical_cols])
+        encoded_feature_names = encoder.get_feature_names_out(categorical_cols)
+        feature_df = feature_df.drop(columns=categorical_cols)
+        X = np.hstack([feature_df.values, encoded])
+        feature_names = list(feature_df.columns) + list(encoded_feature_names)
+    else:
+        X = feature_df.values
+        feature_names = list(feature_df.columns)
+
+    return X, feature_names, encoder
+
+# ---------------------------
+# Model Comparison & ROC
+# ---------------------------
 def compare_models(df):
     X, feature_names, _ = prepare_ml_features(df)
     if X is None or 'severity' not in df.columns:
-        return pd.DataFrame(), go.Figure()
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(text="No data available for ROC curves.", x=0.5, y=0.5, showarrow=False)
+        return pd.DataFrame(), empty_fig
+
     sev_map = {'Low':0, 'Moderate':1, 'High':2}
     y = df['severity'].map(sev_map)
     mask = ~y.isna()
     X, y = X[mask], y[mask]
     if len(X) < 10:
-        return pd.DataFrame(), go.Figure()
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(text="Not enough data for ROC curves.", x=0.5, y=0.5, showarrow=False)
+        return pd.DataFrame(), empty_fig
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
     models = {
@@ -66,16 +73,31 @@ def compare_models(df):
         acc = accuracy_score(y_test, y_pred)
         if hasattr(model, "predict_proba"):
             y_prob = model.predict_proba(X_test)
-            # For multiclass, show ROC for each class
             for i in range(y_prob.shape[1]):
-                fpr, tpr, _ = roc_curve(y_test == i, y_prob[:, i])
-                roc_auc = auc(fpr, tpr)
-                roc_fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f"{name} class {i} (AUC={roc_auc:.2f})"))
+                try:
+                    fpr, tpr, _ = roc_curve(y_test == i, y_prob[:, i])
+                    roc_auc = auc(fpr, tpr)
+                    roc_fig.add_trace(go.Scatter(
+                        x=fpr, y=tpr, mode='lines',
+                        name=f"{name} class {i} (AUC={roc_auc:.2f})"
+                    ))
+                except Exception:
+                    continue
         metrics.append({'Model': name, 'Accuracy': acc})
+
     metrics_df = pd.DataFrame(metrics)
-    roc_fig.update_layout(title="ROC Curves", xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
+    if len(roc_fig.data) == 0:
+        roc_fig.add_annotation(text="No ROC curves available.", x=0.5, y=0.5, showarrow=False)
+    roc_fig.update_layout(
+        title="ROC Curves",
+        xaxis_title="False Positive Rate",
+        yaxis_title="True Positive Rate"
+    )
     return metrics_df, roc_fig
 
+# ---------------------------
+# Severity Prediction Model
+# ---------------------------
 @st.cache_data
 def train_severity_prediction_model(df: pd.DataFrame):
     if df.empty or len(df) < 20:
@@ -95,6 +117,9 @@ def train_severity_prediction_model(df: pd.DataFrame):
     acc = accuracy_score(y_test, model.predict(X_test))
     return model, acc, feature_names
 
+# ---------------------------
+# Anomaly Detection
+# ---------------------------
 @st.cache_data
 def perform_anomaly_detection(df: pd.DataFrame):
     if df.empty or len(df) < 10:
@@ -136,6 +161,9 @@ def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_for
     fig.tight_layout()
     return fig
 
+# ---------------------------
+# Clustering Analysis
+# ---------------------------
 @st.cache_data
 def perform_clustering_analysis(df: pd.DataFrame, n_clusters=5, algorithm='kmeans'):
     if df.empty or len(df) < 10:
@@ -187,10 +215,8 @@ def analyze_cluster_characteristics(clustered_df: pd.DataFrame):
     return cluster_analysis
 
 def plot_3d_clusters(clustered_df):
-    # 3D PCA for clustering visualization
     if clustered_df is None or not all(c in clustered_df.columns for c in ['pca_x', 'pca_y']):
         return go.Figure()
-    # Optionally compute third component if not present
     if 'pca_z' not in clustered_df.columns:
         features_df = clustered_df.select_dtypes(include=[np.number])
         X = features_df.values
@@ -208,14 +234,10 @@ def plot_3d_clusters(clustered_df):
     )
     return fig
 
-
-import pandas as pd
-import numpy as np
+# ---------------------------
+# Feature Association Analysis
+# ---------------------------
 from scipy.stats import chi2_contingency, f_oneway
-import matplotlib.pyplot as plt
-import plotly.express as px
-
-# -- Utility Functions --
 
 def cramers_v(x, y):
     confusion_matrix = pd.crosstab(x, y)
@@ -249,18 +271,11 @@ def eta_squared(groups, values):
     sst = sum((values - grand_mean) ** 2)
     return ssm / sst if sst != 0 else np.nan
 
-# -- Main Association Analysis Helper --
-
 def perform_correlation_analysis(df):
-    """
-    Returns: associations_df, association_heatmap (plotly fig)
-    associations_df columns: feature_1, feature_2, association_type, strength, significant, interpretation
-    """
     results = []
     columns = df.columns
     for i, col1 in enumerate(columns):
         for col2 in columns[i+1:]:
-            # Categorical-Categorical
             if df[col1].dtype == "object" and df[col2].dtype == "object":
                 try:
                     v = cramers_v(df[col1], df[col2])
@@ -281,7 +296,6 @@ def perform_correlation_analysis(df):
                     })
                 except Exception:
                     continue
-            # Binary-Binary
             elif df[col1].nunique() == 2 and df[col2].nunique() == 2:
                 try:
                     v = phi_coefficient(df[col1], df[col2])
@@ -301,14 +315,12 @@ def perform_correlation_analysis(df):
                     })
                 except Exception:
                     continue
-            # Numerical-Categorical
             elif (df[col1].dtype in ['float64', 'int64'] and df[col2].dtype == 'object') or \
                  (df[col2].dtype in ['float64', 'int64'] and df[col1].dtype == 'object'):
                 try:
                     num_col, cat_col = (col1, col2) if df[col1].dtype in ['float64', 'int64'] else (col2, col1)
                     groups = df[cat_col]
                     values = df[num_col]
-                    # Only consider groups with more than 1 value
                     valid_groups = [g for g in np.unique(groups) if sum(groups == g) > 1]
                     if len(valid_groups) < 2:
                         continue
@@ -331,7 +343,6 @@ def perform_correlation_analysis(df):
                 except Exception:
                     continue
     associations_df = pd.DataFrame(results)
-    # Association heatmap (matrix)
     if not associations_df.empty:
         try:
             heatmap_df = associations_df.pivot_table(
@@ -350,18 +361,13 @@ def perform_correlation_analysis(df):
     else:
         return associations_df, None
 
-# -- Other expected stubs for dashboard compatibility --
-
-def compare_models(*args, **kwargs):
-    """Stub for dashboard compatibility."""
-    return pd.DataFrame(), None
-
+# ---------------------------
+# Dashboard Helper Stubs
+# ---------------------------
 def forecast_incident_volume(*args, **kwargs):
-    """Stub for dashboard compatibility."""
     return pd.Series(dtype='float64'), pd.Series(dtype='float64')
 
 def profile_location_risk(df):
-    """Example: Analyzes risk by location, returns DataFrame and Plotly bar chart."""
     if df.empty or 'location' not in df.columns or 'severity' not in df.columns:
         return pd.DataFrame(), None
     location_counts = df['location'].value_counts().rename('incident_count')
@@ -378,7 +384,6 @@ def profile_location_risk(df):
     return risk_df, fig
 
 def profile_incident_type_risk(df):
-    """Example: Analyzes risk by incident type, returns DataFrame and Plotly bar chart."""
     if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
         return pd.DataFrame(), None
     type_counts = df['incident_type'].value_counts().rename('incident_count')
@@ -395,7 +400,6 @@ def profile_incident_type_risk(df):
     return risk_df, fig
 
 def detect_seasonal_patterns(df):
-    """Detects seasonal patterns in incident data, returns Plotly time series figure."""
     if df.empty or 'incident_date' not in df.columns:
         return None
     monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
@@ -409,7 +413,6 @@ def detect_seasonal_patterns(df):
     return fig
 
 def plot_correlation_heatmap(df):
-    """Fallback: plots a correlation heatmap for numeric columns, or warns if insufficient."""
     import matplotlib.pyplot as plt
     import seaborn as sns
     numeric_df = df.select_dtypes(include=['number'])
@@ -424,57 +427,4 @@ def plot_correlation_heatmap(df):
     fig, ax = plt.subplots(figsize=(10,8))
     sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
     plt.tight_layout()
-    return fig
-
-def profile_incident_type_risk(df):
-    """
-    Analyzes risk by incident type: computes incident counts and severity rates,
-    returns a DataFrame and a Plotly bar chart.
-    """
-    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
-        return pd.DataFrame(), None
-
-    # Count incidents per type
-    type_counts = df['incident_type'].value_counts().rename('incident_count')
-    # Severity rate (proportion high severity)
-    sev_map = {'Low':0, 'Moderate':1, 'High':2}
-    df['sev_num'] = df['severity'].map(sev_map)
-    type_severity = df.groupby('incident_type')['sev_num'].mean().rename('avg_severity')
-    risk_df = pd.concat([type_counts, type_severity], axis=1).sort_values('incident_count', ascending=False)
-
-    # Make the plot
-    import plotly.express as px
-    plot_df = risk_df.reset_index().rename(columns={'index':'incident_type'})
-    fig = px.bar(
-        plot_df, x='incident_type', y='incident_count', color='avg_severity',
-        title='Incident Risk by Type',
-        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
-    )
-    return risk_df, fig
-
-def detect_seasonal_patterns(df):
-    """
-    Detects seasonal and temporal patterns in incident data.
-    Returns a Plotly figure of incident counts by month.
-    """
-    if df.empty or 'incident_date' not in df.columns:
-        return None
-
-    # Count incidents per month
-    monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
-    monthly_counts.index = monthly_counts.index.to_timestamp()
-
-    import plotly.graph_objs as go
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=monthly_counts.index,
-        y=monthly_counts.values,
-        mode='lines+markers',
-        name='Incidents'
-    ))
-    fig.update_layout(
-        title='Monthly Incident Volume',
-        xaxis_title='Month',
-        yaxis_title='Incident Count'
-    )
     return fig
