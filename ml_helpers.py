@@ -209,94 +209,133 @@ def plot_3d_clusters(clustered_df):
     return fig
 
 
+import pandas as pd
+import numpy as np
+from scipy.stats import chi2_contingency, f_oneway
+import plotly.express as px
+import plotly.graph_objs as go
 
-def plot_correlation_heatmap(df):
+def cramers_v(x, y):
+    confusion_matrix = pd.crosstab(x, y)
+    chi2 = chi2_contingency(confusion_matrix)[0]
+    n = confusion_matrix.sum().sum()
+    phi2 = chi2 / n
+    r, k = confusion_matrix.shape
+    phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
+    rcorr = r - ((r-1)**2)/(n-1)
+    kcorr = k - ((k-1)**2)/(n-1)
+    return np.sqrt(phi2corr / min((kcorr-1), (rcorr-1)))
+
+def phi_coefficient(x, y):
+    confusion_matrix = pd.crosstab(x, y)
+    if confusion_matrix.shape == (2,2):
+        a = confusion_matrix.iloc[0,0]
+        b = confusion_matrix.iloc[0,1]
+        c = confusion_matrix.iloc[1,0]
+        d = confusion_matrix.iloc[1,1]
+        numerator = a*d - b*c
+        denominator = np.sqrt((a+b)*(c+d)*(a+c)*(b+d))
+        return numerator / denominator if denominator != 0 else np.nan
+    else:
+        return np.nan
+
+def eta_squared(anova_result, groups, values):
+    group_means = [values[groups == g].mean() for g in np.unique(groups)]
+    grand_mean = values.mean()
+    ssm = sum([len(values[groups == g]) * (group_mean - grand_mean) ** 2 for g, group_mean in zip(np.unique(groups), group_means)])
+    sst = sum((values - grand_mean) ** 2)
+    return ssm / sst if sst != 0 else np.nan
+
+def perform_correlation_analysis(df):
     """
-    Plots a correlation heatmap for all numeric columns in the dataframe.
-    Warns if there are not enough numeric columns for a meaningful heatmap.
-    Returns a matplotlib Figure.
+    Returns: associations_df, association_heatmap
+    associations_df columns: feature_1, feature_2, association_type, strength, significant, interpretation
     """
-    numeric_df = df.select_dtypes(include=['number'])
-    if numeric_df.shape[1] < 2:
-        st.warning("Not enough numeric columns for correlation heatmap. Please check your data or add more numeric features.")
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "Not enough numeric columns for correlation heatmap", 
-                fontsize=14, ha='center', va='center')
-        ax.axis('off')
-        plt.tight_layout()
-        return fig
-
-    corr = numeric_df.corr()
-    fig, ax = plt.subplots(figsize=(10,8))
-    sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
-    plt.tight_layout()
-    return fig
-
-st.title("Correlation Heatmap for NDIS Incidents")
-
-csv_url = "https://github.com/darolin8/NDIS_dashboard/raw/main/text%20data/ndis_incidents_1000.csv"
-
-st.write(f"Loading data from: {csv_url}")
-df = pd.read_csv(csv_url)
-
-st.write("Data preview:")
-st.write(df.head())
-
-numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-st.write("Numeric columns detected:", numeric_cols)
-
-fig = plot_correlation_heatmap(df)
-st.pyplot(fig)
-
-def forecast_incident_volume(df, periods=6):
-    """
-    Performs time series forecasting of incident volume using Exponential Smoothing.
-    Returns: actual incident counts (series), forecasted counts (series)
-    """
-    if df.empty or 'incident_date' not in df.columns:
-        return pd.Series(dtype=float), pd.Series(dtype=float)
-    df_sorted = df.sort_values('incident_date')
-    df_monthly = df_sorted.groupby(df_sorted['incident_date'].dt.to_period('M')).size()
-    df_monthly.index = df_monthly.index.to_timestamp()
-    if len(df_monthly) < 3:
-        # Not enough data to forecast
-        return df_monthly, pd.Series(dtype=float)
-    try:
-        from statsmodels.tsa.holtwinters import ExponentialSmoothing
-        model = ExponentialSmoothing(df_monthly, trend='add', seasonal=None)
-        fit = model.fit()
-        forecast = fit.forecast(periods)
-        forecast.index = pd.date_range(start=df_monthly.index[-1]+pd.offsets.MonthBegin(), periods=periods, freq='M')
-        return df_monthly, forecast
-    except Exception as e:
-        print("Forecast error:", e)
-        return df_monthly, pd.Series(dtype=float)
-        
-def profile_location_risk(df):
-    """
-    Analyzes risk by location: computes incident counts and severity rates,
-    returns a DataFrame and a Plotly bar chart.
-    """
-    if df.empty or 'location' not in df.columns or 'severity' not in df.columns:
-        return pd.DataFrame(), None
-
-    # Count incidents per location
-    location_counts = df['location'].value_counts().rename('incident_count')
-    # Severity rate (proportion high severity)
-    sev_map = {'Low':0, 'Moderate':1, 'High':2}
-    df['sev_num'] = df['severity'].map(sev_map)
-    location_severity = df.groupby('location')['sev_num'].mean().rename('avg_severity')
-    risk_df = pd.concat([location_counts, location_severity], axis=1).sort_values('incident_count', ascending=False)
-
-    # Make the plot
-    import plotly.express as px
-    plot_df = risk_df.reset_index().rename(columns={'index':'location'})
-    fig = px.bar(
-        plot_df, x='location', y='incident_count', color='avg_severity',
-        title='Incident Risk by Location',
-        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
-    )
-    return risk_df, fig
+    results = []
+    columns = df.columns
+    for i, col1 in enumerate(columns):
+        for col2 in columns[i+1:]:
+            # Categorical-Categorical
+            if df[col1].dtype == "object" and df[col2].dtype == "object":
+                try:
+                    v = cramers_v(df[col1], df[col2])
+                    chi2, p, _, _ = chi2_contingency(pd.crosstab(df[col1], df[col2]))
+                    interpretation = (
+                        "No association" if v < 0.1 else
+                        "Small association" if v < 0.3 else
+                        "Medium association" if v < 0.5 else
+                        "Large association"
+                    )
+                    results.append({
+                        "feature_1": col1,
+                        "feature_2": col2,
+                        "association_type": "Categorical-Categorical",
+                        "strength": v,
+                        "significant": p < 0.05,
+                        "interpretation": interpretation
+                    })
+                except Exception:
+                    continue
+            # Binary-Binary
+            elif df[col1].nunique() == 2 and df[col2].nunique() == 2:
+                try:
+                    v = phi_coefficient(df[col1], df[col2])
+                    interpretation = (
+                        "No association" if abs(v) < 0.1 else
+                        "Small association" if abs(v) < 0.3 else
+                        "Medium association" if abs(v) < 0.5 else
+                        "Strong association"
+                    )
+                    results.append({
+                        "feature_1": col1,
+                        "feature_2": col2,
+                        "association_type": "Binary-Binary",
+                        "strength": v,
+                        "significant": abs(v) > 0.1,
+                        "interpretation": interpretation
+                    })
+                except Exception:
+                    continue
+            # Numerical-Categorical
+            elif (df[col1].dtype in ['float64', 'int64'] and df[col2].dtype == 'object') or \
+                 (df[col2].dtype in ['float64', 'int64'] and df[col1].dtype == 'object'):
+                try:
+                    num_col, cat_col = (col1, col2) if df[col1].dtype in ['float64', 'int64'] else (col2, col1)
+                    groups = df[cat_col]
+                    values = df[num_col]
+                    anova = f_oneway(*(values[groups == g] for g in np.unique(groups)))
+                    eta2 = eta_squared(anova, groups, values)
+                    interpretation = (
+                        "Small effect" if eta2 < 0.06 else
+                        "Medium effect" if eta2 < 0.14 else
+                        "Large effect"
+                    )
+                    results.append({
+                        "feature_1": num_col,
+                        "feature_2": cat_col,
+                        "association_type": "Numerical-Categorical",
+                        "strength": eta2,
+                        "significant": anova.pvalue < 0.05,
+                        "interpretation": interpretation
+                    })
+                except Exception:
+                    continue
+    associations_df = pd.DataFrame(results)
+    # Association heatmap
+    if not associations_df.empty:
+        heatmap_df = associations_df.pivot_table(
+            index='feature_1', columns='feature_2', values='strength', fill_value=np.nan
+        )
+        fig = px.imshow(
+            heatmap_df,
+            color_continuous_scale='RdBu',
+            aspect='auto',
+            title='Feature Association Matrix',
+            labels=dict(x="Feature 2", y="Feature 1", color="Association Strength")
+        )
+        return associations_df, fig
+    else:
+        return associations_df, None
 
 def profile_incident_type_risk(df):
     """
