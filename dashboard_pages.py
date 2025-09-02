@@ -1610,3 +1610,46 @@ def display_ml_insights_section(df):
         st.subheader("Feature Correlation Analysis")
         corr_fig = plot_correlation_heatmap(df)
         st.pyplot(corr_fig)  # Use st.plotly_chart if you return a plotly figure
+
+
+from ml_helpers import (
+    train_severity_prediction_model,
+    perform_anomaly_detection,
+    plot_anomaly_scatter
+)
+
+def show_severity_prediction_and_anomaly(df):
+    st.header("Severity Prediction Model")
+    # 1. Train the model and show feature importance
+    model, acc, feature_names = train_severity_prediction_model(df)
+    if model is not None:
+        st.write(f"Random Forest Accuracy: **{acc:.2f}**")
+        # Feature importance
+        importances = model.feature_importances_
+        imp_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+        imp_df = imp_df.sort_values(by='Importance', ascending=False)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.barh(imp_df['Feature'], imp_df['Importance'])
+        ax.set_xlabel("Importance")
+        ax.set_title("Feature Importance (Random Forest)")
+        plt.gca().invert_yaxis()
+        st.pyplot(fig)
+    else:
+        st.warning("Not enough data to train severity prediction model.")
+
+    st.header("Anomaly Detection (Isolation Forest & SVM)")
+    # 2. Run anomaly detection and show scatter plots
+    anomaly_df, anomaly_features = perform_anomaly_detection(df)
+    if anomaly_df is not None and anomaly_features:
+        x_col = anomaly_features[0]
+        y_col = anomaly_features[1] if len(anomaly_features) > 1 else anomaly_features[0]
+        st.subheader("Isolation Forest Anomalies")
+        fig1 = plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly",
+                                    axis_labels={x_col: x_col, y_col: y_col})
+        st.pyplot(fig1)
+        st.subheader("SVM Anomalies")
+        fig2 = plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="svm_anomaly",
+                                    axis_labels={x_col: x_col, y_col: y_col})
+        st.pyplot(fig2)
+    else:
+        st.warning("Not enough data for anomaly detection.")
