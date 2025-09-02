@@ -20,14 +20,30 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     file_path = "text data/ndis_incidents_1000.csv"
-    if not os.path.exists(file_path):
-        st.error(f"File '{file_path}' not found. Please upload or place it in the app directory.")
-        st.stop()
-    df = pd.read_csv(file_path, parse_dates=["incident_date", "notification_date"])
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incidents_1000.csv"
+    # Try local file first
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path, parse_dates=["incident_date", "notification_date"])
+    else:
+        try:
+            df = pd.read_csv(url)
+        except Exception as e:
+            st.error(f"Could not load data from either local file or URL: {e}")
+            st.stop()
+        # Try to parse dates if present
+        if "incident_date" in df.columns:
+            df["incident_date"] = pd.to_datetime(df["incident_date"], errors="coerce")
+        if "notification_date" in df.columns:
+            df["notification_date"] = pd.to_datetime(df["notification_date"], errors="coerce")
+    # Drop rows with missing incident_date
+    if "incident_date" in df.columns:
+        df = df.dropna(subset=["incident_date"])
+    # Add weekday column if missing
     if "incident_weekday" not in df.columns and "incident_date" in df.columns:
         df["incident_weekday"] = df["incident_date"].dt.day_name()
     return df
 
+df = load_data()
 def main():
     st.title("🏥 Incident Management Dashboard")
     st.markdown("### Comprehensive Analysis and Reporting System")
@@ -172,6 +188,7 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
+
 
 if __name__ == "__main__":
     main()
