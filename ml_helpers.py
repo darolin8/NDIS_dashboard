@@ -212,8 +212,10 @@ def plot_3d_clusters(clustered_df):
 import pandas as pd
 import numpy as np
 from scipy.stats import chi2_contingency, f_oneway
+import matplotlib.pyplot as plt
 import plotly.express as px
-import plotly.graph_objs as go
+
+# -- Utility Functions --
 
 def cramers_v(x, y):
     confusion_matrix = pd.crosstab(x, y)
@@ -224,7 +226,8 @@ def cramers_v(x, y):
     phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
     rcorr = r - ((r-1)**2)/(n-1)
     kcorr = k - ((k-1)**2)/(n-1)
-    return np.sqrt(phi2corr / min((kcorr-1), (rcorr-1)))
+    denom = min((kcorr-1), (rcorr-1))
+    return np.sqrt(phi2corr / denom) if denom > 0 else np.nan
 
 def phi_coefficient(x, y):
     confusion_matrix = pd.crosstab(x, y)
@@ -239,16 +242,18 @@ def phi_coefficient(x, y):
     else:
         return np.nan
 
-def eta_squared(anova_result, groups, values):
+def eta_squared(groups, values):
     group_means = [values[groups == g].mean() for g in np.unique(groups)]
     grand_mean = values.mean()
     ssm = sum([len(values[groups == g]) * (group_mean - grand_mean) ** 2 for g, group_mean in zip(np.unique(groups), group_means)])
     sst = sum((values - grand_mean) ** 2)
     return ssm / sst if sst != 0 else np.nan
 
+# -- Main Association Analysis Helper --
+
 def perform_correlation_analysis(df):
     """
-    Returns: associations_df, association_heatmap
+    Returns: associations_df, association_heatmap (plotly fig)
     associations_df columns: feature_1, feature_2, association_type, strength, significant, interpretation
     """
     results = []
@@ -303,8 +308,13 @@ def perform_correlation_analysis(df):
                     num_col, cat_col = (col1, col2) if df[col1].dtype in ['float64', 'int64'] else (col2, col1)
                     groups = df[cat_col]
                     values = df[num_col]
-                    anova = f_oneway(*(values[groups == g] for g in np.unique(groups)))
-                    eta2 = eta_squared(anova, groups, values)
+                    # Only consider groups with more than 1 value
+                    valid_groups = [g for g in np.unique(groups) if sum(groups == g) > 1]
+                    if len(valid_groups) < 2:
+                        continue
+                    vals_by_group = [values[groups == g] for g in valid_groups]
+                    anova = f_oneway(*vals_by_group)
+                    eta2 = eta_squared(groups, values)
                     interpretation = (
                         "Small effect" if eta2 < 0.06 else
                         "Medium effect" if eta2 < 0.14 else
@@ -321,21 +331,100 @@ def perform_correlation_analysis(df):
                 except Exception:
                     continue
     associations_df = pd.DataFrame(results)
-    # Association heatmap
+    # Association heatmap (matrix)
     if not associations_df.empty:
-        heatmap_df = associations_df.pivot_table(
-            index='feature_1', columns='feature_2', values='strength', fill_value=np.nan
-        )
-        fig = px.imshow(
-            heatmap_df,
-            color_continuous_scale='RdBu',
-            aspect='auto',
-            title='Feature Association Matrix',
-            labels=dict(x="Feature 2", y="Feature 1", color="Association Strength")
-        )
+        try:
+            heatmap_df = associations_df.pivot_table(
+                index='feature_1', columns='feature_2', values='strength', fill_value=np.nan
+            )
+            fig = px.imshow(
+                heatmap_df,
+                color_continuous_scale='RdBu',
+                aspect='auto',
+                title='Feature Association Matrix',
+                labels=dict(x="Feature 2", y="Feature 1", color="Association Strength")
+            )
+        except Exception:
+            fig = None
         return associations_df, fig
     else:
         return associations_df, None
+
+# -- Other expected stubs for dashboard compatibility --
+
+def compare_models(*args, **kwargs):
+    """Stub for dashboard compatibility."""
+    return pd.DataFrame(), None
+
+def forecast_incident_volume(*args, **kwargs):
+    """Stub for dashboard compatibility."""
+    return pd.Series(dtype='float64'), pd.Series(dtype='float64')
+
+def profile_location_risk(df):
+    """Example: Analyzes risk by location, returns DataFrame and Plotly bar chart."""
+    if df.empty or 'location' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+    location_counts = df['location'].value_counts().rename('incident_count')
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    location_severity = df.groupby('location')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([location_counts, location_severity], axis=1).sort_values('incident_count', ascending=False)
+    plot_df = risk_df.reset_index().rename(columns={'index':'location'})
+    fig = px.bar(
+        plot_df, x='location', y='incident_count', color='avg_severity',
+        title='Incident Risk by Location',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
+
+def profile_incident_type_risk(df):
+    """Example: Analyzes risk by incident type, returns DataFrame and Plotly bar chart."""
+    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+    type_counts = df['incident_type'].value_counts().rename('incident_count')
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    type_severity = df.groupby('incident_type')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([type_counts, type_severity], axis=1).sort_values('incident_count', ascending=False)
+    plot_df = risk_df.reset_index().rename(columns={'index':'incident_type'})
+    fig = px.bar(
+        plot_df, x='incident_type', y='incident_count', color='avg_severity',
+        title='Incident Risk by Type',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
+
+def detect_seasonal_patterns(df):
+    """Detects seasonal patterns in incident data, returns Plotly time series figure."""
+    if df.empty or 'incident_date' not in df.columns:
+        return None
+    monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
+    monthly_counts.index = monthly_counts.index.to_timestamp()
+    fig = px.line(
+        x=monthly_counts.index,
+        y=monthly_counts.values,
+        title='Monthly Incident Volume',
+        labels={'x': 'Month', 'y': 'Incident Count'}
+    )
+    return fig
+
+def plot_correlation_heatmap(df):
+    """Fallback: plots a correlation heatmap for numeric columns, or warns if insufficient."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    numeric_df = df.select_dtypes(include=['number'])
+    if numeric_df.shape[1] < 2:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "Not enough numeric columns for correlation heatmap", 
+                fontsize=14, ha='center', va='center')
+        ax.axis('off')
+        plt.tight_layout()
+        return fig
+    corr = numeric_df.corr()
+    fig, ax = plt.subplots(figsize=(10,8))
+    sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
+    plt.tight_layout()
+    return fig
 
 def profile_incident_type_risk(df):
     """
