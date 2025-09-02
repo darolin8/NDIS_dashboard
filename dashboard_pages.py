@@ -393,8 +393,8 @@ def add_age_and_age_range_columns(df):
 
 def display_executive_summary_section(df):
     import calendar
-
-   st.markdown("""
+    
+    st.markdown("""
     <style>
     .card-container {
         display: flex;
