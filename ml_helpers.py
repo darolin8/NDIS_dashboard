@@ -238,3 +238,29 @@ def forecast_incident_volume(df, periods=6):
     except Exception as e:
         print("Forecast error:", e)
         return df_monthly, pd.Series(dtype=float)
+        
+def profile_location_risk(df):
+    """
+    Analyzes risk by location: computes incident counts and severity rates,
+    returns a DataFrame and a Plotly bar chart.
+    """
+    if df.empty or 'location' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+
+    # Count incidents per location
+    location_counts = df['location'].value_counts().rename('incident_count')
+    # Severity rate (proportion high severity)
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    location_severity = df.groupby('location')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([location_counts, location_severity], axis=1).sort_values('incident_count', ascending=False)
+
+    # Make the plot
+    import plotly.express as px
+    plot_df = risk_df.reset_index().rename(columns={'index':'location'})
+    fig = px.bar(
+        plot_df, x='location', y='incident_count', color='avg_severity',
+        title='Incident Risk by Location',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
