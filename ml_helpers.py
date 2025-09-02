@@ -55,7 +55,7 @@ def compare_models(df):
     models = {
         'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
         'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
-        'Neural Network': MLPClassifier(hidden_layer_sizes=(64,), max_iter=300, random_state=42)
+        'Neural Network': MLPClassifier(hidden_layer_sizes=(64,), max_iter=500, random_state=42)  # Increased max_iter for convergence
     }
     metrics = []
     roc_fig = go.Figure()
@@ -223,7 +223,7 @@ def forecast_incident_volume(df, periods=6):
     if df.empty or 'incident_date' not in df.columns:
         return pd.Series(dtype=float), pd.Series(dtype=float)
     df_sorted = df.sort_values('incident_date')
-    df_monthly = df_sorted.groupby(df_sorted['incident_date'].dt.to_period('M')).size()
+    df_monthly = df_sorted.groupby(df_sorted['incident_date'].dt.to_period('ME')).size()
     df_monthly.index = df_monthly.index.to_timestamp()
     if len(df_monthly) < 3:
         # Not enough data to forecast
@@ -300,7 +300,7 @@ def detect_seasonal_patterns(df):
         return None
 
     # Count incidents per month
-    monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
+    monthly_counts = df.groupby(df['incident_date'].dt.to_period('ME')).size()
     monthly_counts.index = monthly_counts.index.to_timestamp()
 
     import plotly.graph_objs as go
