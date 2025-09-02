@@ -27,7 +27,7 @@ def prepare_ml_features(df):
     feature_df = df[all_feature_cols].copy()
     encoder = None
     if categorical_cols:
-        encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         encoded = encoder.fit_transform(feature_df[categorical_cols])
         encoded_feature_names = encoder.get_feature_names_out(categorical_cols)
         feature_df = feature_df.drop(columns=categorical_cols)
@@ -428,3 +428,4 @@ def plot_correlation_heatmap(df):
     sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
     plt.tight_layout()
     return fig
+    
