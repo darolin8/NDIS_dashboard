@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+import plotly.express as px
+
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, IsolationForest
+from sklearn.ensemble import RandomForestClassifier, IsolationForest, GradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, silhouette_score
+from sklearn.metrics import accuracy_score, silhouette_score, roc_curve, auc
 from sklearn.svm import OneClassSVM
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.decomposition import PCA
@@ -34,6 +39,41 @@ def prepare_ml_features(df: pd.DataFrame):
         return None, None, None
     X = features_df[num_cols].fillna(0)
     return X, num_cols, label_encoders
+
+def compare_models(df):
+    X, feature_names, _ = prepare_ml_features(df)
+    if X is None or 'severity' not in df.columns:
+        return pd.DataFrame(), go.Figure()
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    y = df['severity'].map(sev_map)
+    mask = ~y.isna()
+    X, y = X[mask], y[mask]
+    if len(X) < 10:
+        return pd.DataFrame(), go.Figure()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+    models = {
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+        'Gradient Boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+        'Neural Network': MLPClassifier(hidden_layer_sizes=(64,), max_iter=300, random_state=42)
+    }
+    metrics = []
+    roc_fig = go.Figure()
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test)
+            # For multiclass, show ROC for each class
+            for i in range(y_prob.shape[1]):
+                fpr, tpr, _ = roc_curve(y_test == i, y_prob[:, i])
+                roc_auc = auc(fpr, tpr)
+                roc_fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f"{name} class {i} (AUC={roc_auc:.2f})"))
+        metrics.append({'Model': name, 'Accuracy': acc})
+    metrics_df = pd.DataFrame(metrics)
+    roc_fig.update_layout(title="ROC Curves", xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
+    return metrics_df, roc_fig
 
 @st.cache_data
 def train_severity_prediction_model(df: pd.DataFrame):
@@ -74,17 +114,6 @@ def perform_anomaly_detection(df: pd.DataFrame):
     return out, feature_names
 
 def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly", axis_labels=None):
-    """
-    Plots a scatter plot of anomalies vs normal points in the dataset using the specified columns.
-    Parameters:
-    - anomaly_df: pd.DataFrame with your anomaly detection results.
-    - x_col: Feature name for x-axis.
-    - y_col: Feature name for y-axis.
-    - anomaly_column: Name of the column indicating anomalies (default: 'isolation_forest_anomaly').
-    - axis_labels: Optional dict mapping column names to display names for axes.
-    Returns:
-    - fig: A matplotlib figure object.
-    """
     if (
         anomaly_df is None
         or x_col not in anomaly_df.columns
@@ -92,14 +121,11 @@ def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_for
         or anomaly_column not in anomaly_df.columns
     ):
         raise ValueError("Required columns are missing in the DataFrame.")
-
-    # Use friendly axis labels if provided
     display_x = axis_labels[x_col] if axis_labels and x_col in axis_labels else x_col
     display_y = axis_labels[y_col] if axis_labels and y_col in axis_labels else y_col
-
     fig, ax = plt.subplots(figsize=(8, 5))
     normal = anomaly_df[anomaly_df[anomaly_column] == False]
-    anomaly = anomaly_df[anomaly_df[anomaly_column] == True] # <-- FIXED typo here
+    anomaly = anomaly_df[anomaly_df[anomaly_column] == True]
     ax.scatter(normal[x_col], normal[y_col], c='blue', label='Normal', alpha=0.5)
     ax.scatter(anomaly[x_col], anomaly[y_col], c='red', label='Anomaly', alpha=0.7)
     ax.set_xlabel(display_x)
@@ -158,3 +184,136 @@ def analyze_cluster_characteristics(clustered_df: pd.DataFrame):
         }
         cluster_analysis[cluster_id] = analysis
     return cluster_analysis
+
+def plot_3d_clusters(clustered_df):
+    # 3D PCA for clustering visualization
+    if clustered_df is None or not all(c in clustered_df.columns for c in ['pca_x', 'pca_y']):
+        return go.Figure()
+    # Optionally compute third component if not present
+    if 'pca_z' not in clustered_df.columns:
+        features_df = clustered_df.select_dtypes(include=[np.number])
+        X = features_df.values
+        if X.shape[1] >= 3:
+            pca = PCA(n_components=3)
+            X_pca = pca.fit_transform(X)
+            clustered_df['pca_z'] = X_pca[:, 2]
+        else:
+            clustered_df['pca_z'] = np.zeros(len(clustered_df))
+    fig = px.scatter_3d(
+        clustered_df, x='pca_x', y='pca_y', z='pca_z',
+        color=clustered_df['cluster'].astype(str),
+        hover_data=["incident_date", "location", "incident_type", "severity"],
+        title="Incident Clusters (3D PCA View)"
+    )
+    return fig
+
+def plot_correlation_heatmap(df):
+    import seaborn as sns
+    corr = df.select_dtypes(include=[np.number]).corr()
+    fig, ax = plt.subplots(figsize=(10,8))
+    sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
+    plt.tight_layout()
+    return fig
+
+def forecast_incident_volume(df, periods=6):
+    """
+    Performs time series forecasting of incident volume using Exponential Smoothing.
+    Returns: actual incident counts (series), forecasted counts (series)
+    """
+    if df.empty or 'incident_date' not in df.columns:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    df_sorted = df.sort_values('incident_date')
+    df_monthly = df_sorted.groupby(df_sorted['incident_date'].dt.to_period('M')).size()
+    df_monthly.index = df_monthly.index.to_timestamp()
+    if len(df_monthly) < 3:
+        # Not enough data to forecast
+        return df_monthly, pd.Series(dtype=float)
+    try:
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        model = ExponentialSmoothing(df_monthly, trend='add', seasonal=None)
+        fit = model.fit()
+        forecast = fit.forecast(periods)
+        forecast.index = pd.date_range(start=df_monthly.index[-1]+pd.offsets.MonthBegin(), periods=periods, freq='M')
+        return df_monthly, forecast
+    except Exception as e:
+        print("Forecast error:", e)
+        return df_monthly, pd.Series(dtype=float)
+        
+def profile_location_risk(df):
+    """
+    Analyzes risk by location: computes incident counts and severity rates,
+    returns a DataFrame and a Plotly bar chart.
+    """
+    if df.empty or 'location' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+
+    # Count incidents per location
+    location_counts = df['location'].value_counts().rename('incident_count')
+    # Severity rate (proportion high severity)
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    location_severity = df.groupby('location')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([location_counts, location_severity], axis=1).sort_values('incident_count', ascending=False)
+
+    # Make the plot
+    import plotly.express as px
+    plot_df = risk_df.reset_index().rename(columns={'index':'location'})
+    fig = px.bar(
+        plot_df, x='location', y='incident_count', color='avg_severity',
+        title='Incident Risk by Location',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
+
+def profile_incident_type_risk(df):
+    """
+    Analyzes risk by incident type: computes incident counts and severity rates,
+    returns a DataFrame and a Plotly bar chart.
+    """
+    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
+        return pd.DataFrame(), None
+
+    # Count incidents per type
+    type_counts = df['incident_type'].value_counts().rename('incident_count')
+    # Severity rate (proportion high severity)
+    sev_map = {'Low':0, 'Moderate':1, 'High':2}
+    df['sev_num'] = df['severity'].map(sev_map)
+    type_severity = df.groupby('incident_type')['sev_num'].mean().rename('avg_severity')
+    risk_df = pd.concat([type_counts, type_severity], axis=1).sort_values('incident_count', ascending=False)
+
+    # Make the plot
+    import plotly.express as px
+    plot_df = risk_df.reset_index().rename(columns={'index':'incident_type'})
+    fig = px.bar(
+        plot_df, x='incident_type', y='incident_count', color='avg_severity',
+        title='Incident Risk by Type',
+        labels={'incident_count': 'Incidents', 'avg_severity': 'Avg Severity'}
+    )
+    return risk_df, fig
+
+def detect_seasonal_patterns(df):
+    """
+    Detects seasonal and temporal patterns in incident data.
+    Returns a Plotly figure of incident counts by month.
+    """
+    if df.empty or 'incident_date' not in df.columns:
+        return None
+
+    # Count incidents per month
+    monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
+    monthly_counts.index = monthly_counts.index.to_timestamp()
+
+    import plotly.graph_objs as go
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=monthly_counts.index,
+        y=monthly_counts.values,
+        mode='lines+markers',
+        name='Incidents'
+    ))
+    fig.update_layout(
+        title='Monthly Incident Volume',
+        xaxis_title='Month',
+        yaxis_title='Incident Count'
+    )
+    return fig
