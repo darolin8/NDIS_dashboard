@@ -208,9 +208,28 @@ def plot_3d_clusters(clustered_df):
     return fig
 
 def plot_correlation_heatmap(df):
+    """
+    Plots a correlation heatmap for all numeric columns in the dataframe.
+    Warns if there are not enough numeric columns for a meaningful heatmap.
+    Returns a matplotlib Figure, or None if not enough data.
+    """
+    import matplotlib.pyplot as plt
     import seaborn as sns
-    corr = df.select_dtypes(include=[np.number]).corr()
-    fig, ax = plt.subplots(figsize=(10,8))
+    import numpy as np
+
+    # Select only numeric columns
+    numeric_df = df.select_dtypes(include=[np.number])
+    if numeric_df.shape[1] < 2:
+        # Not enough numeric columns for a heatmap
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "Not enough numeric columns for correlation heatmap", 
+                fontsize=14, ha='center', va='center')
+        ax.axis('off')
+        plt.tight_layout()
+        return fig
+
+    corr = numeric_df.corr()
+    fig, ax = plt.subplots(figsize=(10, 8))
     sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
     plt.tight_layout()
     return fig
