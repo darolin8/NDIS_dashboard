@@ -1617,7 +1617,26 @@ from ml_helpers import (
     perform_anomaly_detection,
     plot_anomaly_scatter
 )
+def pattern_detection(df):
+    st.header("📊 Pattern Detection")
 
+    # Prepare time and severity columns if not already done
+    if 'incident_date' not in df.columns:
+        st.error("incident_date column missing from data.")
+        return
+    df['month'] = df['incident_date'].dt.month
+    df['day_of_week'] = df['incident_date'].dt.dayofweek
+    if 'severity_numeric' not in df.columns and 'severity' in df.columns:
+        df['severity_numeric'] = df['severity'].map({'Low': 1, 'Moderate': 2, 'High': 3})
+
+    st.subheader("1. Monthly Incident Heatmap (Month vs Day of Week)")
+    st.plotly_chart(get_monthly_incident_heatmap(df), use_container_width=True)
+
+    st.subheader("2. Average Incident Severity by Month")
+    st.plotly_chart(get_average_severity_by_month(df), use_container_width=True)
+
+    st.subheader("3. Daily Incident Volume Patterns (ML Clusters)")
+    st.plotly_chart(get_daily_volume_clusters(df), use_container_width=True)
 def show_severity_prediction_and_anomaly(df):
     st.header("Severity Prediction Model")
     # 1. Train the model and show feature importance
