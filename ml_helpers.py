@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+import plotly.express as px
+
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, IsolationForest
+from sklearn.ensemble import RandomForestClassifier, IsolationForest, GradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, silhouette_score
+from sklearn.metrics import accuracy_score, silhouette_score, roc_curve, auc
 from sklearn.svm import OneClassSVM
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.decomposition import PCA
@@ -35,16 +40,7 @@ def prepare_ml_features(df: pd.DataFrame):
     X = features_df[num_cols].fillna(0)
     return X, num_cols, label_encoders
 
-import pandas as pd
-import plotly.graph_objs as go
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_curve, auc
-
 def compare_models(df):
-    # Prepare features
-    from ml_helpers import prepare_ml_features
     X, feature_names, _ = prepare_ml_features(df)
     if X is None or 'severity' not in df.columns:
         return pd.DataFrame(), go.Figure()
@@ -77,7 +73,6 @@ def compare_models(df):
         metrics.append({'Model': name, 'Accuracy': acc})
     metrics_df = pd.DataFrame(metrics)
     roc_fig.update_layout(title="ROC Curves", xaxis_title="False Positive Rate", yaxis_title="True Positive Rate")
-
     return metrics_df, roc_fig
 
 @st.cache_data
@@ -119,17 +114,6 @@ def perform_anomaly_detection(df: pd.DataFrame):
     return out, feature_names
 
 def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly", axis_labels=None):
-    """
-    Plots a scatter plot of anomalies vs normal points in the dataset using the specified columns.
-    Parameters:
-    - anomaly_df: pd.DataFrame with your anomaly detection results.
-    - x_col: Feature name for x-axis.
-    - y_col: Feature name for y-axis.
-    - anomaly_column: Name of the column indicating anomalies (default: 'isolation_forest_anomaly').
-    - axis_labels: Optional dict mapping column names to display names for axes.
-    Returns:
-    - fig: A matplotlib figure object.
-    """
     if (
         anomaly_df is None
         or x_col not in anomaly_df.columns
@@ -137,14 +121,11 @@ def plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_for
         or anomaly_column not in anomaly_df.columns
     ):
         raise ValueError("Required columns are missing in the DataFrame.")
-
-    # Use friendly axis labels if provided
     display_x = axis_labels[x_col] if axis_labels and x_col in axis_labels else x_col
     display_y = axis_labels[y_col] if axis_labels and y_col in axis_labels else y_col
-
     fig, ax = plt.subplots(figsize=(8, 5))
     normal = anomaly_df[anomaly_df[anomaly_column] == False]
-    anomaly = anomaly_df[anomaly_df[anomaly_column] == True] # <-- FIXED typo here
+    anomaly = anomaly_df[anomaly_df[anomaly_column] == True]
     ax.scatter(normal[x_col], normal[y_col], c='blue', label='Normal', alpha=0.5)
     ax.scatter(anomaly[x_col], anomaly[y_col], c='red', label='Anomaly', alpha=0.7)
     ax.set_xlabel(display_x)
@@ -203,3 +184,33 @@ def analyze_cluster_characteristics(clustered_df: pd.DataFrame):
         }
         cluster_analysis[cluster_id] = analysis
     return cluster_analysis
+
+def plot_3d_clusters(clustered_df):
+    # 3D PCA for clustering visualization
+    if clustered_df is None or not all(c in clustered_df.columns for c in ['pca_x', 'pca_y']):
+        return go.Figure()
+    # Optionally compute third component if not present
+    if 'pca_z' not in clustered_df.columns:
+        features_df = clustered_df.select_dtypes(include=[np.number])
+        X = features_df.values
+        if X.shape[1] >= 3:
+            pca = PCA(n_components=3)
+            X_pca = pca.fit_transform(X)
+            clustered_df['pca_z'] = X_pca[:, 2]
+        else:
+            clustered_df['pca_z'] = np.zeros(len(clustered_df))
+    fig = px.scatter_3d(
+        clustered_df, x='pca_x', y='pca_y', z='pca_z',
+        color=clustered_df['cluster'].astype(str),
+        hover_data=["incident_date", "location", "incident_type", "severity"],
+        title="Incident Clusters (3D PCA View)"
+    )
+    return fig
+
+def plot_correlation_heatmap(df):
+    import seaborn as sns
+    corr = df.select_dtypes(include=[np.number]).corr()
+    fig, ax = plt.subplots(figsize=(10,8))
+    sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
+    plt.tight_layout()
+    return fig
