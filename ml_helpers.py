@@ -541,6 +541,12 @@ def plot_correlation_heatmap(df):
         plt.tight_layout()
         return fig
 
+import pandas as pd
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import plotly.express as px
+
 def get_monthly_incident_heatmap(df):
     heatmap_data = df.groupby(['month', 'day_of_week']).size().reset_index(name='incident_count')
     pivot_heatmap = heatmap_data.pivot(index='day_of_week', columns='month', values='incident_count')
@@ -592,7 +598,6 @@ def get_daily_volume_clusters(df, n_clusters=4):
         labels={'incident_count': 'Daily Incident Count', 'date': 'Date'}
     )
     return fig
-# ---------------------------
 # Input Validation Helper
 # ---------------------------
 def validate_dataframe(df, required_columns=None):
