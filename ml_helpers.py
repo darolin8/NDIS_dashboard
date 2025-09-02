@@ -214,3 +214,27 @@ def plot_correlation_heatmap(df):
     sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
     plt.tight_layout()
     return fig
+
+def forecast_incident_volume(df, periods=6):
+    """
+    Performs time series forecasting of incident volume using Exponential Smoothing.
+    Returns: actual incident counts (series), forecasted counts (series)
+    """
+    if df.empty or 'incident_date' not in df.columns:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    df_sorted = df.sort_values('incident_date')
+    df_monthly = df_sorted.groupby(df_sorted['incident_date'].dt.to_period('M')).size()
+    df_monthly.index = df_monthly.index.to_timestamp()
+    if len(df_monthly) < 3:
+        # Not enough data to forecast
+        return df_monthly, pd.Series(dtype=float)
+    try:
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
+        model = ExponentialSmoothing(df_monthly, trend='add', seasonal=None)
+        fit = model.fit()
+        forecast = fit.forecast(periods)
+        forecast.index = pd.date_range(start=df_monthly.index[-1]+pd.offsets.MonthBegin(), periods=periods, freq='M')
+        return df_monthly, forecast
+    except Exception as e:
+        print("Forecast error:", e)
+        return df_monthly, pd.Series(dtype=float)
