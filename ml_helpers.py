@@ -291,3 +291,29 @@ def profile_incident_type_risk(df):
     )
     return risk_df, fig
 
+def detect_seasonal_patterns(df):
+    """
+    Detects seasonal and temporal patterns in incident data.
+    Returns a Plotly figure of incident counts by month.
+    """
+    if df.empty or 'incident_date' not in df.columns:
+        return None
+
+    # Count incidents per month
+    monthly_counts = df.groupby(df['incident_date'].dt.to_period('M')).size()
+    monthly_counts.index = monthly_counts.index.to_timestamp()
+
+    import plotly.graph_objs as go
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=monthly_counts.index,
+        y=monthly_counts.values,
+        mode='lines+markers',
+        name='Incidents'
+    ))
+    fig.update_layout(
+        title='Monthly Incident Volume',
+        xaxis_title='Month',
+        yaxis_title='Incident Count'
+    )
+    return fig
