@@ -519,10 +519,52 @@ def display_executive_summary_section(df):
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
+import streamlit as st
+
 def display_executive_summary_section(df):
     st.header("📊 Executive Summary")
     st.markdown("---")
     df = add_age_and_age_range_columns(df)
+
+    # --- Inject the CSS just once at the top ---
+    st.markdown("""
+    <style>
+    .dashboard-card {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        padding: 0.5rem 0.2rem;
+        width: 110px;
+        height: 70px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+    .dashboard-card-title {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: #222;
+        line-height: 1.1;
+        margin-bottom: 0.15rem;
+    }
+    .dashboard-card-value {
+        font-size: 1.13rem;
+        font-weight: 700;
+        color: #1769aa;
+        line-height: 1;
+        margin-bottom: 0.07rem;
+    }
+    .dashboard-card-desc {
+        font-size: 0.62rem;
+        color: #444;
+        line-height: 1.1;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 
@@ -534,18 +576,10 @@ def display_executive_summary_section(df):
         )
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Top Incident<br>Type
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
-                  {top_type}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  Most frequent
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Top Incident<br>Type</span>
+                <span class="dashboard-card-value">{top_type}</span>
+                <span class="dashboard-card-desc">Most frequent</span>
             </div>
             """,
             unsafe_allow_html=True
@@ -561,18 +595,10 @@ def display_executive_summary_section(df):
             latest_month_count = 0
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Latest Month<br>Incidents
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
-                  {latest_month_count}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  {latest_month_str}
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Latest Month<br>Incidents</span>
+                <span class="dashboard-card-value">{latest_month_count}</span>
+                <span class="dashboard-card-desc">{latest_month_str}</span>
             </div>
             """,
             unsafe_allow_html=True
@@ -588,18 +614,10 @@ def display_executive_summary_section(df):
             prev_month_count = 0
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Previous Month<br>Incidents
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
-                  {prev_month_count}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  {prev_month_str}
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Previous Month<br>Incidents</span>
+                <span class="dashboard-card-value">{prev_month_count}</span>
+                <span class="dashboard-card-desc">{prev_month_str}</span>
             </div>
             """,
             unsafe_allow_html=True
@@ -613,18 +631,10 @@ def display_executive_summary_section(df):
         )
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  High Severity<br>Incidents
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#d9534f;line-height:1;">
-                  {high_severity}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  Critical cases
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">High Severity<br>Incidents</span>
+                <span class="dashboard-card-value" style="color:#d9534f;">{high_severity}</span>
+                <span class="dashboard-card-desc">Critical cases</span>
             </div>
             """,
             unsafe_allow_html=True
@@ -638,63 +648,37 @@ def display_executive_summary_section(df):
         )
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Reportable<br>Incidents
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#f0ad4e;line-height:1;">
-                  {reportable}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  Regulatory events
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Reportable<br>Incidents</span>
+                <span class="dashboard-card-value" style="color:#f0ad4e;">{reportable}</span>
+                <span class="dashboard-card-desc">Regulatory events</span>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-    # Average Age card (calculated from DOB)
     with col6:
         avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
         avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Average<br>Age
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#5ad8a6;line-height:1;">
-                  {avg_age_txt}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  Avg participant age
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Average<br>Age</span>
+                <span class="dashboard-card-value" style="color:#5ad8a6;">{avg_age_txt}</span>
+                <span class="dashboard-card-desc">Avg participant age</span>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-    # Most common age range card
     with col7:
         common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
         st.markdown(
             f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1rem 0.4rem;text-align:center;height:130px;
-                        display:flex;flex-direction:column;justify-content:space-between;">
-                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
-                  Most Common<br>Age Range
-                </span>
-                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
-                  {common_range}
-                </span>
-                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
-                  Top age group
-                </span>
+            <div class="dashboard-card">
+                <span class="dashboard-card-title">Most Common<br>Age Range</span>
+                <span class="dashboard-card-value">{common_range}</span>
+                <span class="dashboard-card-desc">Top age group</span>
             </div>
             """,
             unsafe_allow_html=True
