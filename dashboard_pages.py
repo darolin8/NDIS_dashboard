@@ -1052,29 +1052,32 @@ def display_ml_insights_section(df):
         "Correlations"
     ])
 
+
     # Predictive Models
-    with tabs[0]:
-        st.subheader("Predictive Models Comparison")
-        metrics_df, roc_fig = compare_models(df)
+with tabs[0]:
+    st.subheader("Predictive Models Comparison")
+    results, rows, roc_fig = compare_models(df)
+    if rows:
+        metrics_df = pd.DataFrame(rows)
         st.dataframe(metrics_df, use_container_width=True)
+    if roc_fig is not None:
         st.plotly_chart(roc_fig, use_container_width=True)
 
-        st.subheader("Severity Prediction Model")
-        model, acc, features = train_severity_prediction_model(df)
-        if model is not None and features is not None:
-            st.write(f"Model accuracy: {acc:.2%}")
-            st.write(f"Features used: {features}")
-            if hasattr(model, "feature_importances_"):
-                importances = model.feature_importances_
-                importance_df = pd.DataFrame({
-                    "Feature": features,
-                    "Importance": importances
-                }).sort_values("Importance", ascending=False)
-                fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances")
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Not enough data to train severity prediction model.")
-
+    st.subheader("Severity Prediction Model")
+    model, acc, features = train_severity_prediction_model(df)
+    if model is not None and features is not None:
+        st.write(f"Model accuracy: {acc:.2%}")
+        st.write(f"Features used: {features}")
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            importance_df = pd.DataFrame({
+                "Feature": features,
+                "Importance": importances
+            }).sort_values("Importance", ascending=False)
+            fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances")
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Not enough data to train severity prediction model.")
     # Forecasting
     with tabs[1]:
         st.subheader("Incident Volume Forecasting")
