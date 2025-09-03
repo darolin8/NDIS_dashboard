@@ -563,22 +563,6 @@ def display_executive_summary_section(df):
         plot_time_analysis(df)
     plot_reportable_analysis(df)
 
-# ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
-
-def display_operational_performance_section(df):
-    st.header("📈 Operational Performance & Risk Analysis")
-    display_operational_performance_cards(df)
-    st.markdown("---")
-    plot_reporter_type_metrics(df)
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        plot_incident_types_bar(df)
-    with col2:
-        plot_medical_outcomes(df)
-    plot_monthly_incidents_by_severity(df)
-    plot_reporter_performance_scatter(df)
-    plot_serious_injury_age_severity(df)
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
@@ -969,196 +953,146 @@ def plot_contributing_factors_by_month(df):
 # ================= PAGE SECTIONS =================
 
 def display_executive_summary_section(df):
-    st.header("📊 Executive Summary")
-    st.markdown("---")
-    df = add_age_and_age_range_columns(df)
+    import calendar
 
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    st.markdown("""
+    <style>
+    .main-container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 18px 24px;
+    }
+    .card-container {
+        display: flex;
+        gap: 2rem;
+        margin-bottom: 2.5rem;
+        justify-content: flex-start;
+    }
+    .dashboard-card {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        padding: 1.6rem 1.2rem 1.2rem 1.2rem;
+        min-width: 170px;
+        max-width: 220px;
+        text-align: center;
+        flex: 1;
+    }
+    .dashboard-card-title {
+        font-size: 1 rem;
+        font-weight: 600;
+        margin-bottom: 0.6rem;
+        color: #222;
+    }
+    .dashboard-card-value {
+        font-size: 1.7 rem;
+        font-weight: 700;
+        color: #1769aa;
+        margin-bottom: 0.3rem;
+    }
+    .dashboard-card-desc {
+        font-size: 0.75rem;
+        color: #444;
+        margin-bottom: 0.1rem;
+    }
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 2rem 0 1rem 0;
+    }
+    .divider {
+        margin: 2rem 0 2rem 0;
+        border-top: 1px solid #eee;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    with col1:
-        top_type = (
-            df['incident_type'].value_counts().idxmax()
-            if 'incident_type' in df.columns and not df.empty
-            else "N/A"
-        )
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Top Incident Type
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
-                  {top_type}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Most frequent
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # ---- CARD DATA ----
+    # Top Incident Type
+    top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
+    # Latest Month Incident
+    if 'incident_date' in df.columns and not df.empty:
+        latest_month = df['incident_date'].max().to_period('M')
+        latest_month_str = latest_month.strftime('%B %Y')
+        latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
+    else:
+        latest_month_str = "N/A"
+        latest_month_count = 0
+    # Previous Month Incident
+    if 'incident_date' in df.columns and not df.empty:
+        prev_month = latest_month - 1
+        prev_month_str = prev_month.strftime('%B %Y')
+        prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
+    else:
+        prev_month_str = "N/A"
+        prev_month_count = 0
+    # High Severity
+    high_severity_count = int((df['severity'].str.lower() == 'high').sum()) if 'severity' in df.columns else 0
+    # Reportable Incidents
+    reportable_count = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
 
-    with col2:
-        if 'incident_date' in df.columns and not df.empty:
-            latest_month = df['incident_date'].max().to_period('M')
-            latest_month_str = latest_month.strftime('%b %Y')
-            latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
-        else:
-            latest_month_str = "N/A"
-            latest_month_count = 0
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Latest Month Incidents
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
-                  {latest_month_count}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  {latest_month_str}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    st.markdown('<div class="main-container">', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="card-container">
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Top Incident Type</div>
+        <div class="dashboard-card-value">{top_type}</div>
+        <div class="dashboard-card-desc">Most frequent</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Latest Month Incidents</div>
+        <div class="dashboard-card-value">{latest_month_count}</div>
+        <div class="dashboard-card-desc">{latest_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Previous Month Incidents</div>
+        <div class="dashboard-card-value">{prev_month_count}</div>
+        <div class="dashboard-card-desc">{prev_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">High Severity Incidents</div>
+        <div class="dashboard-card-value">{high_severity_count}</div>
+        <div class="dashboard-card-desc">Critical cases</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Reportable Incidents</div>
+        <div class="dashboard-card-value">{reportable_count}</div>
+        <div class="dashboard-card-desc">Regulatory events</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    with col3:
-        if 'incident_date' in df.columns and not df.empty:
-            prev_month = latest_month - 1
-            prev_month_str = prev_month.strftime('%b %Y')
-            prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
-        else:
-            prev_month_str = "N/A"
-            prev_month_count = 0
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Previous Month Incidents
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
-                  {prev_month_count}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  {prev_month_str}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # --- Your other summary plots/sections below as needed ---
+    st.markdown('<div class="section-title">Severity Distribution</div>', unsafe_allow_html=True)
+    plot_severity_distribution(df)
 
-    with col4:
-        high_severity = (
-            len(df[df['severity'].str.lower() == 'high'])
-            if 'severity' in df.columns
-            else 0
-        )
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  High Severity Incidents
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#d9534f;">
-                  {high_severity}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Critical cases
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    st.markdown('<div class="section-title">Top 10 Incident Types</div>', unsafe_allow_html=True)
+    plot_incident_types_bar(df)
 
-    with col5:
-        reportable = (
-            int(df['reportable'].sum())
-            if 'reportable' in df.columns
-            else 0
-        )
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Reportable Incidents
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#f0ad4e;">
-                  {reportable}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Regulatory events
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    # Average Age card (calculated from DOB)
-    with col6:
-        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
-        avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Average Age
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#5ad8a6;">
-                  {avg_age_txt}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Average participant age
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    # Most common age range card
-    with col7:
-        common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Most Common Age Range
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
-                  {common_range}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Age group with most participants
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.markdown("---")
-    # Keep your section plotting logic below
-    col1, col2 = st.columns(2)
-    with col1:
-        plot_severity_distribution(df)
-    with col2:
-        plot_top_incidents_by_volume_severity(df)
-    plot_monthly_incidents_by_severity(df)
+    st.markdown('<div class="section-title">Location Analysis</div>', unsafe_allow_html=True)
     plot_location_analysis(df)
+
+    st.markdown('<div class="section-title">Monthly Trends</div>', unsafe_allow_html=True)
+    plot_monthly_incidents_by_severity(df)
+
+    st.markdown('<div class="section-title">Medical Outcomes</div>', unsafe_allow_html=True)
+    plot_medical_outcomes(df)
+
+    st.markdown('<div class="section-title">Daily Incident Trends</div>', unsafe_allow_html=True)
     plot_incident_trends(df)
-    col1, col2 = st.columns(2)
-    with col1:
-        plot_weekday_analysis(df)
-    with col2:
-        plot_time_analysis(df)
+
+    st.markdown('<div class="section-title">Incidents by Day of Week</div>', unsafe_allow_html=True)
+    plot_weekday_analysis(df)
+
+    st.markdown('<div class="section-title">Incidents by Hour of Day</div>', unsafe_allow_html=True)
+    plot_time_analysis(df)
+
+    st.markdown('<div class="section-title">Reportable Analysis</div>', unsafe_allow_html=True)
     plot_reportable_analysis(df)
 
+    st.markdown('</div>', unsafe_allow_html=True)  # Close main-container
 
 def display_operational_performance_section(df):
     st.header(" Operational Performance & Risk Analysis Metrics")
