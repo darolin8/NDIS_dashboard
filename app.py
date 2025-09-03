@@ -223,7 +223,7 @@ def main():
             st.subheader("Severity ML Models")
             X, y, feature_names = prepare_ml_features(filtered_df)  
             results, rows, roc_fig = compare_models(X, y, feature_names)
-            if rows:
+            if rows is not None and len(rows) > 0:
                 metrics_df = pd.DataFrame(rows)
                 st.dataframe(metrics_df)
             if roc_fig is not None:
