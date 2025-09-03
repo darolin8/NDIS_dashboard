@@ -394,16 +394,16 @@ def add_age_and_age_range_columns(df):
 def display_executive_summary_section(df):
     import calendar
     
-    st.markdown("""
-    <style>
+   st.markdown("""
+<style>
 .dashboard-card {
     background: #fff;
     border: 1px solid #e3e3e3;
     border-radius: 14px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.04);
     padding: 0.7rem 0.5rem 0.5rem 0.5rem;
-    width: 120px;         /* smaller width */
-    height: 75px;         /* smaller height */
+    width: 120px;
+    height: 75px;
     text-align: center;
     display: flex;
     flex-direction: column;
@@ -411,30 +411,25 @@ def display_executive_summary_section(df):
     align-items: center;
 }
 .dashboard-card-title {
-    font-size: 0.85rem;   /* smaller font */
+    font-size: 0.85rem;
     font-weight: 600;
     margin-bottom: 0.2rem;
     color: #222;
 }
 .dashboard-card-value {
-    font-size: 1.08rem;   /* smaller font */
+    font-size: 1.08rem;
     font-weight: 700;
     color: #1769aa;
     margin-bottom: 0.15rem;
 }
 .dashboard-card-desc {
-    font-size: 0.7rem;    /* smaller font */
+    font-size: 0.7rem;
     color: #444;
     margin-bottom: 0.05rem;
 }
-    
-    /* Reduce font size if content overflows */
-    .card:has(.card-title[style*="font-size:0.9rem"]), 
-    .card:has(.card-desc[style*="font-size:0.8rem"]) {
-        font-size: 0.95rem;
-    }
-    </style>
+</style>
 """, unsafe_allow_html=True)
+    
 
     # ---- CARD DATA ----
     # Top Incident Type
