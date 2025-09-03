@@ -9,7 +9,15 @@ from dashboard_pages import (
     display_ml_insights_section,
     apply_investigation_rules
 )
+from ml_helpers import (
+    prepare_ml_features, compare_models, train_severity_prediction_model,
+    perform_anomaly_detection, plot_anomaly_scatter,
+    perform_clustering_analysis, analyze_cluster_characteristics, plot_3d_clusters,
+    plot_correlation_heatmap, forecast_incident_volume,
+    profile_location_risk, profile_incident_type_risk, detect_seasonal_patterns
+)
 
+# ----- CONFIG -----
 st.set_page_config(
     page_title="Incident Management Dashboard",
     page_icon="🏥",
@@ -17,6 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ----- DATA LOADING -----
 @st.cache_data
 def load_data():
     file_path = "text data/ndis_incident_1000.csv"
@@ -43,7 +52,7 @@ def load_data():
         df["incident_weekday"] = df["incident_date"].dt.day_name()
     return df
 
-df = load_data()
+# ----- MAIN DASHBOARD -----
 def main():
     st.title("🏥 Incident Management Dashboard")
     st.markdown("### Comprehensive Analysis and Reporting System")
@@ -52,9 +61,8 @@ def main():
     df = load_data()
     df = apply_investigation_rules(df)
 
+    # ------ SIDEBAR NAVIGATION AND FILTERS ------
     st.sidebar.header("📊 Dashboard Navigation")
-
-    # ---- Move Dashboard Page Selector to Top of Sidebar ----
     page = st.sidebar.radio(
         "Select Dashboard Page",
         [
@@ -62,12 +70,14 @@ def main():
             "📈 Operational Performance & Risk Analysis",
             "📋 Compliance & Investigation",
             "🤖 ML Insights",
+            "🧠 Advanced ML Analytics"
         ],
     )
 
-    # ---- Date Filter ----
+    # ---- Filters ----
     st.sidebar.header("Filters")
     filtered_df = df.copy()
+    # Date Filter
     if "incident_date" in df.columns:
         min_date, max_date = df["incident_date"].min(), df["incident_date"].max()
         date_range = st.sidebar.date_input(
@@ -80,8 +90,7 @@ def main():
                 (filtered_df["incident_date"] >= pd.to_datetime(date_range[0])) &
                 (filtered_df["incident_date"] <= pd.to_datetime(date_range[1]))
             ]
-
-    # ---- Age Filter ----
+    # Age Filter
     if "participant_age" in df.columns:
         age_min = int(df["participant_age"].min())
         age_max = int(df["participant_age"].max())
@@ -96,8 +105,7 @@ def main():
             (filtered_df["participant_age"] >= age_range[0]) &
             (filtered_df["participant_age"] <= age_range[1])
         ]
-
-    # ---- Location Filter with "All" option ----
+    # Location Filter
     if "location" in df.columns:
         locations = sorted(df["location"].dropna().unique())
         locations_with_all = ["All"] + locations
@@ -109,8 +117,7 @@ def main():
         )
         if selected_location != "All":
             filtered_df = filtered_df[filtered_df["location"] == selected_location]
-
-    # ---- Severity Filter with "All" option ----
+    # Severity Filter
     if "severity" in df.columns:
         severities = sorted(df["severity"].dropna().unique())
         severities_with_all = ["All"] + severities
@@ -122,8 +129,7 @@ def main():
         )
         if selected_severity != "All":
             filtered_df = filtered_df[filtered_df["severity"] == selected_severity]
-
-    # ---- Incident Type Filter with "All" option ----
+    # Incident Type Filter
     if "incident_type" in df.columns:
         incident_types = sorted(df["incident_type"].dropna().unique())
         incident_types_with_all = ["All"] + incident_types
@@ -135,8 +141,7 @@ def main():
         )
         if selected_incident_type != "All":
             filtered_df = filtered_df[filtered_df["incident_type"] == selected_incident_type]
-
-    # ---- Reporter Type Filter with "All" option ----
+    # Reporter Type Filter
     if "reported_by" in df.columns:
         reporter_types = sorted(df["reported_by"].dropna().unique())
         reporter_types_with_all = ["All"] + reporter_types
@@ -149,15 +154,13 @@ def main():
         if selected_reporter_type != "All":
             filtered_df = filtered_df[filtered_df["reported_by"] == selected_reporter_type]
 
-    # Filter summary
+    # ---- Filter summary ----
     if len(filtered_df) != len(df):
         st.sidebar.success(f"Applied filters: {len(filtered_df)} of {len(df)} records")
-
-    # Reset filters button
     if st.sidebar.button("🔄 Reset All Filters"):
         st.experimental_rerun()
 
-    # Data overview in sidebar
+    # ---- Data overview ----
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📈 Data Overview")
     col1, col2 = st.sidebar.columns(2)
@@ -175,11 +178,7 @@ def main():
         st.sidebar.write(f"🔴 High Severity: {high_severity_pct:.1f}%")
         st.sidebar.write(f"📊 Reportable: {reportable_pct:.1f}%")
 
-    # Page navigation
-    st.sidebar.markdown("---")
-    # Already moved to top
-
-    # Display selected page
+    # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
         display_executive_summary_section(filtered_df)
     elif page == "📈 Operational Performance & Risk Analysis":
@@ -188,109 +187,75 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
-
-
-if __name__ == "__main__":
-    main()
-
-
-import streamlit as st
-import pandas as pd
-from ml_helpers import (
-    prepare_ml_features, compare_models, train_severity_prediction_model,
-    perform_anomaly_detection, plot_anomaly_scatter,
-    perform_clustering_analysis, analyze_cluster_characteristics, plot_3d_clusters,
-    plot_correlation_heatmap, forecast_incident_volume,
-    profile_location_risk, profile_incident_type_risk, detect_seasonal_patterns
-)
-
-@st.cache_data
-def load_ndis_data():
-    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
-    try:
-        df = pd.read_csv(url, parse_dates=['incident_date'])
-        return df
-    except Exception as e:
-        st.error(f"Could not load data: {e}")
-        return pd.DataFrame()
-
-def main():
-    st.title("NDIS Incident Analytics Dashboard")
-    df = load_ndis_data()
-    if df.empty:
-        st.error("No data available.")
-        return
-
-    page = st.sidebar.selectbox("Select analysis", [
-        "Executive Summary",
-        "Location Risk",
-        "Incident Type Risk",
-        "Seasonal Patterns",
-        "Severity ML Models",
-        "Anomaly Detection",
-        "Clustering",
-        "Correlation Matrix",
-        "Incident Forecast"
-    ])
-
-    if page == "Executive Summary":
-        st.header("Executive Summary")
-        st.write(df.head(20))
-    elif page == "Location Risk":
-        st.header("Incident Risk by Location")
-        risk_df, fig = profile_location_risk(df)
-        if fig: st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(risk_df)
-    elif page == "Incident Type Risk":
-        st.header("Incident Risk by Type")
-        risk_df, fig = profile_incident_type_risk(df)
-        if fig: st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(risk_df)
-    elif page == "Seasonal Patterns":
-        st.header("Seasonal & Temporal Patterns")
-        fig = detect_seasonal_patterns(df)
-        if fig: st.plotly_chart(fig, use_container_width=True)
-    elif page == "Severity ML Models":
-        st.header("Severity ML Model Comparison")
-        metrics_df, roc_fig = compare_models(df)
-        st.dataframe(metrics_df)
-        st.plotly_chart(roc_fig, use_container_width=True)
-    elif page == "Anomaly Detection":
-        st.header("Anomaly Detection")
-        anomaly_df, feat_names = perform_anomaly_detection(df)
-        if anomaly_df is not None:
-            fig = plot_anomaly_scatter(anomaly_df, 'month', 'hour', axis_labels={'month':'Month', 'hour':'Hour'})
+    elif page == "🧠 Advanced ML Analytics":
+        st.header("🧠 Advanced ML Analytics")
+        # Add ML helpers section with subpage selection
+        ml_page = st.radio("Select ML Analysis", [
+            "Location Risk",
+            "Incident Type Risk",
+            "Seasonal Patterns",
+            "Severity ML Models",
+            "Anomaly Detection",
+            "Clustering",
+            "Correlation Matrix",
+            "Incident Forecast"
+        ], horizontal=True)
+        # Each ML analysis section
+        if ml_page == "Location Risk":
+            st.subheader("Incident Risk by Location")
+            risk_df, fig = profile_location_risk(filtered_df)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(risk_df, use_container_width=True)
+        elif ml_page == "Incident Type Risk":
+            st.subheader("Incident Risk by Type")
+            risk_df, fig = profile_incident_type_risk(filtered_df)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(risk_df, use_container_width=True)
+        elif ml_page == "Seasonal Patterns":
+            st.subheader("Seasonal & Temporal Patterns")
+            fig = detect_seasonal_patterns(filtered_df)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+        elif ml_page == "Severity ML Models":
+            st.subheader("Severity ML Model Comparison")
+            metrics_df, roc_fig = compare_models(filtered_df)
+            st.dataframe(metrics_df, use_container_width=True)
+            st.plotly_chart(roc_fig, use_container_width=True)
+        elif ml_page == "Anomaly Detection":
+            st.subheader("Anomaly Detection")
+            anomaly_df, feat_names = perform_anomaly_detection(filtered_df)
+            if anomaly_df is not None:
+                fig = plot_anomaly_scatter(anomaly_df, 'month', 'hour', axis_labels={'month':'Month', 'hour':'Hour'})
+                st.pyplot(fig)
+                st.dataframe(anomaly_df.head(20), use_container_width=True)
+        elif ml_page == "Clustering":
+            st.subheader("Clustering Analysis")
+            clustered_df, feat_names, sil_score, pca = perform_clustering_analysis(filtered_df)
+            if clustered_df is not None:
+                fig3d = plot_3d_clusters(clustered_df)
+                st.plotly_chart(fig3d, use_container_width=True)
+                cluster_info = analyze_cluster_characteristics(clustered_df)
+                st.write(cluster_info)
+        elif ml_page == "Correlation Matrix":
+            st.subheader("Correlation Matrix")
+            fig = plot_correlation_heatmap(filtered_df)
             st.pyplot(fig)
-            st.dataframe(anomaly_df.head(20))
-    elif page == "Clustering":
-        st.header("Clustering Analysis")
-        clustered_df, feat_names, sil_score, pca = perform_clustering_analysis(df)
-        if clustered_df is not None:
-            fig3d = plot_3d_clusters(clustered_df)
-            st.plotly_chart(fig3d, use_container_width=True)
-            cluster_info = analyze_cluster_characteristics(clustered_df)
-            st.write(cluster_info)
-    elif page == "Correlation Matrix":
-        st.header("Correlation Matrix")
-        fig = plot_correlation_heatmap(df)
-        st.pyplot(fig)
-    elif page == "Incident Forecast":
-        st.header("Incident Forecasting")
-        actual, forecast = forecast_incident_volume(df, periods=6)
-        import plotly.graph_objs as go
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=actual.index, y=actual.values, mode='lines+markers', name='Actual'))
-        if not forecast.empty:
-            fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode='lines+markers', name='Forecast'))
-        fig.update_layout(title="Incident Volume Forecast", xaxis_title="Month", yaxis_title="Incidents")
-        st.plotly_chart(fig, use_container_width=True)
-        st.write("Forecast Table")
-        if not forecast.empty:
-            forecast_df = pd.DataFrame({
-                'Month': forecast.index.strftime('%Y-%m'),
-                'Forecast': forecast.values
-            })
-            st.dataframe(forecast_df)
+        elif ml_page == "Incident Forecast":
+            st.subheader("Incident Forecasting")
+            actual, forecast = forecast_incident_volume(filtered_df, periods=6)
+            import plotly.graph_objs as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=actual.index, y=actual.values, mode='lines+markers', name='Actual'))
+            if not forecast.empty:
+                fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode='lines+markers', name='Forecast'))
+            fig.update_layout(title="Incident Volume Forecast", xaxis_title="Month", yaxis_title="Incidents")
+            st.plotly_chart(fig, use_container_width=True)
+            st.write("Forecast Table")
+            if not forecast.empty:
+                forecast_df = pd.DataFrame({
+                    'Month': forecast.index.strftime('%Y-%m'),
+                    'Forecast': forecast.values
+                })
+                st.dataframe(forecast_df, use_container_width=True)
 
 if __name__ == "__main__":
     main()
