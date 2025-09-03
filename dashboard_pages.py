@@ -1052,33 +1052,31 @@ def display_ml_insights_section(df):
         "Correlations"
     ])
 
-tabs = st.tabs(["Predictive Models", "Forecasting", "Data Overview"])
-    # Predictive Models
-with tabs[0]:
-    st.subheader("Predictive Models Comparison")
-    results, rows, roc_fig = compare_models(df)
-    if rows is not None and len(rows) > 0:
-        metrics_df = pd.DataFrame(rows)
-        st.dataframe(metrics_df, use_container_width=True)
-    if roc_fig is not None:
-        st.plotly_chart(roc_fig, use_container_width=True)
+    with tabs[0]:
+        st.subheader("Predictive Models Comparison")
+        results, rows, roc_fig = compare_models(df)
+        if rows is not None and len(rows) > 0:
+            metrics_df = pd.DataFrame(rows)
+            st.dataframe(metrics_df, use_container_width=True)
+        if roc_fig is not None:
+            st.plotly_chart(roc_fig, use_container_width=True)
 
-    st.subheader("Severity Prediction Model")
-    model, acc, features = train_severity_prediction_model(df)
-    if model is not None and features is not None:
-        st.write(f"Model accuracy: {acc:.2%}")
-        st.write(f"Features used: {features}")
-        if hasattr(model, "feature_importances_"):
-            importances = model.feature_importances_
-            importance_df = pd.DataFrame({
-                "Feature": features,
-                "Importance": importances
-            }).sort_values("Importance", ascending=False)
-            fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances")
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("Not enough data to train severity prediction model.")
-    # Forecasting
+        st.subheader("Severity Prediction Model")
+        model, acc, features = train_severity_prediction_model(df)
+        if model is not None and features is not None:
+            st.write(f"Model accuracy: {acc:.2%}")
+            st.write(f"Features used: {features}")
+            if hasattr(model, "feature_importances_"):
+                importances = model.feature_importances_
+                importance_df = pd.DataFrame({
+                    "Feature": features,
+                    "Importance": importances
+                }).sort_values("Importance", ascending=False)
+                fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances")
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Not enough data to train severity prediction model.")
+
     with tabs[1]:
         st.subheader("Incident Volume Forecasting")
         actual, forecast = forecast_incident_volume(df)
@@ -1087,7 +1085,6 @@ with tabs[0]:
         fig.add_trace(go.Scatter(x=forecast.index.astype(str), y=forecast.values, mode='lines', name='Forecast'))
         st.plotly_chart(fig, use_container_width=True)
 
-    # Risk Analysis
     with tabs[2]:
         st.subheader("Location Risk Profile")
         loc_df, loc_fig = profile_location_risk(df)
@@ -1099,7 +1096,6 @@ with tabs[0]:
         st.dataframe(type_df, use_container_width=True)
         st.plotly_chart(type_fig, use_container_width=True)
 
-    # Pattern Detection
     with tabs[3]:
         st.subheader("Seasonal & Temporal Pattern Detection")
         pattern_fig = detect_seasonal_patterns(df)
@@ -1136,7 +1132,6 @@ with tabs[0]:
         else:
             st.warning("Not enough data for anomaly detection.")
 
-    # Clustering
     with tabs[4]:
         st.subheader("Clustering Analysis (2D)")
         clustered, features, sil_score, pca = perform_clustering_analysis(df)
@@ -1160,8 +1155,9 @@ with tabs[0]:
         else:
             st.warning("Not enough data for clustering.")
 
-    # Correlations
     with tabs[5]:
         st.subheader("Feature Correlation Analysis")
         corr_fig = plot_correlation_heatmap(df)
         st.pyplot(corr_fig)
+   
+    
