@@ -275,29 +275,6 @@ def plot_severity_distribution(df):
     )
     st.plotly_chart(fig, use_container_width=True, key="severity_dist")
 
-def plot_top_incidents_by_volume_severity(df):
-    if df.empty or 'incident_type' not in df.columns or 'severity' not in df.columns:
-        st.warning("No data available for top incidents analysis")
-        return
-    top_incidents = df['incident_type'].value_counts().head(5).index
-    filtered_df = df[df['incident_type'].isin(top_incidents)]
-    severity_counts = filtered_df.groupby(['incident_type', 'severity']).size().reset_index(name='count')
-    fig = px.bar(
-        severity_counts,
-        x='incident_type',
-        y='count',
-        color='severity',
-        title="Top 5 Incident Types by Volume & Severity",
-        labels={'incident_type': 'Incident Type', 'count': 'Number of Incidents'},
-        color_discrete_map={'High': '#FF2B2B', 'Moderate': '#FF8700', 'Low': '#29B09D'},
-        height=400
-    )
-    fig.update_layout(
-        xaxis_tickangle=-45,
-        legend_title="Severity",
-        showlegend=True
-    )
-    st.plotly_chart(fig, use_container_width=True, key="top_incidents_volume_severity")
 
 def plot_monthly_incidents_by_severity(df):
     if df.empty or 'incident_date' not in df.columns or 'severity' not in df.columns:
@@ -625,214 +602,24 @@ def plot_serious_injury_age_severity(df):
     else:
         st.info("No high severity incidents found for age analysis")
 
-def add_age_and_age_range_columns(df):
-    
-    if 'dob' in df.columns:
-        df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
-        today = pd.to_datetime('today').normalize()
-        df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
-        df['participant_age'] = df['participant_age'].where(df['dob'].notnull())
-        df['participant_age'] = df['participant_age'].astype('Int64')
 
-    def get_age_range(age):
-        if pd.isnull(age):
-            return "Unknown"
-        if age < 18:
-            return "Under 18"
-        elif age < 30:
-            return "18-29"
-        elif age < 45:
-            return "30-44"
-        elif age < 60:
-            return "45-59"
-        else:
-            return "60+"
-
-    if 'participant_age' in df.columns:
-        df['age_range'] = df['participant_age'].apply(get_age_range)
-    return df
-
+# ========== EXECUTIVE SUMMARY FUNCTIONS ==========
 def display_executive_summary_section(df):
-    import calendar
-
-    st.markdown("""
-    <style>
-    .main-container {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 18px 24px;
-    }
-    .card-container {
-        display: flex;
-        gap: 2rem;
-        margin-bottom: 2.5rem;
-        justify-content: flex-start;
-    }
-    .dashboard-card {
-        background: #fff;
-        border: 1px solid #e3e3e3;
-        border-radius: 14px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-        padding: 1.6rem 1.2rem 1.2rem 1.2rem;
-        min-width: 170px;
-        max-width: 220px;
-        text-align: center;
-        flex: 1;
-    }
-    .dashboard-card-title {
-        font-size: 1.15rem;
-        font-weight: 600;
-        margin-bottom: 0.6rem;
-        color: #222;
-    }
-    .dashboard-card-value {
-        font-size: 2.1rem;
-        font-weight: 700;
-        color: #1769aa;
-        margin-bottom: 0.3rem;
-    }
-    .dashboard-card-desc {
-        font-size: 0.97rem;
-        color: #444;
-        margin-bottom: 0.1rem;
-    }
-    .section-title {
-        font-size: 1.35rem;
-        font-weight: 700;
-        margin: 2rem 0 1rem 0;
-    }
-    .divider {
-        margin: 2rem 0 2rem 0;
-        border-top: 1px solid #eee;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # ---- CARD DATA ----
-    # Top Incident Type
-    top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
-    # Latest Month Incident
-    if 'incident_date' in df.columns and not df.empty:
-        latest_month = df['incident_date'].max().to_period('M')
-        latest_month_str = latest_month.strftime('%B %Y')
-        latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
-    else:
-        latest_month_str = "N/A"
-        latest_month_count = 0
-    # Previous Month Incident
-    if 'incident_date' in df.columns and not df.empty:
-        prev_month = latest_month - 1
-        prev_month_str = prev_month.strftime('%B %Y')
-        prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
-    else:
-        prev_month_str = "N/A"
-        prev_month_count = 0
-    # High Severity
-    high_severity_count = int((df['severity'].str.lower() == 'high').sum()) if 'severity' in df.columns else 0
-    # Reportable Incidents
-    reportable_count = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
-
-    st.markdown('<div class="main-container">', unsafe_allow_html=True)
-    st.markdown(f"""
-    <div class="card-container">
-      <div class="dashboard-card">
-        <div class="dashboard-card-title">Top Incident Type</div>
-        <div class="dashboard-card-value">{top_type}</div>
-        <div class="dashboard-card-desc">Most frequent</div>
-      </div>
-      <div class="dashboard-card">
-        <div class="dashboard-card-title">Latest Month Incidents</div>
-        <div class="dashboard-card-value">{latest_month_count}</div>
-        <div class="dashboard-card-desc">{latest_month_str}</div>
-      </div>
-      <div class="dashboard-card">
-        <div class="dashboard-card-title">Previous Month Incidents</div>
-        <div class="dashboard-card-value">{prev_month_count}</div>
-        <div class="dashboard-card-desc">{prev_month_str}</div>
-      </div>
-      <div class="dashboard-card">
-        <div class="dashboard-card-title">High Severity Incidents</div>
-        <div class="dashboard-card-value">{high_severity_count}</div>
-        <div class="dashboard-card-desc">Critical cases</div>
-      </div>
-      <div class="dashboard-card">
-        <div class="dashboard-card-title">Reportable Incidents</div>
-        <div class="dashboard-card-value">{reportable_count}</div>
-        <div class="dashboard-card-desc">Regulatory events</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-
+    st.header("📊 Executive Summary")
+    st.dataframe(df.head(20), use_container_width=True)
+    st.write(f"Total incidents: {len(df)}")
+    if "incident_date" in df.columns:
+        st.write(f"Date range: {df['incident_date'].min().date()} to {df['incident_date'].max().date()}")
+    if "location" in df.columns:
+        st.write(f"Unique locations: {df['location'].nunique()}")
+    if "incident_type" in df.columns:
+        st.write(f"Incident types: {df['incident_type'].nunique()}")
+    if "severity" in df.columns:
+        st.write(f"Severity levels: {df['severity'].unique()}")
 
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
-def display_operational_performance_cards(df):
-    """Display operational performance cards with trend indicators"""
-    if df.empty or 'incident_date' not in df.columns:
-        st.warning("No data available for operational performance cards")
-        return
-    
-    # Calculate current month and previous month data
-    current_date = df['incident_date'].max()
-    current_month = current_date.to_period('M')
-    previous_month = current_month - 1
-    
-    current_df = df[df['incident_date'].dt.to_period('M') == current_month]
-    previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
-    
-    st.markdown("### 📈 Operational Performance Metrics")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Location Reportable Rate
-        if 'location' in df.columns and 'reportable' in df.columns:
-            current_reportable_rate = (current_df['reportable'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_reportable_rate = (previous_df['reportable'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_reportable_rate, previous_reportable_rate)
-            
-            st.metric(
-                label="🏢 Location Reportable Rate",
-                value=f"{current_reportable_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents that are reportable by location"
-            )
-    
-    with col2:
-        # Average Participant Age
-        if 'participant_age' in df.columns:
-            current_avg_age = current_df['participant_age'].mean() if len(current_df) > 0 else 0
-            previous_avg_age = previous_df['participant_age'].mean() if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_avg_age, previous_avg_age)
-            
-            st.metric(
-                label="👥 Average Participant Age",
-                value=f"{current_avg_age:.1f} yrs",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="normal",
-                help="Average age of participants involved in incidents"
-            )
-    
-    with col3:
-        # Medical Attention Rate
-        if 'medical_attention_required' in df.columns:
-            current_medical_rate = (current_df['medical_attention_required'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_medical_rate = (previous_df['medical_attention_required'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_medical_rate, previous_medical_rate)
-            
-            st.metric(
-                label="🏥 Medical Attention Rate",
-                value=f"{current_medical_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents requiring medical attention"
-            )
 def display_operational_performance_section(df):
     st.header("📈 Operational Performance & Risk Analysis")
     display_operational_performance_cards(df)
@@ -847,45 +634,9 @@ def display_operational_performance_section(df):
     plot_monthly_incidents_by_severity(df)  # <--- FIXED HERE
     plot_carer_performance_scatter(df)
     plot_serious_injury_age_severity(df)
-    
-def plot_reporter_type_metrics(df):
-    """Display reporter type related metrics"""
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if 'reported_by' in df.columns:
-            value = df['reported_by'].nunique()
-            plot_metric("Reporter Types", value, color_graph="#5B8FF9")
-    
-    with col2:
-        if 'medical_attention_required' in df.columns:
-            value = int(df['medical_attention_required'].sum())
-            plot_metric("Medical Attention Required", value, color_graph="#F6BD16")
-    
-    with col3:
-        if 'participant_age' in df.columns:
-            avg_age = df['participant_age'].mean()
-            plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
 
 
 
-def plot_serious_injury_age_severity(df):
-    """Create serious injury age and severity analysis"""
-    if df.empty or 'severity' not in df.columns or 'participant_age' not in df.columns:
-        st.info("No high severity incidents found for age analysis")
-        return
-    serious_df = df[df['severity'].str.lower() == 'high']
-    if not serious_df.empty:
-        fig = px.histogram(
-            serious_df, 
-            x='participant_age', 
-            color='severity', 
-            nbins=20,
-            title="High Severity Incidents: Age Distribution"
-        )
-        st.plotly_chart(fig, use_container_width=True, key="serious_injury_age_severity")
-    else:
-        st.info("No high severity incidents found for age analysis")
 
 # ================= INVESTIGATION/COMPLIANCE FUNCTIONS =================
 
@@ -1120,7 +871,7 @@ def plot_contributing_factors_by_month(df):
 def display_executive_summary_section(df):
     import calendar
 
-    st.markdown("""
+     st.markdown("""
     <style>
     .main-container {
         max-width: 1100px;
@@ -1145,24 +896,24 @@ def display_executive_summary_section(df):
         flex: 1;
     }
     .dashboard-card-title {
-        font-size: 1 rem;
+        font-size: 1.15rem;
         font-weight: 600;
         margin-bottom: 0.6rem;
         color: #222;
     }
     .dashboard-card-value {
-        font-size: 1.7 rem;
+        font-size: 2.1rem;
         font-weight: 700;
         color: #1769aa;
         margin-bottom: 0.3rem;
     }
     .dashboard-card-desc {
-        font-size: 0.75rem;
+        font-size: 0.97rem;
         color: #444;
         margin-bottom: 0.1rem;
     }
     .section-title {
-        font-size: 1.05rem;
+        font-size: 1.35rem;
         font-weight: 700;
         margin: 2rem 0 1rem 0;
     }
@@ -1242,8 +993,6 @@ def display_executive_summary_section(df):
     st.markdown('<div class="section-title">Monthly Trends</div>', unsafe_allow_html=True)
     plot_monthly_incidents_by_severity(df)
 
-    st.markdown('<div class="section-title">Medical Outcomes</div>', unsafe_allow_html=True)
-    plot_medical_outcomes(df)
 
     st.markdown('<div class="section-title">Daily Incident Trends</div>', unsafe_allow_html=True)
     plot_incident_trends(df)
@@ -1603,60 +1352,7 @@ def display_ml_insights_section(df):
 
 
 
-# --- Executive Summary ---
-def display_executive_summary_section(df):
-    st.header("📊 Executive Summary")
-    st.markdown("#### Quick Data Overview")
-    st.dataframe(df.head(20), use_container_width=True)
-    st.write(f"Total incidents: {len(df)}")
-    if "incident_date" in df.columns:
-        st.write(f"Date range: {df['incident_date'].min().date()} to {df['incident_date'].max().date()}")
-    if "location" in df.columns:
-        st.write(f"Unique locations: {df['location'].nunique()}")
-    if "incident_type" in df.columns:
-        st.write(f"Incident types: {df['incident_type'].nunique()}")
-    if "severity" in df.columns:
-        st.write(f"Severity levels: {df['severity'].unique()}")
 
-# --- Operational Performance ---
-def display_operational_performance_section(df):
-    st.header("📈 Operational Performance & Risk Analysis")
-    st.markdown("#### Incident Volume by Location")
-    if "location" in df.columns:
-        location_counts = df["location"].value_counts().head(15)
-        st.bar_chart(location_counts)
-    st.markdown("#### Incident Volume by Type")
-    if "incident_type" in df.columns:
-        type_counts = df["incident_type"].value_counts().head(15)
-        st.bar_chart(type_counts)
-    st.markdown("#### Severity Distribution")
-    if "severity" in df.columns:
-        severity_counts = df["severity"].value_counts()
-        st.bar_chart(severity_counts)
-    st.markdown("#### Monthly Trends")
-    if "incident_date" in df.columns:
-        monthly_counts = df.groupby(df["incident_date"].dt.to_period("M")).size()
-        monthly_counts.index = monthly_counts.index.to_timestamp()
-        st.line_chart(monthly_counts)
-
-# --- Compliance & Investigation ---
-def display_compliance_investigation_section(df):
-    st.header("📋 Compliance & Investigation")
-    st.markdown("#### Reportable Incidents")
-    if "reportable" in df.columns:
-        reportable_counts = df["reportable"].value_counts()
-        st.bar_chart(reportable_counts)
-        st.write(f"Total reportable incidents: {df['reportable'].sum()}")
-    st.markdown("#### Incidents Requiring Medical Attention")
-    if "medical_attention_required" in df.columns:
-        med_counts = df["medical_attention_required"].value_counts()
-        st.bar_chart(med_counts)
-        st.write(f"Total needing medical attention: {df['medical_attention_required'].sum()}")
-    st.markdown("#### High Severity Investigations")
-    if "severity" in df.columns:
-        high_sev = df[df["severity"].str.lower() == "high"]
-        st.write(f"High severity incidents: {len(high_sev)}")
-        st.dataframe(high_sev.head(10), use_container_width=True)
 
 # --- ML Insights ---
 def display_ml_insights_section(df):
