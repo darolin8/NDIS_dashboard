@@ -979,6 +979,8 @@ def main():
 if __name__ == "__main__":
     main()
     
+
+
 # --- Export aliases for dashboard compatibility ---
 
 prepare_ml_features = create_comprehensive_features
@@ -986,13 +988,13 @@ compare_models = predictive_models_comparison
 forecast_incident_volume = incident_volume_forecasting
 profile_location_risk = location_risk_profiling
 
-# If you have these, map them. If not, set to None or implement as needed:
-profile_incident_type_risk = None  # Or = incident_type_risk_profiling if it exists
+# If you have these functions, use the correct name. If not, leave as None for now.
+profile_incident_type_risk = None  # Or: incident_type_risk_profiling
 detect_seasonal_patterns = seasonal_temporal_patterns
 perform_clustering_analysis = clustering_analysis
-analyze_cluster_characteristics = None  # Or your real function
-plot_3d_clusters = None  # Or your real function
+analyze_cluster_characteristics = None  # Or your function name
+plot_3d_clusters = None  # Or your function name
 plot_correlation_heatmap = correlation_analysis
-train_severity_prediction_model = None  # Or your real function
-perform_anomaly_detection = None  # Or your real function
-plot_anomaly_scatter = None  # Or your real function
+train_severity_prediction_model = None  # Or your function name
+perform_anomaly_detection = None  # Or your function name
+plot_anomaly_scatter = None  # Or your function name
