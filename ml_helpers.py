@@ -978,3 +978,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+# --- Export aliases for dashboard compatibility ---
+compare_models = predictive_models_comparison
+forecast_incident_volume = incident_volume_forecasting
+profile_location_risk = location_risk_profiling
+profile_incident_type_risk = incident_type_risk_profiling if 'incident_type_risk_profiling' in globals() else None
+detect_seasonal_patterns = seasonal_temporal_patterns
+perform_clustering_analysis = clustering_analysis
+plot_3d_clusters = None  # If you have a 3D cluster plot function, assign it here
+plot_correlation_heatmap = correlation_analysis
+train_severity_prediction_model = None  # Assign your model training function if exists
+perform_anomaly_detection = None        # Assign anomaly detection function if exists
+analyze_cluster_characteristics = None  # Assign cluster characteristics function if exists
