@@ -13,7 +13,6 @@ import os
 st.info(f"Loaded from: {os.path.abspath(__file__)}")
 
 
-
 # ================= UTILITY FUNCTIONS =================
 
 def calculate_trend(current_value, previous_value):
@@ -87,6 +86,168 @@ def plot_gauge(indicator_number, indicator_color, indicator_suffix, indicator_ti
         margin=dict(l=10, r=10, t=50, b=10, pad=8),
     )
     st.plotly_chart(fig, use_container_width=True, key=indicator_title.replace(" ", "_")+"_gauge")
+  
+
+def load_ndis_data():
+    """Load the NDIS incident CSV from GitHub and return a pandas DataFrame."""
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
+    try:
+        df = pd.read_csv(url)
+        return df
+    except Exception as e:
+        st.error(f"Could not load data from GitHub: {e}")
+        return pd.DataFrame()
+
+def plot_time_analysis(df):
+    if df.empty or 'incident_time' not in df.columns:
+        st.warning("No time data available for analysis")
+        return
+
+    df = df.copy()
+    df['incident_hour'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.hour
+    df = df.dropna(subset=['incident_hour'])
+    df['incident_hour'] = df['incident_hour'].astype(int)
+
+    # Select the first present cause column
+    cause_col = None
+    for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
+        if c in df.columns:
+            cause_col = c
+            break
+
+    if cause_col is None:
+        st.warning("No cause column found. Expected one of: incident_type / contributing_factors / cause / root_cause.")
+        return
+
+    df[cause_col] = df[cause_col].astype(str).fillna("Unknown")
+    top_n = 5
+    top_causes = df[cause_col].value_counts().head(top_n).index
+    df['cause_group'] = np.where(df[cause_col].isin(top_causes), df[cause_col], 'Other')
+
+    hours = list(range(24))
+    grouped = (
+        df.groupby(['incident_hour', 'cause_group'])
+          .size()
+          .reset_index(name='count')
+    )
+    pivot = (
+        grouped.pivot_table(index='incident_hour', columns='cause_group',
+                            values='count', aggfunc='sum', fill_value=0)
+              .reindex(hours, fill_value=0)
+    )
+    totals = pivot.sum(axis=1)
+
+    fig = go.Figure()
+
+    # Stacked bars for causes
+    for cause in sorted(pivot.columns):
+        fig.add_trace(go.Bar(
+            x=hours,
+            y=pivot[cause].values,
+            name=str(cause),
+            opacity=0.7,
+            hovertemplate="Hour %{x}: %{y} incidents<br>Cause: " + str(cause) + "<extra></extra>",
+        ))
+
+    # Line for total incidents
+    fig.add_trace(go.Scatter(
+        x=hours,
+        y=totals.values,
+        mode="lines+markers",
+        name="Total incidents",
+        line=dict(width=3, color="orange"),
+        yaxis="y2",
+        hovertemplate="Hour %{x}: %{y} total<extra></extra>",
+    ))
+
+    fig.update_layout(
+        title="Incidents by Hour of Day",
+        barmode="stack",
+        xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
+        yaxis=dict(title="Number of Incidents", side="left"),
+        yaxis2=dict(title="Total Incidents", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60, r=20, l=60, b=60),
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig, use_container_width=True, key="time_analysis")
+
+def plot_weekday_analysis(df):
+    if 'incident_weekday' not in df.columns:
+        # Auto-create weekday column if missing
+        if 'incident_time' in df.columns:
+            df['incident_weekday'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.day_name()
+        else:
+            st.warning("No data available for weekday analysis")
+            return
+    weekday_counts = df['incident_weekday'].value_counts()
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    weekday_counts = weekday_counts.reindex(day_order, fill_value=0)
+    fig = px.bar(
+        x=weekday_counts.index,
+        y=weekday_counts.values,
+        title="Incidents by Day of Week",
+        labels={'x': 'Day of Week', 'y': 'Number of Incidents'},
+        color=weekday_counts.values,
+        color_continuous_scale='Plasma'
+    )
+    st.plotly_chart(fig, use_container_width=True, key="weekday_analysis")
+
+def plot_reportable_analysis(df):
+    if df.empty or 'reportable' not in df.columns:
+        st.warning("No data available for reportable analysis")
+        return
+    reportable_counts = df['reportable'].value_counts()
+    reportable_labels = ['Not Reportable', 'Reportable']
+    if len(reportable_counts) == 2 and 0 in reportable_counts.index and 1 in reportable_counts.index:
+        reportable_counts.index = reportable_labels
+    elif True in reportable_counts.index or False in reportable_counts.index:
+        reportable_counts.index = ['Reportable' if x else 'Not Reportable' for x in reportable_counts.index]
+    fig = px.pie(
+        values=reportable_counts.values,
+        names=reportable_counts.index,
+        title="Reportable Incidents Distribution",
+        color_discrete_sequence=['#90EE90', '#FFB6C1']
+    )
+    st.plotly_chart(fig, use_container_width=True, key="reportable_analysis")
+
+def plot_medical_outcomes(df):
+    if df.empty or 'treatment_required' not in df.columns or 'medical_attention_required' not in df.columns:
+        st.warning("No data available for medical outcomes")
+        return
+    medical_summary = {
+        'Treatment Required': df['treatment_required'].sum(),
+        'Medical Attention Required': df['medical_attention_required'].sum(),
+        'No Medical Intervention': len(df) - df[['treatment_required', 'medical_attention_required']].any(axis=1).sum()
+    }
+    fig = px.bar(
+        x=list(medical_summary.keys()),
+        y=list(medical_summary.values()),
+        title="Medical Intervention Requirements",
+        labels={'x': 'Medical Outcome', 'y': 'Number of Cases'},
+        color=list(medical_summary.values()),
+        color_continuous_scale='RdYlBu_r',
+        height=400
+    )
+    fig.update_layout(showlegend=False, xaxis_tickangle=-15)
+    st.plotly_chart(fig, use_container_width=True, key="medical_outcomes")
+
+def plot_reporter_type_metrics(df):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if 'reported_by' in df.columns:
+            value = df['reported_by'].nunique()
+            plot_metric("Reporter Types", value, color_graph="#5B8FF9")
+    with col2:
+        if 'medical_attention_required' in df.columns:
+            value = int(df['medical_attention_required'].sum())
+            plot_metric("Medical Attention Required", value, color_graph="#F6BD16")
+    with col3:
+        if 'participant_age' in df.columns:
+            avg_age = df['participant_age'].mean()
+            plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
+
 
 def plot_severity_distribution(df):
     if df.empty or 'severity' not in df.columns:
@@ -243,161 +404,7 @@ def plot_incident_trends(df):
     )
     st.plotly_chart(fig, use_container_width=True, key="incident_trends")
 
-def plot_weekday_analysis(df):
-    if df.empty or 'incident_weekday' not in df.columns:
-        st.warning("No data available for weekday analysis")
-        return
-    weekday_counts = df['incident_weekday'].value_counts()
-    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    weekday_counts = weekday_counts.reindex(day_order, fill_value=0)
-    fig = px.bar(
-        x=weekday_counts.index,
-        y=weekday_counts.values,
-        title="Incidents by Day of Week",
-        labels={'x': 'Day of Week', 'y': 'Number of Incidents'},
-        color=weekday_counts.values,
-        color_continuous_scale='Plasma'
-    )
-    st.plotly_chart(fig, use_container_width=True, key="weekday_analysis")
 
-
-
-def plot_time_analysis():
-    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
-    try:
-        df = pd.read_csv(url)
-    except Exception as e:
-        st.error(f"Could not load data from GitHub: {e}")
-        return
-
-    if df.empty or 'incident_time' not in df.columns:
-        st.warning("No time data available for analysis")
-        return
-
-    df = df.copy()
-    df['incident_hour'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.hour
-    df = df.dropna(subset=['incident_hour'])
-    df['incident_hour'] = df['incident_hour'].astype(int)
-
-    # Select the first present cause column
-    cause_col = None
-    for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
-        if c in df.columns:
-            cause_col = c
-            break
-
-    if cause_col is None:
-        st.warning("No cause column found. Expected one of: incident_type / contributing_factors / cause / root_cause.")
-        return
-
-    df[cause_col] = df[cause_col].astype(str).fillna("Unknown")
-    top_n = 5
-    top_causes = df[cause_col].value_counts().head(top_n).index
-    df['cause_group'] = np.where(df[cause_col].isin(top_causes), df[cause_col], 'Other')
-
-    hours = list(range(24))
-    grouped = (
-        df.groupby(['incident_hour', 'cause_group'])
-          .size()
-          .reset_index(name='count')
-    )
-    pivot = (
-        grouped.pivot_table(index='incident_hour', columns='cause_group',
-                            values='count', aggfunc='sum', fill_value=0)
-              .reindex(hours, fill_value=0)
-    )
-    totals = pivot.sum(axis=1)
-
-    fig = go.Figure()
-
-    # Stacked bars for causes
-    for cause in sorted(pivot.columns):
-        fig.add_trace(go.Bar(
-            x=hours,
-            y=pivot[cause].values,
-            name=str(cause),
-            opacity=0.7,
-            hovertemplate="Hour %{x}: %{y} incidents<br>Cause: " + str(cause) + "<extra></extra>",
-        ))
-
-    # Line for total incidents
-    fig.add_trace(go.Scatter(
-        x=hours,
-        y=totals.values,
-        mode="lines+markers",
-        name="Total incidents",
-        line=dict(width=3, color="orange"),
-        yaxis="y2",
-        hovertemplate="Hour %{x}: %{y} total<extra></extra>",
-    ))
-
-    fig.update_layout(
-        title="Incidents by Hour of Day",
-        barmode="stack",
-        xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
-        yaxis=dict(title="Number of Incidents", side="left"),
-        yaxis2=dict(title="Total Incidents", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(t=60, r=20, l=60, b=60),
-        hovermode="x unified",
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key="time_analysis")
-
-
-def plot_reportable_analysis(df):
-    if df.empty or 'reportable' not in df.columns:
-        st.warning("No data available for reportable analysis")
-        return
-    reportable_counts = df['reportable'].value_counts()
-    reportable_labels = ['Not Reportable', 'Reportable']
-    if len(reportable_counts) == 2 and 0 in reportable_counts.index and 1 in reportable_counts.index:
-        reportable_counts.index = reportable_labels
-    elif True in reportable_counts.index or False in reportable_counts.index:
-        reportable_counts.index = ['Reportable' if x else 'Not Reportable' for x in reportable_counts.index]
-    fig = px.pie(
-        values=reportable_counts.values,
-        names=reportable_counts.index,
-        title="Reportable Incidents Distribution",
-        color_discrete_sequence=['#90EE90', '#FFB6C1']
-    )
-    st.plotly_chart(fig, use_container_width=True, key="reportable_analysis")
-
-def plot_medical_outcomes(df):
-    if df.empty or 'treatment_required' not in df.columns or 'medical_attention_required' not in df.columns:
-        st.warning("No data available for medical outcomes")
-        return
-    medical_summary = {
-        'Treatment Required': df['treatment_required'].sum(),
-        'Medical Attention Required': df['medical_attention_required'].sum(),
-        'No Medical Intervention': len(df) - df[['treatment_required', 'medical_attention_required']].any(axis=1).sum()
-    }
-    fig = px.bar(
-        x=list(medical_summary.keys()),
-        y=list(medical_summary.values()),
-        title="Medical Intervention Requirements",
-        labels={'x': 'Medical Outcome', 'y': 'Number of Cases'},
-        color=list(medical_summary.values()),
-        color_continuous_scale='RdYlBu_r',
-        height=400
-    )
-    fig.update_layout(showlegend=False, xaxis_tickangle=-15)
-    st.plotly_chart(fig, use_container_width=True, key="medical_outcomes")
-
-def plot_reporter_type_metrics(df):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if 'reported_by' in df.columns:
-            value = df['reported_by'].nunique()
-            plot_metric("Reporter Types", value, color_graph="#5B8FF9")
-    with col2:
-        if 'medical_attention_required' in df.columns:
-            value = int(df['medical_attention_required'].sum())
-            plot_metric("Medical Attention Required", value, color_graph="#F6BD16")
-    with col3:
-        if 'participant_age' in df.columns:
-            avg_age = df['participant_age'].mean()
-            plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
 
 def plot_reporter_performance_scatter(df):
     if df.empty or not {'reported_by','notification_date','incident_date'}.issubset(df.columns):
