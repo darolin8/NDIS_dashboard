@@ -192,3 +192,105 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+import streamlit as st
+import pandas as pd
+from ml_helpers import (
+    prepare_ml_features, compare_models, train_severity_prediction_model,
+    perform_anomaly_detection, plot_anomaly_scatter,
+    perform_clustering_analysis, analyze_cluster_characteristics, plot_3d_clusters,
+    plot_correlation_heatmap, forecast_incident_volume,
+    profile_location_risk, profile_incident_type_risk, detect_seasonal_patterns
+)
+
+@st.cache_data
+def load_ndis_data():
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
+    try:
+        df = pd.read_csv(url, parse_dates=['incident_date'])
+        return df
+    except Exception as e:
+        st.error(f"Could not load data: {e}")
+        return pd.DataFrame()
+
+def main():
+    st.title("NDIS Incident Analytics Dashboard")
+    df = load_ndis_data()
+    if df.empty:
+        st.error("No data available.")
+        return
+
+    page = st.sidebar.selectbox("Select analysis", [
+        "Executive Summary",
+        "Location Risk",
+        "Incident Type Risk",
+        "Seasonal Patterns",
+        "Severity ML Models",
+        "Anomaly Detection",
+        "Clustering",
+        "Correlation Matrix",
+        "Incident Forecast"
+    ])
+
+    if page == "Executive Summary":
+        st.header("Executive Summary")
+        st.write(df.head(20))
+    elif page == "Location Risk":
+        st.header("Incident Risk by Location")
+        risk_df, fig = profile_location_risk(df)
+        if fig: st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(risk_df)
+    elif page == "Incident Type Risk":
+        st.header("Incident Risk by Type")
+        risk_df, fig = profile_incident_type_risk(df)
+        if fig: st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(risk_df)
+    elif page == "Seasonal Patterns":
+        st.header("Seasonal & Temporal Patterns")
+        fig = detect_seasonal_patterns(df)
+        if fig: st.plotly_chart(fig, use_container_width=True)
+    elif page == "Severity ML Models":
+        st.header("Severity ML Model Comparison")
+        metrics_df, roc_fig = compare_models(df)
+        st.dataframe(metrics_df)
+        st.plotly_chart(roc_fig, use_container_width=True)
+    elif page == "Anomaly Detection":
+        st.header("Anomaly Detection")
+        anomaly_df, feat_names = perform_anomaly_detection(df)
+        if anomaly_df is not None:
+            fig = plot_anomaly_scatter(anomaly_df, 'month', 'hour', axis_labels={'month':'Month', 'hour':'Hour'})
+            st.pyplot(fig)
+            st.dataframe(anomaly_df.head(20))
+    elif page == "Clustering":
+        st.header("Clustering Analysis")
+        clustered_df, feat_names, sil_score, pca = perform_clustering_analysis(df)
+        if clustered_df is not None:
+            fig3d = plot_3d_clusters(clustered_df)
+            st.plotly_chart(fig3d, use_container_width=True)
+            cluster_info = analyze_cluster_characteristics(clustered_df)
+            st.write(cluster_info)
+    elif page == "Correlation Matrix":
+        st.header("Correlation Matrix")
+        fig = plot_correlation_heatmap(df)
+        st.pyplot(fig)
+    elif page == "Incident Forecast":
+        st.header("Incident Forecasting")
+        actual, forecast = forecast_incident_volume(df, periods=6)
+        import plotly.graph_objs as go
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=actual.index, y=actual.values, mode='lines+markers', name='Actual'))
+        if not forecast.empty:
+            fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode='lines+markers', name='Forecast'))
+        fig.update_layout(title="Incident Volume Forecast", xaxis_title="Month", yaxis_title="Incidents")
+        st.plotly_chart(fig, use_container_width=True)
+        st.write("Forecast Table")
+        if not forecast.empty:
+            forecast_df = pd.DataFrame({
+                'Month': forecast.index.strftime('%Y-%m'),
+                'Forecast': forecast.values
+            })
+            st.dataframe(forecast_df)
+
+if __name__ == "__main__":
+    main()
