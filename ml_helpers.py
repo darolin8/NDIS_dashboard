@@ -1186,21 +1186,33 @@ if __name__ == "__main__":
 
 
 # --- Export aliases for dashboard compatibility ---
+
+
 prepare_ml_features = create_comprehensive_features
 compare_models = predictive_models_comparison
+
+# If your forecasting helper is `incident_volume_forecasting` (the one that plots
+# and returns a DataFrame), keep this alias:
 forecast_incident_volume = incident_volume_forecasting
+
 profile_location_risk = location_risk_profiling
 profile_incident_type_risk = incident_type_risk_profiling
+
 detect_seasonal_patterns = seasonal_temporal_patterns
 perform_clustering_analysis = clustering_analysis
-analyze_cluster_characteristics = None  # not required here
-plot_correlation_heatmap = correlation_analysis
-train_severity_prediction_model = None  # optional external
-perform_anomaly_detection = None        # optional external
-plot_anomaly_scatter = None             # optional external
-train_severity_prediction_model = your_train_fn
-perform_anomaly_detection = your_anomaly_fn
-plot_3d_clusters = your_plot_3d_fn  # if you have one
+
+# These names must point to real functions you defined above.
+# If you don't have one of them, set it to None instead of a fake name.
+analyze_cluster_characteristics = analyze_cluster_characteristics  # or None
+plot_3d_clusters = plot_3d_clusters                                # or None
+
+# Keep your existing heatmap function name (it returns a matplotlib fig)
+plot_correlation_heatmap = plot_correlation_heatmap
+
+train_severity_prediction_model = train_severity_prediction_model   # or None
+perform_anomaly_detection = perform_anomaly_detection               # or None
+plot_anomaly_scatter = plot_anomaly_scatter                         # or None
+
 
 
 
