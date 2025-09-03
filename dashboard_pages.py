@@ -260,37 +260,41 @@ def plot_weekday_analysis(df):
     )
     st.plotly_chart(fig, use_container_width=True, key="weekday_analysis")
 
-def plot_time_analysis(df, cause_col=None):
+
+
+def plot_time_analysis():
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
+    try:
+        df = pd.read_csv(url)
+    except Exception as e:
+        st.error(f"Could not load data from GitHub: {e}")
+        return
+
     if df.empty or 'incident_time' not in df.columns:
         st.warning("No time data available for analysis")
         return
 
     df = df.copy()
-    # Robustly parse hour
     df['incident_hour'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.hour
     df = df.dropna(subset=['incident_hour'])
     df['incident_hour'] = df['incident_hour'].astype(int)
 
-    # Pick a cause column if not provided
-    if cause_col is None:
-        for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
-            if c in df.columns:
-                cause_col = c
-                break
+    # Select the first present cause column
+    cause_col = None
+    for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
+        if c in df.columns:
+            cause_col = c
+            break
 
-    if cause_col is None or cause_col not in df.columns:
+    if cause_col is None:
         st.warning("No cause column found. Expected one of: incident_type / contributing_factors / cause / root_cause.")
         return
 
-    # Prepare cause values
     df[cause_col] = df[cause_col].astype(str).fillna("Unknown")
-
-    # Top-N causes (for legend readability)
     top_n = 5
     top_causes = df[cause_col].value_counts().head(top_n).index
     df['cause_group'] = np.where(df[cause_col].isin(top_causes), df[cause_col], 'Other')
 
-    # Pivot data for stacked bars
     hours = list(range(24))
     grouped = (
         df.groupby(['incident_hour', 'cause_group'])
@@ -339,6 +343,7 @@ def plot_time_analysis(df, cause_col=None):
     )
 
     st.plotly_chart(fig, use_container_width=True, key="time_analysis")
+
 
 def plot_reportable_analysis(df):
     if df.empty or 'reportable' not in df.columns:
