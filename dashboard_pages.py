@@ -401,7 +401,7 @@ def display_executive_summary_section(df):
     st.markdown("---")
     df = add_age_and_age_range_columns(df)
 
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
         top_type = (
@@ -527,30 +527,8 @@ def display_executive_summary_section(df):
             unsafe_allow_html=True
         )
 
-    # Average Age card (calculated from DOB)
-    with col6:
-        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
-        avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
-        st.markdown(
-            f"""
-            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
-                <span style="font-size:1rem;font-weight:600;color:#222;">
-                  Average Age
-                </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#5ad8a6;">
-                  {avg_age_txt}
-                </span><br>
-                <span style="font-size:0.93rem;color:#444;">
-                  Average participant age
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
     # Most common age range card
-    with col7:
+    with col6:
         common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
         st.markdown(
             f"""
