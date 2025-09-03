@@ -64,7 +64,7 @@ def main():
             "📊 Executive Summary",
             "📈 Operational Performance & Risk Analysis",
             "📋 Compliance & Investigation",
-            "🤖 ML Insights"
+            "🤖 ML Insights",
             "🗺️ Incident Map" 
         ],
     )
