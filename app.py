@@ -208,7 +208,6 @@ def main():
         if ml_page == "Location Risk":
             st.subheader("Incident Risk by Location")
             risk_df, fig = profile_location_risk(filtered_df)
-            if fig: st.plotly_chart(fig, use_container_width=True)
             st.dataframe(risk_df, use_container_width=True)
         elif ml_page == "Incident Type Risk":
             st.subheader("Incident Risk by Type")
