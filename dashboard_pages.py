@@ -21,7 +21,6 @@ st.info(f"Loaded from: {os.path.abspath(__file__)}")
 
 from ml_helpers import (
    incident_volume_forecasting,
-    location_risk_profiling,
     seasonal_temporal_patterns,
     plot_time_with_causes,
     plot_carer_performance_scatter,
@@ -1249,6 +1248,7 @@ def display_ml_insights_section(df):
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.warning(f"Correlation analysis failed: {e}")
+
 
    
     
