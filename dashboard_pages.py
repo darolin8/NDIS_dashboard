@@ -238,24 +238,84 @@ def plot_weekday_analysis(df):
     )
     st.plotly_chart(fig, use_container_width=True, key="weekday_analysis")
 
-def plot_time_analysis(df):
+def plot_time_analysis(df, cause_col=None):
     if df.empty or 'incident_time' not in df.columns:
         st.warning("No time data available for analysis")
         return
+
     df = df.copy()
-    df['incident_hour'] = pd.to_datetime(df['incident_time'], format='%H:%M', errors='coerce').dt.hour
-    hourly_counts = df['incident_hour'].value_counts().sort_index()
-    fig = px.line(
-        x=hourly_counts.index,
-        y=hourly_counts.values,
-        title="Incidents by Hour of Day",
-        markers=True
+    # Robustly parse hour
+    df['incident_hour'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.hour
+    df = df.dropna(subset=['incident_hour'])
+    df['incident_hour'] = df['incident_hour'].astype(int)
+
+    # Pick a cause column if not provided
+    if cause_col is None:
+        for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
+            if c in df.columns:
+                cause_col = c
+                break
+
+    if cause_col is None or cause_col not in df.columns:
+        st.warning("No cause column found. Expected one of: incident_type / contributing_factors / cause / root_cause.")
+        return
+
+    # Prepare cause values
+    df[cause_col] = df[cause_col].astype(str).fillna("Unknown")
+
+    # Top-N causes (for legend readability)
+    top_n = 5
+    top_causes = df[cause_col].value_counts().head(top_n).index
+    df['cause_group'] = np.where(df[cause_col].isin(top_causes), df[cause_col], 'Other')
+
+    # Pivot data for stacked bars
+    hours = list(range(24))
+    grouped = (
+        df.groupby(['incident_hour', 'cause_group'])
+          .size()
+          .reset_index(name='count')
     )
+    pivot = (
+        grouped.pivot_table(index='incident_hour', columns='cause_group',
+                            values='count', aggfunc='sum', fill_value=0)
+              .reindex(hours, fill_value=0)
+    )
+    totals = pivot.sum(axis=1)
+
+    fig = go.Figure()
+
+    # Stacked bars for causes
+    for cause in sorted(pivot.columns):
+        fig.add_trace(go.Bar(
+            x=hours,
+            y=pivot[cause].values,
+            name=str(cause),
+            opacity=0.7,
+            hovertemplate="Hour %{x}: %{y} incidents<br>Cause: " + str(cause) + "<extra></extra>",
+        ))
+
+    # Line for total incidents
+    fig.add_trace(go.Scatter(
+        x=hours,
+        y=totals.values,
+        mode="lines+markers",
+        name="Total incidents",
+        line=dict(width=3, color="orange"),
+        yaxis="y2",
+        hovertemplate="Hour %{x}: %{y} total<extra></extra>",
+    ))
+
     fig.update_layout(
-        xaxis_title="Hour of Day",
-        yaxis_title="Number of Incidents",
-        xaxis=dict(tickmode='linear', tick0=0, dtick=2)
+        title="Incidents by Hour of Day",
+        barmode="stack",
+        xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
+        yaxis=dict(title="Number of Incidents", side="left"),
+        yaxis2=dict(title="Total Incidents", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60, r=20, l=60, b=60),
+        hovermode="x unified",
     )
+
     st.plotly_chart(fig, use_container_width=True, key="time_analysis")
 
 def plot_reportable_analysis(df):
