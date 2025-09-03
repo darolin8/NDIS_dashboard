@@ -1052,7 +1052,7 @@ def display_ml_insights_section(df):
         "Correlations"
     ])
 
-
+tabs = st.tabs(["Predictive Models", "Forecasting", "Data Overview"])
     # Predictive Models
 with tabs[0]:
     st.subheader("Predictive Models Comparison")
