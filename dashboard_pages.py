@@ -741,7 +741,6 @@ def display_operational_performance_section(df):
         plot_incident_types_bar(df)
     with col2:
         plot_medical_outcomes(df)
-    plot_monthly_incidents_by_severity(df)
     plot_carer_performance_scatter(df)
     plot_serious_injury_age_severity(df)
 
