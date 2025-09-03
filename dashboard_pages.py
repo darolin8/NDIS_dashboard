@@ -490,6 +490,10 @@ def add_age_and_age_range_columns(df):
     return df
 
 
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
 def plot_carer_performance_scatter(df):
     need = {'carer_id', 'notification_date', 'incident_date'}
     if df.empty or not need.issubset(df.columns):
@@ -497,52 +501,51 @@ def plot_carer_performance_scatter(df):
         return
 
     data = df.copy()
-    # --- Parse dates & compute delay (days) ---
     data['incident_date'] = pd.to_datetime(data['incident_date'], errors='coerce')
     data['notification_date'] = pd.to_datetime(data['notification_date'], errors='coerce')
     data = data.dropna(subset=['incident_date', 'notification_date', 'carer_id'])
     data['delay_days'] = (data['notification_date'] - data['incident_date']).dt.days
+    data['carer_id'] = data['carer_id'].astype(str)
 
     if data.empty:
         st.info("No valid rows after parsing dates.")
         return
 
-    # ---- Controls / Filters ----
+    # ---- Filters (with 'All' options) ----
     with st.expander("Filters & Display Options", expanded=True):
-        # Date range filter
-        min_d, max_d = data['incident_date'].min().date(), data['incident_date'].max().date()
-        date_range = st.date_input("Incident date range", (min_d, max_d))
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            start_d, end_d = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+        # Dates
+        min_d = data['incident_date'].min().date()
+        max_d = data['incident_date'].max().date()
+        use_all_dates = st.checkbox("Use all dates", value=True)
+        if not use_all_dates:
+            start_d, end_d = st.date_input("Incident date range", (min_d, max_d))
+            start_d, end_d = pd.to_datetime(start_d), pd.to_datetime(end_d)
             data = data[(data['incident_date'] >= start_d) & (data['incident_date'] <= end_d)]
 
-        # Carer filter
+        # Carers
         carer_counts = data['carer_id'].value_counts()
-        default_carers = list(carer_counts.head(10).index)
+        carer_options = ["All"] + list(carer_counts.index)
         selected_carers = st.multiselect(
             "Carer(s) to include",
-            options=list(carer_counts.index),
-            default=default_carers
+            options=carer_options,
+            default=["All"],
+            help="Choose 'All' to include every carer"
         )
-        if selected_carers:
+        if "All" not in selected_carers and selected_carers:
             data = data[data['carer_id'].isin(selected_carers)]
 
-        # Minimum incidents per carer
-        min_inc = st.slider("Minimum incidents per carer", 1, int(max(1, carer_counts.max())), 1)
-        # Axis scales
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            x_scale = st.radio("X axis scale", ["linear", "log"], horizontal=True, index=0)
-        with c2:
-            y_scale = st.radio("Y axis scale", ["linear", "log"], horizontal=True, index=0)
-        with c3:
-            size_max = st.slider("Bubble max size", 20, 100, 60)
+        # Recompute for slider bounds
+        carer_counts = data['carer_id'].value_counts()
+        max_inc = int(max(1, (carer_counts.max() if not carer_counts.empty else 1)))
+        min_inc = st.slider("Minimum incidents per carer", 1, max_inc, 1)
+
+        size_max = st.slider("Bubble max size", 20, 100, 60)
 
     if data.empty:
         st.info("No rows after filters.")
         return
 
-    # ---- Aggregate performance metrics by carer ----
+    # ---- Aggregate ----
     perf = (
         data.groupby('carer_id', as_index=False)
             .agg(
@@ -551,12 +554,11 @@ def plot_carer_performance_scatter(df):
             )
     )
     perf = perf[perf['total_incidents'] >= min_inc]
-
     if perf.empty:
         st.info("No carers meet the selected filters/minimum incident count.")
         return
 
-    # ---- Plot ----
+    # ---- Plot (linear axes, no scale toggles) ----
     fig = px.scatter(
         perf,
         x='avg_delay',
@@ -574,22 +576,17 @@ def plot_carer_performance_scatter(df):
     )
 
     fig.update_traces(
-        marker=dict(line=dict(width=1.5, color='rgba(0,0,0,0.25)')) ,
-        hovertemplate=(
-            "Carer: %{marker.color}<br>"
-            "Avg delay: %{x:.2f} days<br>"
-            "Total incidents: %{y}<extra></extra>"
-        )
+        marker=dict(line=dict(width=1.5, color='rgba(0,0,0,0.25)')),
+        hovertemplate="Carer: %{marker.color}<br>Avg delay: %{x:.2f} days<br>Total incidents: %{y}<extra></extra>"
     )
 
-    # grid, zero lines, ranges & scales
     fig.update_xaxes(
-        type=x_scale, showgrid=True, gridwidth=1, gridcolor='lightblue',
+        showgrid=True, gridwidth=1, gridcolor='lightblue',
         zeroline=True, zerolinecolor='lightblue', rangemode='tozero',
-        rangeslider=dict(visible=True)  # range slider for easy zoom on X
+        rangeslider=dict(visible=True)   # range slider keeps easy zoom on X
     )
     fig.update_yaxes(
-        type=y_scale, showgrid=True, gridwidth=1, gridcolor='lightblue',
+        showgrid=True, gridwidth=1, gridcolor='lightblue',
         zeroline=True, zerolinecolor='lightblue', rangemode='tozero'
     )
 
@@ -597,19 +594,18 @@ def plot_carer_performance_scatter(df):
         legend_title_text='Carer',
         plot_bgcolor='white',
         hovermode='closest',
-        dragmode='zoom',                  # box-zoom by default
+        dragmode='zoom',
         margin=dict(t=60, r=20, l=60, b=60),
-        uirevision="keep"                 # keep zoom when filters tweak
+        uirevision="keep"  # keeps zoom when tweaking filters
     )
 
-    # Enable wheel zoom & full toolbar
     config = {
         "displaylogo": False,
-        "scrollZoom": True,              # mouse wheel zoom
+        "scrollZoom": True,
         "modeBarButtonsToAdd": ["lasso2d", "select2d", "resetScale2d"]
     }
-
     st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
+
 
 
 def plot_serious_injury_age_severity(df):
@@ -872,126 +868,6 @@ def plot_reporter_type_metrics(df):
             plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
 
 
-def plot_carer_performance_scatter(df):
-    need = {'carer_id', 'notification_date', 'incident_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning(f"Missing columns for carer performance analysis: {need}")
-        return
-
-    data = df.copy()
-    # --- Parse dates & compute delay (days) ---
-    data['incident_date'] = pd.to_datetime(data['incident_date'], errors='coerce')
-    data['notification_date'] = pd.to_datetime(data['notification_date'], errors='coerce')
-    data = data.dropna(subset=['incident_date', 'notification_date', 'carer_id'])
-    data['delay_days'] = (data['notification_date'] - data['incident_date']).dt.days
-
-    if data.empty:
-        st.info("No valid rows after parsing dates.")
-        return
-
-    # ---- Controls / Filters ----
-    with st.expander("Filters & Display Options", expanded=True):
-        # Date range filter
-        min_d, max_d = data['incident_date'].min().date(), data['incident_date'].max().date()
-        date_range = st.date_input("Incident date range", (min_d, max_d))
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            start_d, end_d = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-            data = data[(data['incident_date'] >= start_d) & (data['incident_date'] <= end_d)]
-
-        # Carer filter
-        carer_counts = data['carer_id'].value_counts()
-        default_carers = list(carer_counts.head(10).index)
-        selected_carers = st.multiselect(
-            "Carer(s) to include",
-            options=list(carer_counts.index),
-            default=default_carers
-        )
-        if selected_carers:
-            data = data[data['carer_id'].isin(selected_carers)]
-
-        # Minimum incidents per carer
-        min_inc = st.slider("Minimum incidents per carer", 1, int(max(1, carer_counts.max())), 1)
-        # Axis scales
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            x_scale = st.radio("X axis scale", ["linear", "log"], horizontal=True, index=0)
-        with c2:
-            y_scale = st.radio("Y axis scale", ["linear", "log"], horizontal=True, index=0)
-        with c3:
-            size_max = st.slider("Bubble max size", 20, 100, 60)
-
-    if data.empty:
-        st.info("No rows after filters.")
-        return
-
-    # ---- Aggregate performance metrics by carer ----
-    perf = (
-        data.groupby('carer_id', as_index=False)
-            .agg(
-                avg_delay=('delay_days', 'mean'),
-                total_incidents=('incident_date', 'count')
-            )
-    )
-    perf = perf[perf['total_incidents'] >= min_inc]
-
-    if perf.empty:
-        st.info("No carers meet the selected filters/minimum incident count.")
-        return
-
-    # ---- Plot ----
-    fig = px.scatter(
-        perf,
-        x='avg_delay',
-        y='total_incidents',
-        color='carer_id',
-        size='total_incidents',
-        size_max=size_max,
-        labels={
-            'avg_delay': 'Average Notification Delay (days)',
-            'total_incidents': 'Total Incidents',
-            'carer_id': 'Carer'
-        },
-        title='Carer Performance Analysis',
-        opacity=0.8
-    )
-
-    fig.update_traces(
-        marker=dict(line=dict(width=1.5, color='rgba(0,0,0,0.25)')) ,
-        hovertemplate=(
-            "Carer: %{marker.color}<br>"
-            "Avg delay: %{x:.2f} days<br>"
-            "Total incidents: %{y}<extra></extra>"
-        )
-    )
-
-    # grid, zero lines, ranges & scales
-    fig.update_xaxes(
-        type=x_scale, showgrid=True, gridwidth=1, gridcolor='lightblue',
-        zeroline=True, zerolinecolor='lightblue', rangemode='tozero',
-        rangeslider=dict(visible=True)  # range slider for easy zoom on X
-    )
-    fig.update_yaxes(
-        type=y_scale, showgrid=True, gridwidth=1, gridcolor='lightblue',
-        zeroline=True, zerolinecolor='lightblue', rangemode='tozero'
-    )
-
-    fig.update_layout(
-        legend_title_text='Carer',
-        plot_bgcolor='white',
-        hovermode='closest',
-        dragmode='zoom',                  # box-zoom by default
-        margin=dict(t=60, r=20, l=60, b=60),
-        uirevision="keep"                 # keep zoom when filters tweak
-    )
-
-    # Enable wheel zoom & full toolbar
-    config = {
-        "displaylogo": False,
-        "scrollZoom": True,              # mouse wheel zoom
-        "modeBarButtonsToAdd": ["lasso2d", "select2d", "resetScale2d"]
-    }
-
-    st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
 
 def plot_serious_injury_age_severity(df):
     """Create serious injury age and severity analysis"""
