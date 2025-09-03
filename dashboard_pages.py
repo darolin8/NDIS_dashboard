@@ -1057,7 +1057,7 @@ def display_ml_insights_section(df):
 with tabs[0]:
     st.subheader("Predictive Models Comparison")
     results, rows, roc_fig = compare_models(df)
-    if rows:
+    if rows is not None and len(rows) > 0:
         metrics_df = pd.DataFrame(rows)
         st.dataframe(metrics_df, use_container_width=True)
     if roc_fig is not None:
