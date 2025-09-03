@@ -631,7 +631,7 @@ def display_executive_summary_section(df):
     </style>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1, col2, col3, col4, col5, col7 = st.columns(6)
 
     with col1:
         top_type = (
@@ -723,20 +723,6 @@ def display_executive_summary_section(df):
         )
 
     with col6:
-        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
-        avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
-        st.markdown(
-            f"""
-            <div class="dashboard-card">
-                <span class="dashboard-card-title">Average<br>Age</span>
-                <span class="dashboard-card-value" style="color:#5ad8a6;">{avg_age_txt}</span>
-                <span class="dashboard-card-desc">Avg participant age</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with col7:
         common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
         st.markdown(
             f"""
