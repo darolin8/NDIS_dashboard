@@ -506,35 +506,7 @@ def display_executive_summary_section(df):
     """, unsafe_allow_html=True)
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    # --- Your other summary plots/sections below as needed ---
-    st.markdown('<div class="section-title">Severity Distribution</div>', unsafe_allow_html=True)
-    plot_severity_distribution(df)
 
-    st.markdown('<div class="section-title">Top 10 Incident Types</div>', unsafe_allow_html=True)
-    plot_incident_types_bar(df)
-
-    st.markdown('<div class="section-title">Location Analysis</div>', unsafe_allow_html=True)
-    plot_location_analysis(df)
-
-    st.markdown('<div class="section-title">Monthly Trends</div>', unsafe_allow_html=True)
-    plot_monthly_incidents_by_severity(df)
-
-    st.markdown('<div class="section-title">Medical Outcomes</div>', unsafe_allow_html=True)
-    plot_medical_outcomes(df)
-
-    st.markdown('<div class="section-title">Daily Incident Trends</div>', unsafe_allow_html=True)
-    plot_incident_trends(df)
-
-    st.markdown('<div class="section-title">Incidents by Day of Week</div>', unsafe_allow_html=True)
-    plot_weekday_analysis(df)
-
-    st.markdown('<div class="section-title">Incidents by Hour of Day</div>', unsafe_allow_html=True)
-    plot_time_analysis(df)
-
-    st.markdown('<div class="section-title">Reportable Analysis</div>', unsafe_allow_html=True)
-    plot_reportable_analysis(df)
-
-    st.markdown('</div>', unsafe_allow_html=True)  # Close main-container
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
