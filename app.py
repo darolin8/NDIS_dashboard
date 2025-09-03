@@ -18,8 +18,10 @@ from ml_helpers import (
     detect_seasonal_patterns,
     perform_clustering_analysis,
     plot_correlation_heatmap,
+    incident_type_risk_profiling as profile_incident_type_risk,
 
 )
+
 
 # ----- CONFIG -----
 st.set_page_config(
