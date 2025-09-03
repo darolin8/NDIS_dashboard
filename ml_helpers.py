@@ -1185,33 +1185,59 @@ if __name__ == "__main__":
     main()
 
 
+
+
+
 # --- Export aliases for dashboard compatibility ---
 
+# Hard aliases to differently-named helpers (these DO exist above)
+prepare_ml_features        = create_comprehensive_features
+compare_models             = predictive_models_comparison
+forecast_incident_volume   = incident_volume_forecasting
+profile_location_risk      = location_risk_profiling
+detect_seasonal_patterns   = seasonal_temporal_patterns
+perform_clustering_analysis= clustering_analysis
 
-prepare_ml_features = create_comprehensive_features
-compare_models = predictive_models_comparison
+# If your dashboard expects plot_correlation_heatmap but you implemented correlation_analysis,
+# alias it. (Your UI already guards for either a fig or a matrix.)
+plot_correlation_heatmap   = correlation_analysis
 
-# If your forecasting helper is `incident_volume_forecasting` (the one that plots
-# and returns a DataFrame), keep this alias:
-forecast_incident_volume = incident_volume_forecasting
+# Optional functions — set to None if missing so imports don’t crash
+try:
+    analyze_cluster_characteristics
+except NameError:
+    analyze_cluster_characteristics = None
 
-profile_location_risk = location_risk_profiling
+try:
+    plot_3d_clusters
+except NameError:
+    plot_3d_clusters = None
+
+try:
+    train_severity_prediction_model
+except NameError:
+    train_severity_prediction_model = None
+
+try:
+    perform_anomaly_detection
+except NameError:
+    perform_anomaly_detection = None
+
+try:
+    plot_anomaly_scatter
+except NameError:
+    plot_anomaly_scatter = None
+
+# Dashboard imports this name; ensure it exists. If your real function is named
+# `incident_type_risk_profiling`, alias it; if you don’t have it, provide a harmless stub.
+try:
+    incident_type_risk_profiling
+except NameError:
+    def incident_type_risk_profiling(df):
+        return (pd.DataFrame(), None)
+
 profile_incident_type_risk = incident_type_risk_profiling
-
-detect_seasonal_patterns = seasonal_temporal_patterns
-perform_clustering_analysis = clustering_analysis
-
-# These names must point to real functions you defined above.
-# If you don't have one of them, set it to None instead of a fake name.
-analyze_cluster_characteristics = analyze_cluster_characteristics  # or None
-plot_3d_clusters = plot_3d_clusters                                # or None
-
-# Keep your existing heatmap function name (it returns a matplotlib fig)
-plot_correlation_heatmap = plot_correlation_heatmap
-
-train_severity_prediction_model = train_severity_prediction_model   # or None
-perform_anomaly_detection = perform_anomaly_detection               # or None
-plot_anomaly_scatter = plot_anomaly_scatter                         # or None
+                    # or None
 
 
 
