@@ -396,50 +396,38 @@ def display_executive_summary_section(df):
     
     st.markdown("""
     <style>
-    .card-container {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 24px;
-    }
-    .card {
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-        padding: 18px 12px;
-        width: 160px;
-        height: 90px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        transition: font-size 0.2s;
-        overflow: hidden;
-    }
-    .card .card-title {
-        font-size: 1.02rem;
-        font-weight: 600;
-        margin-bottom: 2px;
-        text-align: center;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .card .card-value {
-        font-size: 1.7rem;
-        font-weight: bold;
-        margin-bottom: 2px;
-        color: #1a73e8;
-    }
-    .card .card-desc {
-        font-size: 0.9rem;
-        color: #444;
-        text-align: center;
-        max-width: 95%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
+.dashboard-card {
+    background: #fff;
+    border: 1px solid #e3e3e3;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    padding: 0.7rem 0.5rem 0.5rem 0.5rem;
+    width: 120px;         /* smaller width */
+    height: 75px;         /* smaller height */
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.dashboard-card-title {
+    font-size: 0.85rem;   /* smaller font */
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+    color: #222;
+}
+.dashboard-card-value {
+    font-size: 1.08rem;   /* smaller font */
+    font-weight: 700;
+    color: #1769aa;
+    margin-bottom: 0.15rem;
+}
+.dashboard-card-desc {
+    font-size: 0.7rem;    /* smaller font */
+    color: #444;
+    margin-bottom: 0.05rem;
+}
+    
     /* Reduce font size if content overflows */
     .card:has(.card-title[style*="font-size:0.9rem"]), 
     .card:has(.card-desc[style*="font-size:0.8rem"]) {
