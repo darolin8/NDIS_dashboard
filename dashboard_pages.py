@@ -177,7 +177,6 @@ def plot_time_analysis(df):
     ))
 
     fig.update_layout(
-        title="Incidents by Hour of Day",
         barmode="stack",
         xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
         yaxis=dict(title="Number of Incidents", side="left"),
@@ -207,7 +206,6 @@ def plot_weekday_analysis(df):
     fig = px.bar(
         x=weekday_counts.index,
         y=weekday_counts.values,
-        title="Incidents by Day of Week",
         labels={'x': 'Day of Week', 'y': 'Number of Incidents'},
         color=weekday_counts.values,
         color_continuous_scale='Plasma'
@@ -227,7 +225,6 @@ def plot_reportable_analysis(df):
     fig = px.pie(
         values=reportable_counts.values,
         names=reportable_counts.index,
-        title="Reportable Incidents Distribution",
         color_discrete_sequence=['#90EE90', '#FFB6C1']
     )
     st.plotly_chart(fig, use_container_width=True, key="reportable_analysis")
@@ -278,7 +275,6 @@ def plot_severity_distribution(df):
     fig = px.pie(
         values=severity_counts.values,
         names=severity_counts.index,
-        title="Incident Severity Distribution",
         color=severity_counts.index,
         color_discrete_map=colors,
         height=400
@@ -301,7 +297,6 @@ def plot_monthly_incidents_by_severity(df):
         x='year_month',
         y='count',
         color='severity',
-        title="Monthly Incidents by Severity",
         labels={'year_month': 'Month', 'count': 'Number of Incidents'},
         color_discrete_map={'High': '#FF2B2B', 'Moderate': '#FF8700', 'Low': '#29B09D'},
         height=400
@@ -319,7 +314,6 @@ def plot_incident_types_bar(df):
         x=incident_counts.values,
         y=incident_counts.index,
         orientation='h',
-        title="Top 10 Incident Types",
         labels={'x': 'Number of Incidents', 'y': 'Incident Type'},
         color=incident_counts.values,
         color_continuous_scale='Viridis',
@@ -345,7 +339,6 @@ def plot_location_analysis(df):
     fig = px.bar(
         x=location_counts.index,
         y=vals,
-        title="Incidents by Location",
         labels={'x': 'Location', 'y': 'Number of Incidents'},
         color=vals,
         color_continuous_scale=black_red_scale,
