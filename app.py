@@ -219,16 +219,15 @@ def main():
             st.subheader("Seasonal & Temporal Patterns")
             fig = detect_seasonal_patterns(filtered_df)
             if fig: st.plotly_chart(fig, use_container_width=True)
-        elif ml_page == "Severity ML Models":
+        if ml_page == "Severity ML Models":
             st.subheader("Severity ML Models")
             X, y, feature_names = prepare_ml_features(filtered_df)  
             results, rows, roc_fig = compare_models(X, y, feature_names)
             if rows:
-            metrics_df = pd.DataFrame(rows)
-            st.dataframe(metrics_df)
+                metrics_df = pd.DataFrame(rows)
+                st.dataframe(metrics_df)
             if roc_fig is not None:
-            st.plotly_chart(roc_fig, use_container_width=True)
-        
+                st.plotly_chart(roc_fig, use_container_width=True)
         elif ml_page == "Anomaly Detection":
             st.subheader("Anomaly Detection")
             anomaly_df, feat_names = perform_anomaly_detection(filtered_df)
