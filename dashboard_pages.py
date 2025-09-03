@@ -1601,63 +1601,88 @@ def display_ml_insights_section(df):
         st.pyplot(corr_fig)  # Use st.plotly_chart if you return a plotly figure
 
 
-from ml_helpers import (
-    train_severity_prediction_model,
-    perform_anomaly_detection,
-    plot_anomaly_scatter
-)
-def pattern_detection(df):
-    st.header("📊 Pattern Detection")
 
-    # Prepare time and severity columns if not already done
-    if 'incident_date' not in df.columns:
-        st.error("incident_date column missing from data.")
-        return
-    df['month'] = df['incident_date'].dt.month
-    df['day_of_week'] = df['incident_date'].dt.dayofweek
-    if 'severity_numeric' not in df.columns and 'severity' in df.columns:
-        df['severity_numeric'] = df['severity'].map({'Low': 1, 'Moderate': 2, 'High': 3})
 
-    st.subheader("1. Monthly Incident Heatmap (Month vs Day of Week)")
-    st.plotly_chart(get_monthly_incident_heatmap(df), use_container_width=True)
+# --- Executive Summary ---
+def display_executive_summary_section(df):
+    st.header("📊 Executive Summary")
+    st.markdown("#### Quick Data Overview")
+    st.dataframe(df.head(20), use_container_width=True)
+    st.write(f"Total incidents: {len(df)}")
+    if "incident_date" in df.columns:
+        st.write(f"Date range: {df['incident_date'].min().date()} to {df['incident_date'].max().date()}")
+    if "location" in df.columns:
+        st.write(f"Unique locations: {df['location'].nunique()}")
+    if "incident_type" in df.columns:
+        st.write(f"Incident types: {df['incident_type'].nunique()}")
+    if "severity" in df.columns:
+        st.write(f"Severity levels: {df['severity'].unique()}")
 
-    st.subheader("2. Average Incident Severity by Month")
-    st.plotly_chart(get_average_severity_by_month(df), use_container_width=True)
+# --- Operational Performance ---
+def display_operational_performance_section(df):
+    st.header("📈 Operational Performance & Risk Analysis")
+    st.markdown("#### Incident Volume by Location")
+    if "location" in df.columns:
+        location_counts = df["location"].value_counts().head(15)
+        st.bar_chart(location_counts)
+    st.markdown("#### Incident Volume by Type")
+    if "incident_type" in df.columns:
+        type_counts = df["incident_type"].value_counts().head(15)
+        st.bar_chart(type_counts)
+    st.markdown("#### Severity Distribution")
+    if "severity" in df.columns:
+        severity_counts = df["severity"].value_counts()
+        st.bar_chart(severity_counts)
+    st.markdown("#### Monthly Trends")
+    if "incident_date" in df.columns:
+        monthly_counts = df.groupby(df["incident_date"].dt.to_period("M")).size()
+        monthly_counts.index = monthly_counts.index.to_timestamp()
+        st.line_chart(monthly_counts)
 
-    st.subheader("3. Daily Incident Volume Patterns (ML Clusters)")
-    st.plotly_chart(get_daily_volume_clusters(df), use_container_width=True)
-def show_severity_prediction_and_anomaly(df):
-    st.header("Severity Prediction Model")
-    # 1. Train the model and show feature importance
-    model, acc, feature_names = train_severity_prediction_model(df)
-    if model is not None:
-        st.write(f"Random Forest Accuracy: **{acc:.2f}**")
-        # Feature importance
-        importances = model.feature_importances_
-        imp_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-        imp_df = imp_df.sort_values(by='Importance', ascending=False)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.barh(imp_df['Feature'], imp_df['Importance'])
-        ax.set_xlabel("Importance")
-        ax.set_title("Feature Importance (Random Forest)")
-        plt.gca().invert_yaxis()
-        st.pyplot(fig)
-    else:
-        st.warning("Not enough data to train severity prediction model.")
+# --- Compliance & Investigation ---
+def display_compliance_investigation_section(df):
+    st.header("📋 Compliance & Investigation")
+    st.markdown("#### Reportable Incidents")
+    if "reportable" in df.columns:
+        reportable_counts = df["reportable"].value_counts()
+        st.bar_chart(reportable_counts)
+        st.write(f"Total reportable incidents: {df['reportable'].sum()}")
+    st.markdown("#### Incidents Requiring Medical Attention")
+    if "medical_attention_required" in df.columns:
+        med_counts = df["medical_attention_required"].value_counts()
+        st.bar_chart(med_counts)
+        st.write(f"Total needing medical attention: {df['medical_attention_required'].sum()}")
+    st.markdown("#### High Severity Investigations")
+    if "severity" in df.columns:
+        high_sev = df[df["severity"].str.lower() == "high"]
+        st.write(f"High severity incidents: {len(high_sev)}")
+        st.dataframe(high_sev.head(10), use_container_width=True)
 
-    st.header("Anomaly Detection (Isolation Forest & SVM)")
-    # 2. Run anomaly detection and show scatter plots
-    anomaly_df, anomaly_features = perform_anomaly_detection(df)
-    if anomaly_df is not None and anomaly_features:
-        x_col = anomaly_features[0]
-        y_col = anomaly_features[1] if len(anomaly_features) > 1 else anomaly_features[0]
-        st.subheader("Isolation Forest Anomalies")
-        fig1 = plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="isolation_forest_anomaly",
-                                    axis_labels={x_col: x_col, y_col: y_col})
-        st.pyplot(fig1)
-        st.subheader("SVM Anomalies")
-        fig2 = plot_anomaly_scatter(anomaly_df, x_col, y_col, anomaly_column="svm_anomaly",
-                                    axis_labels={x_col: x_col, y_col: y_col})
-        st.pyplot(fig2)
-    else:
-        st.warning("Not enough data for anomaly detection.")
+# --- ML Insights ---
+def display_ml_insights_section(df):
+    st.header("🤖 ML Insights")
+    st.markdown("#### ML-Driven Insights")
+    st.info("For advanced ML analytics, use the 🧠 Advanced ML Analytics tab in the dashboard sidebar.")
+    st.markdown("You can explore:")
+    st.markdown("- Location risk profiling")
+    st.markdown("- Incident type risk")
+    st.markdown("- Temporal and seasonal patterns")
+    st.markdown("- Severity prediction models")
+    st.markdown("- Anomaly detection")
+    st.markdown("- Clustering analysis")
+    st.markdown("- Correlation matrix")
+    st.markdown("- Incident forecasting")
+    st.markdown("Use available filters to customize your ML analysis.")
+
+# --- Investigation Rules ---
+def apply_investigation_rules(df):
+    # Example: Flag incidents for investigation if high severity or reportable or medical attention required
+    df = df.copy()
+    df["needs_investigation"] = False
+    if "severity" in df.columns:
+        df.loc[df["severity"].str.lower() == "high", "needs_investigation"] = True
+    if "reportable" in df.columns:
+        df.loc[df["reportable"] == 1, "needs_investigation"] = True
+    if "medical_attention_required" in df.columns:
+        df.loc[df["medical_attention_required"] == 1, "needs_investigation"] = True
+    return df
