@@ -217,7 +217,7 @@ def plot_location_analysis(df):
     fig.update_layout(
         xaxis_tickangle=-45,
         showlegend=False,
-        coloraxis_colorbar=dict(title="Count", len=0.6)
+        coloraxis_colorbar=dict(title="Color", len=1.0
     )
 
     st.plotly_chart(fig, use_container_width=True, key="location_analysis")
