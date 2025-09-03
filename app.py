@@ -10,6 +10,8 @@ from dashboard_pages import (
     apply_investigation_rules
 )
 
+from incident_mapping import render_incident_mapping
+
 # ----- CONFIG -----
 st.set_page_config(
     page_title="Incident Management Dashboard",
@@ -63,6 +65,7 @@ def main():
             "📈 Operational Performance & Risk Analysis",
             "📋 Compliance & Investigation",
             "🤖 ML Insights"
+            "🗺️ Incident Map" 
         ],
     )
 
@@ -179,6 +182,8 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
+    elif page == "🗺️ Incident Map":
+        render_incident_mapping(df, filtered_df)
 
 if __name__ == "__main__":
     main()
