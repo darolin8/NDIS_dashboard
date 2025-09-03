@@ -574,6 +574,48 @@ def location_risk_profiling(df):
     # Return the DataFrame and the main figure (e.g., the top risk bar chart)
     return location_stats, top_risk_fig
 
+
+
+
+def incident_type_risk_profiling(df):
+    st.markdown("### 🗂️ Incident Type Risk Profiling")
+    if 'incident_type' not in df.columns or 'severity' not in df.columns:
+        st.warning("Incident type and severity columns required.")
+        return None, None
+
+    sev_map = {'Low': 0, 'Medium': 1, 'Moderate': 1, 'High': 2, 'Critical': 2}
+    tmp = df.copy()
+    tmp['severity_numeric'] = tmp['severity'].map(sev_map)
+    if 'medical_attention_required' in tmp.columns:
+        tmp['medical_attention_required'] = tmp['medical_attention_required'].astype(int)
+    if 'reportable' in tmp.columns:
+        tmp['reportable'] = tmp['reportable'].astype(int)
+
+    type_stats = tmp.groupby('incident_type').agg({
+        'severity_numeric': ['count', 'mean', 'std'],
+        'medical_attention_required': 'mean' if 'medical_attention_required' in tmp.columns else lambda x: 0,
+        'reportable': 'mean' if 'reportable' in tmp.columns else lambda x: 0,
+        'participant_id': 'nunique' if 'participant_id' in tmp.columns else lambda x: 1
+    }).round(3)
+
+    type_stats.columns = ['Incident_Count', 'Avg_Severity', 'Severity_Std', 'Medical_Rate', 'Reportable_Rate', 'Unique_Participants']
+    type_stats['Risk_Score'] = (
+        type_stats['Avg_Severity'] * 0.4 +
+        type_stats['Medical_Rate'] * 0.3 +
+        type_stats['Reportable_Rate'] * 0.3
+    )
+    type_stats = type_stats.sort_values('Risk_Score', ascending=False)
+
+    fig = px.bar(
+        type_stats.reset_index(),
+        x='Risk_Score', y='incident_type', orientation='h',
+        title="Incident Type Risk Scores",
+        color='Risk_Score', color_continuous_scale='Reds',
+        labels={'Risk_Score': 'Risk Score', 'incident_type': 'Incident Type'}
+    )
+    fig.update_layout(height=600)
+    return type_stats, fig
+
 # -----------------------------------------------------------------------------
 # Seasonal & Temporal Patterns
 # -----------------------------------------------------------------------------
