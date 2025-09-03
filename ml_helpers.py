@@ -476,7 +476,7 @@ def location_risk_profiling(df):
     st.markdown("### 📍 Location Risk Profiling")
     if 'location' not in df.columns or 'severity' not in df.columns:
         st.warning("Location and severity columns required.")
-        return None
+        return None, None  # return a tuple
 
     sev_map = {'Low':0,'Medium':1,'Moderate':1,'High':2,'Critical':2}
     tmp = df.copy()
@@ -516,36 +516,36 @@ def location_risk_profiling(df):
         }).background_gradient(subset=['Risk_Score'], cmap='Reds')
         st.dataframe(styled, use_container_width=True)
     with c2:
-        fig = px.histogram(location_stats.reset_index(), x='Risk_Score', nbins=20,
-                           title="Risk Score Distribution",
-                           labels={'Risk_Score':'Risk Score','count':'Locations'})
-        st.plotly_chart(fig, use_container_width=True)
+        risk_score_fig = px.histogram(location_stats.reset_index(), x='Risk_Score', nbins=20,
+                                     title="Risk Score Distribution",
+                                     labels={'Risk_Score':'Risk Score','count':'Locations'})
+        st.plotly_chart(risk_score_fig, use_container_width=True)
 
     st.markdown("#### 📊 Location Risk Visualizations")
     tab1, tab2, tab3 = st.tabs(["🎯 Top Risk Locations", "📈 Incident Volume", "🏥 Medical Attention Rate"])
     with tab1:
         top_risk = location_stats.head(15).reset_index()
-        fig = px.bar(top_risk, x='Risk_Score', y='location', orientation='h',
-                     title="Top 15 Highest Risk Locations",
-                     color='Risk_Score', color_continuous_scale='Reds',
-                     labels={'Risk_Score':'Risk Score','location':'Location'})
-        fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        top_risk_fig = px.bar(top_risk, x='Risk_Score', y='location', orientation='h',
+                              title="Top 15 Highest Risk Locations",
+                              color='Risk_Score', color_continuous_scale='Reds',
+                              labels={'Risk_Score':'Risk Score','location':'Location'})
+        top_risk_fig.update_layout(height=600)
+        st.plotly_chart(top_risk_fig, use_container_width=True)
     with tab2:
         top_vol = location_stats.sort_values('Incident_Count', ascending=False).head(15).reset_index()
-        fig = px.bar(top_vol, x='Incident_Count', y='location', orientation='h',
-                     title="Top 15 Locations by Incident Volume",
-                     color='Incident_Count', color_continuous_scale='Blues')
-        fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        top_vol_fig = px.bar(top_vol, x='Incident_Count', y='location', orientation='h',
+                             title="Top 15 Locations by Incident Volume",
+                             color='Incident_Count', color_continuous_scale='Blues')
+        top_vol_fig.update_layout(height=600)
+        st.plotly_chart(top_vol_fig, use_container_width=True)
     with tab3:
         high_med = location_stats[location_stats['Medical_Rate'] > 0].sort_values('Medical_Rate', ascending=False).head(15).reset_index()
         if len(high_med) > 0:
-            fig = px.bar(high_med, x='Medical_Rate', y='location', orientation='h',
-                         title="Top 15 by Medical Attention Rate",
-                         color='Medical_Rate', color_continuous_scale='Oranges')
-            fig.update_layout(height=600)
-            st.plotly_chart(fig, use_container_width=True)
+            high_med_fig = px.bar(high_med, x='Medical_Rate', y='location', orientation='h',
+                                  title="Top 15 by Medical Attention Rate",
+                                  color='Medical_Rate', color_continuous_scale='Oranges')
+            high_med_fig.update_layout(height=600)
+            st.plotly_chart(high_med_fig, use_container_width=True)
         else:
             st.info("No locations with medical attention data available.")
 
@@ -571,7 +571,8 @@ def location_risk_profiling(df):
     for r in recs:
         st.write(r)
 
-    return location_stats
+    # Return the DataFrame and the main figure (e.g., the top risk bar chart)
+    return location_stats, top_risk_fig
 
 # -----------------------------------------------------------------------------
 # Seasonal & Temporal Patterns
