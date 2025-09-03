@@ -188,18 +188,40 @@ def plot_location_analysis(df):
     if df.empty or 'location' not in df.columns:
         st.warning("No data available for location analysis")
         return
+
     location_counts = df['location'].value_counts().head(8)
+    vals = location_counts.values
+
+    # Black -> Red continuous scale
+    black_red_scale = [
+        [0.00, "#000000"],
+        [0.15, "#1a0000"],
+        [0.30, "#330000"],
+        [0.45, "#4d0000"],
+        [0.60, "#660000"],
+        [0.75, "#800000"],
+        [0.90, "#b30000"],
+        [1.00, "#ff0000"],
+    ]
+
     fig = px.bar(
         x=location_counts.index,
-        y=location_counts.values,
+        y=vals,
         title="Incidents by Location",
         labels={'x': 'Location', 'y': 'Number of Incidents'},
-        color=location_counts.values,
-        color_continuous_scale='Blues',
+        color=vals,
+        color_continuous_scale=black_red_scale,
+        range_color=[vals.min(), vals.max()],
         height=400
     )
-    fig.update_layout(xaxis_tickangle=-45, showlegend=False)
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        showlegend=False,
+        coloraxis_colorbar=dict(title="Count", len=0.6)
+    )
+
     st.plotly_chart(fig, use_container_width=True, key="location_analysis")
+
 
 def plot_incident_trends(df):
     if df.empty or 'incident_date' not in df.columns:
