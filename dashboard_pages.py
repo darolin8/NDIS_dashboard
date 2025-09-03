@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 import streamlit as st
 st.warning("EXECUTIVE SUMMARY UPDATED")
 
+import os
+st.info(f"Loaded from: {os.path.abspath(__file__)}")
+
+
 
 
 
