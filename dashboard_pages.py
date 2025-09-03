@@ -1,3 +1,4 @@
+
 # ----------------------------
 # Imports
 # ----------------------------
@@ -13,24 +14,29 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import sys, os
+
+import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Optional banner (kept from your version)
 st.warning("EXECUTIVE SUMMARY UPDATED")
 st.info(f"Loaded from: {os.path.abspath(__file__)}")
 
 from ml_helpers import (
-   incident_volume_forecasting,
+    # Charts/utilities you already used
+    incident_volume_forecasting,
     seasonal_temporal_patterns,
     plot_time_with_causes,
-    plot_carer_performance_scatter,
     create_comprehensive_features,
     correlation_analysis,
     clustering_analysis,
     predictive_models_comparison,
-    incident_type_risk_profiling as profile_incident_type_risk
+    incident_type_risk_profiling as profile_incident_type_risk,
+    # 🔽 New ML bits for the Insights page
+    enhanced_confusion_matrix_analysis,
+    create_predictive_risk_scoring,
+    incident_similarity_analysis,
 )
-
 
 from utils.factor_labels import shorten_factor
 
@@ -404,7 +410,8 @@ def add_age_and_age_range_columns(df):
         df['age_range'] = df['participant_age'].apply(get_age_range)
     return df
 
-def plot_carer_performance_scatter(df):
+# NOTE: renamed to avoid clashing with ml_helpers.plot_carer_performance_scatter
+def plot_carer_performance_scatter_local(df):
     need = {'carer_id', 'notification_date', 'incident_date'}
     if df.empty or not need.issubset(df.columns):
         st.warning(f"Missing columns for carer performance analysis: {need}")
@@ -517,7 +524,7 @@ def plot_carer_performance_scatter(df):
     st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
 
 # ----------------------------
-# Investigation rules (kept the comprehensive one)
+# Investigation rules
 # ----------------------------
 def apply_investigation_rules(df):
     def requires_investigation(row):
@@ -547,7 +554,7 @@ def apply_investigation_rules(df):
     return df
 
 # ----------------------------
-# Executive Summary (kept the styled, fuller version)
+# Executive Summary
 # ----------------------------
 def display_executive_summary_section(df):
     st.markdown("""
@@ -664,7 +671,7 @@ def display_executive_summary_section(df):
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ----------------------------
-# Operational Performance (kept the later, fuller version)
+# Operational Performance
 # ----------------------------
 def display_operational_performance_section(df):
     st.header(" Operational Performance & Risk Analysis Metrics")
@@ -741,7 +748,7 @@ def display_operational_performance_section(df):
         plot_incident_types_bar(df)
     with col2:
         plot_medical_outcomes(df)
-    plot_carer_performance_scatter(df)
+    plot_carer_performance_scatter_local(df)
     plot_serious_injury_age_severity(df)
 
 # ----------------------------
@@ -907,8 +914,6 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-
-
 def plot_contributing_factors_by_month(df, top_k=25):
     need = {'contributing_factors', 'incident_date'}
     if df.empty or not need.issubset(df.columns):
@@ -1028,219 +1033,149 @@ def display_compliance_investigation_section(df):
     plot_contributing_factors_by_month(df)
 
 # ----------------------------
-# Advanced ML Insights (kept the full tabbed version)
+# ML Insights (robust, minimal dependencies)
 # ----------------------------
-def display_ml_insights_section(df):
-    st.header("🧠 Advanced ML Insights Dashboard")
-    tabs = st.tabs([
-        "Predictive Models",
-        "Forecasting",
-        "Risk Analysis",
-        "Pattern Detection",
-        "Clustering Analysis",
-        "Correlations"
-    ])
+def display_ml_insights_section(filtered_df):
+    """
+    ML-focused page:
+      • Evaluate trained models (confusion matrix + ROC/PR when binary)
+      • Quick feature importance (if available)
+      • Interactive risk-scoring sandbox
+      • Similar-incident lookup
+    """
+    st.header("🤖 ML Insights")
 
-    # ---------- Predictive Models ----------
-    with tabs[0]:
-        st.subheader("Predictive Models Comparison")
-        roc_fig = None
-        try:
-            cm_out = compare_models(df)
-            if cm_out is None:
-                st.info("No output from compare_models.")
-            elif isinstance(cm_out, tuple):
-                # Possible shapes: (metrics_df, roc_fig) OR (results, rows) OR (results, rows, roc_fig)
-                if len(cm_out) == 2:
-                    a, b = cm_out
-                    if isinstance(a, pd.DataFrame):
-                        # (metrics_df, roc_fig)
-                        metrics_df, roc_fig = a, b
-                        st.dataframe(metrics_df, use_container_width=True)
-                    else:
-                        # (results, rows)
-                        results, rows = a, b
-                        if rows:
-                            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-                elif len(cm_out) == 3:
-                    # (results, rows, roc_fig)
-                    results, rows, roc_fig = cm_out
-                    if rows:
-                        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-                else:
-                    st.info("compare_models returned an unexpected shape.")
-            else:
-                st.info("compare_models returned an unexpected type.")
-        except Exception as e:
-            st.warning(f"compare_models failed: {e}")
+    # Choose data scope for ML UI
+    use_filtered = st.toggle("Use filtered data for ML widgets", value=True,
+                             help="Turn off to use the full dataset.")
+    df_full = getattr(st.session_state, "df", None)
+    if df_full is None:
+        st.error("No dataframe in session. Make sure data was loaded successfully.")
+        return
+    df_used = filtered_df if use_filtered else df_full
 
-        if roc_fig is not None:
+    # Build features for the current scope
+    try:
+        X, feature_names, features_df = create_comprehensive_features(df_used)
+    except Exception as e:
+        st.error(f"Feature engineering failed: {e}")
+        return
+
+    # 1) Model evaluation (if models trained via sidebar)
+    st.subheader("📊 Model Evaluation")
+    models = st.session_state.get("trained_models", {})
+
+    if not models:
+        st.info("No trained models found. Use the sidebar **Train models** button to create baselines.")
+    else:
+        for model_name, md in models.items():
             try:
-                st.plotly_chart(roc_fig, use_container_width=True)
+                y_test = md.get("y_test")
+                y_pred = md.get("predictions")
+                y_proba = md.get("probabilities")
+                # Class names: binary -> No/Yes, otherwise infer from y_test
+                classes = ['No', 'Yes'] if len(np.unique(y_test)) == 2 else [str(c) for c in sorted(np.unique(y_test))]
+                fig = enhanced_confusion_matrix_analysis(y_test, y_pred, y_proba, classes, model_name)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Could not render metrics for {model_name}: {e}")
+
+        # 1a) Feature importance (optional, best model only)
+        st.markdown("#### 🔍 Feature Importance (if available)")
+        try:
+            best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
+            best_model = best_blob["model"]
+            if hasattr(best_model, "feature_importances_"):
+                importances = np.array(best_model.feature_importances_)
+                order = np.argsort(importances)[::-1][:20]  # top 20
+                fi_df = pd.DataFrame({
+                    "feature": [feature_names[i] for i in order if i < len(feature_names)],
+                    "importance": [float(importances[i]) for i in order if i < len(importances)],
+                })
+                if len(fi_df):
+                    fig = px.bar(fi_df, x="importance", y="feature", orientation="h",
+                                 title=f"Top Features — {best_name}")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.caption("No matching feature importances to show.")
+            else:
+                st.caption(f"{best_name} does not expose feature importances.")
+        except Exception as e:
+            st.caption(f"Feature-importance preview unavailable: {e}")
+
+    st.divider()
+
+    # 2) Predictive Risk Scoring Sandbox
+    st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
+    if not models:
+        st.info("Train a model in the sidebar to enable risk scoring.")
+    else:
+        risk_scorer = create_predictive_risk_scoring(df_used, models, feature_names)
+        if risk_scorer is None:
+            st.warning("Risk scorer could not be created from the current models.")
+        else:
+            # Controls
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                hour = st.slider("Hour of day", 0, 23, 8)
+            with c2:
+                loc_options = df_used["location"].dropna().astype(str).value_counts().index.tolist() or \
+                              ["kitchen", "bathroom", "living room", "activity room"]
+                location = st.selectbox("Location", options=loc_options[:25])
+            with c3:
+                p_hist = st.slider("Participant prior incidents", 0, int(
+                    df_used.groupby("participant_id")["incident_id"].count().max() if "participant_id" in df_used.columns else 20
+                ), 3)
+            with c4:
+                c_hist = st.slider("Carer prior incidents", 0, int(
+                    df_used.groupby("carer_id")["incident_id"].count().max() if "carer_id" in df_used.columns else 20
+                ), 5)
+
+            # Approximate location risk from observed averages (fallback to 2)
+            try:
+                loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
+                if not np.isfinite(loc_risk):
+                    loc_risk = 2.0
             except Exception:
-                pass
+                loc_risk = 2.0
 
-        st.subheader("Severity Prediction Model")
-        if 'train_severity_prediction_model' in globals() and callable(train_severity_prediction_model):
-            try:
-                model, acc, features = train_severity_prediction_model(df)
-                if model is not None and features is not None:
-                    st.write(f"Model accuracy: {acc:.2%}")
-                    st.write(f"Features used: {features}")
-                    if hasattr(model, "feature_importances_"):
-                        importance_df = (
-                            pd.DataFrame({"Feature": features, "Importance": model.feature_importances_})
-                              .sort_values("Importance", ascending=False)
-                        )
-                        fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances")
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Not enough data to train severity prediction model.")
-            except Exception as e:
-                st.warning(f"Severity model failed: {e}")
-        else:
-            st.info("Severity prediction helper not enabled in ml_helpers.")
+            scenario = {
+                "hour": hour,
+                "location": location,
+                "participant_history": int(p_hist),
+                "carer_history": int(c_hist),
+                "day_type": "weekend" if st.checkbox("Weekend?", value=False) else "weekday",
+                "location_risk": float(loc_risk) if np.isfinite(loc_risk) else 2.0,
+            }
 
-    # ---------- Forecasting ----------
-    with tabs[1]:
-        st.subheader("Incident Volume Forecasting")
-        try:
-            fc_out = forecast_incident_volume(df)
-            # If the helper already renders charts internally, it may just return a DataFrame
-            if isinstance(fc_out, tuple) and len(fc_out) == 2:
-                actual, forecast = fc_out
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=pd.Index(actual).astype(str), y=np.array(actual), mode='lines', name='Actual'))
-                fig.add_trace(go.Scatter(x=pd.Index(forecast).astype(str), y=np.array(forecast), mode='lines', name='Forecast'))
-                st.plotly_chart(fig, use_container_width=True)
-            elif isinstance(fc_out, pd.DataFrame):
-                st.dataframe(fc_out, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Forecasting failed: {e}")
-
-    # ---------- Risk Analysis ----------
-    with tabs[2]:
-        st.subheader("Location Risk Profile")
-        try:
-            loc_df, loc_fig = profile_location_risk(df)
-            if loc_df is not None:
-                st.dataframe(loc_df, use_container_width=True)
-            if loc_fig is not None:
-                st.plotly_chart(loc_fig, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Location risk failed: {e}")
-
-        st.subheader("Incident Type Risk Profile")
-        if 'profile_incident_type_risk' in globals() and callable(profile_incident_type_risk):
-            try:
-                type_df, type_fig = profile_incident_type_risk(df)
-                if type_df is not None:
-                    st.dataframe(type_df, use_container_width=True)
-                if type_fig is not None:
-                    st.plotly_chart(type_fig, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Incident type risk failed: {e}")
-        else:
-            st.info("Incident type risk helper not enabled in ml_helpers.")
-
-    # ---------- Pattern Detection & Anomalies ----------
-    with tabs[3]:
-        st.subheader("Seasonal & Temporal Pattern Detection")
-        try:
-            pattern_fig = detect_seasonal_patterns(df)
-            if pattern_fig is not None:
-                st.plotly_chart(pattern_fig, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Temporal patterns failed: {e}")
-
-        st.subheader("Anomaly Detection (Isolation Forest & SVM)")
-        if 'perform_anomaly_detection' in globals() and callable(perform_anomaly_detection):
-            try:
-                out, features = perform_anomaly_detection(df)
-                if out is not None and features is not None:
-                    # Add quick PCA for plotting if missing
-                    if ("pca_x" not in out.columns or "pca_y" not in out.columns) and len(features) >= 2:
-                        from sklearn.decomposition import PCA
-                        X = out[features].select_dtypes(include=[np.number]).fillna(0)
-                        if X.shape[1] >= 2 and len(X) >= 2:
-                            X_pca = PCA(n_components=2).fit_transform(X)
-                            out['pca_x'], out['pca_y'] = X_pca[:, 0], X_pca[:, 1]
-
-                    st.dataframe(
-                        out[['incident_date','location','incident_type','isolation_forest_anomaly','svm_anomaly','anomaly_score']]
-                        .head(20),
-                        use_container_width=True
-                    )
-
-                    if {"pca_x","pca_y"}.issubset(out.columns):
-                        fig = px.scatter(
-                            out,
-                            x='pca_x', y='pca_y',
-                            color=out['isolation_forest_anomaly'].map({True: "Anomaly", False: "Normal"}),
-                            symbol=out['svm_anomaly'].map({True: "Anomaly", False: "Normal"}),
-                            title="Isolation Forest & SVM Anomalies (PCA View)",
-                            hover_data=["incident_date", "location", "incident_type", "severity"] if 'severity' in out.columns else None
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Not enough data for anomaly detection.")
-            except Exception as e:
-                st.warning(f"Anomaly detection failed: {e}")
-        else:
-            st.info("Anomaly detection helper not enabled in ml_helpers.")
-
-    # ---------- Clustering ----------
-    with tabs[4]:
-        st.subheader("Clustering Analysis (2D)")
-        try:
-            clustered, features, sil_score, pca = perform_clustering_analysis(df)
-            if clustered is not None and features is not None:
-                fig2d = px.scatter(
-                    clustered, x="pca_x", y="pca_y",
-                    color=clustered['cluster'].astype(str),
-                    hover_data=[c for c in ["incident_date","location","incident_type","severity"] if c in clustered.columns],
-                    title="Incident Clusters (2D PCA View)"
-                )
-                st.plotly_chart(fig2d, use_container_width=True)
-                if sil_score is not None:
-                    st.write(f"Silhouette Score: {sil_score:.3f}")
-
-                st.subheader("Clustering Analysis (3D)")
-                if 'plot_3d_clusters' in globals() and callable(plot_3d_clusters):
-                    fig3d = plot_3d_clusters(clustered)
-                    st.plotly_chart(fig3d, use_container_width=True)
-                else:
-                    st.info("3D clustering helper not enabled in ml_helpers.")
-
-                st.subheader("Cluster Characteristics")
-                if 'analyze_cluster_characteristics' in globals() and callable(analyze_cluster_characteristics):
-                    cluster_info = analyze_cluster_characteristics(clustered)
-                    if cluster_info:
-                        st.write(pd.DataFrame(cluster_info).T)
-                else:
-                    st.info("Cluster characteristics helper not enabled in ml_helpers.")
+            res = risk_scorer(scenario)
+            if res["risk_level"] == "HIGH":
+                st.error(f"🚨 HIGH RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
+            elif res["risk_level"] == "MEDIUM":
+                st.warning(f"⚠️  MEDIUM RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
             else:
-                st.info("Not enough data for clustering.")
-        except Exception as e:
-            st.warning(f"Clustering failed: {e}")
+                st.success(f"✅ LOW RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
 
-    # ---------- Correlations ----------
-    with tabs[5]:
-        st.subheader("Feature Correlation Analysis")
-        try:
-            corr_fig_or_mat = plot_correlation_heatmap(df)
-            # Accept either a matplotlib Figure OR a correlation matrix
-            if hasattr(corr_fig_or_mat, "axes"):  # matplotlib figure
-                st.pyplot(corr_fig_or_mat)
-            elif isinstance(corr_fig_or_mat, (pd.DataFrame, np.ndarray)):
-                # render as heatmap if only the matrix is returned
-                mat = corr_fig_or_mat if isinstance(corr_fig_or_mat, pd.DataFrame) else pd.DataFrame(corr_fig_or_mat)
-                fig = px.imshow(mat, color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
-                                title="Feature Correlation Matrix")
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Correlation analysis failed: {e}")
+    st.divider()
 
+    # 3) Similar Incident Finder
+    st.subheader("🧭 Similar Incident Finder")
+    if len(df_used) < 3:
+        st.info("Not enough rows to compute similarity.")
+        return
 
-   
-    
+    try:
+        finder, sim = incident_similarity_analysis(df_used, X, feature_names)
+        idx = st.number_input("Incident index (0-based)", min_value=0, max_value=max(0, len(df_used)-1), value=0, step=1)
+        topk = st.slider("Top-K similar", min_value=3, max_value=10, value=5, step=1)
+        if st.button("Find similar"):
+            results = finder(int(idx), top_k=int(topk))
+            if not results:
+                st.info("No similar incidents found.")
+            else:
+                for r in results:
+                    st.write(f"• idx {r['index']}  |  similarity {r['similarity_score']:.3f}")
+                    with st.expander("View incident details"):
+                        st.json(r["incident_data"].to_dict() if r["incident_data"] is not None else {})
+    except Exception as e:
+        st.warning(f"Similarity search unavailable: {e}")
