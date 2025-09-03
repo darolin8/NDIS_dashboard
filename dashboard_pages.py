@@ -31,6 +31,8 @@ from ml_helpers import (
     analyze_cluster_characteristics
 )
 
+
+from utils.factor_labels import shorten_factor
 # ----------------------------
 # Utility
 # ----------------------------
@@ -911,47 +913,51 @@ def plot_investigation_pipeline(df):
     fig.update_layout(showlegend=False, height=400)
     st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
 
-def plot_contributing_factors_by_month(df):
-    if df.empty or 'contributing_factors' not in df.columns or 'incident_date' not in df.columns:
+
+
+def plot_contributing_factors_by_month(df, top_k=25):
+    need = {'contributing_factors', 'incident_date'}
+    if df.empty or not need.issubset(df.columns):
         st.warning("No data available for Contributing Factors heatmap")
         return
-    df = df.copy()
 
-    # Incident Type Keyword
-    if 'Incident Type Keyword' not in df.columns:
-        def extract_keyword(s):
-            s = str(s)
-            m = re.search(r'for the (.+?) incident', s, re.IGNORECASE)
-            if m: return m.group(1).strip()
-            m = re.search(r'for the (.+?) Incident', s, re.IGNORECASE)
-            if m: return m.group(1).strip()
-            m = re.search(r'for the (.+?) event', s, re.IGNORECASE)
-            if m: return m.group(1).strip()
-            words = s.split()
-            return " ".join(words[-3:-1]) if len(words) > 2 else s
-        df['Incident Type Keyword'] = df['contributing_factors'].apply(extract_keyword)
+    d = df.copy()
+    d['incident_date'] = pd.to_datetime(d['incident_date'], errors='coerce')
+    d = d.dropna(subset=['incident_date'])
 
-    # Month-Year
-    if 'Month-Year' not in df.columns:
-        df['Month-Year'] = pd.to_datetime(df['incident_date'], errors='coerce').dt.strftime('%b %Y')
+    # 1–2 word labels
+    d['factor_short'] = d['contributing_factors'].apply(shorten_factor)
 
-    # Count
-    if 'Count' not in df.columns:
-        df['Count'] = 1
+    # focus on the most common to keep the y-axis readable
+    top_factors = d['factor_short'].value_counts().head(top_k).index
+    d = d[d['factor_short'].isin(top_factors)]
 
-    heatmap_data = df.pivot_table(
-        index='Incident Type Keyword',
-        columns='Month-Year',
+    # chronological months
+    d['month_period'] = d['incident_date'].dt.to_period('M')
+    d['Count'] = 1
+
+    heatmap = d.pivot_table(
+        index='factor_short',
+        columns='month_period',     # PeriodIndex keeps true order
         values='Count',
         aggfunc='sum',
         fill_value=0
+    ).sort_index(axis=1)
+
+    # don’t annotate zeros
+    mask = (heatmap == 0)
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+    sns.heatmap(
+        heatmap, annot=True, fmt="d", cmap="Blues",
+        mask=mask, cbar_kws={'label': 'Count'}, ax=ax
     )
-    fig, ax = plt.subplots(figsize=(12, 8))
-    sns.heatmap(heatmap_data, annot=True, fmt="d", cmap="Blues", ax=ax)
-    ax.set_ylabel("Incident Type")
     ax.set_xlabel("Month-Year")
+    ax.set_ylabel("Incident Type")
+    ax.set_xticklabels([p.strftime('%b %Y') for p in heatmap.columns], rotation=45, ha='right')
     ax.set_title("Contributing Factors by Month-Year")
-    st.pyplot(fig)
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
 
 def display_compliance_investigation_section(df):
     st.header("Compliance & Investigation Metrics")
