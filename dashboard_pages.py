@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import random
 from datetime import datetime, timedelta
 import re
+import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import streamlit as st
@@ -378,7 +379,7 @@ def plot_location_analysis(df):
     fig.update_layout(
         xaxis_tickangle=-45,
         showlegend=False,
-        coloraxis_colorbar=dict(title="Color", len=1.0)
+        coloraxis_colorbar=dict(title="Color", len=1.5)
     )
 
     st.plotly_chart(fig, use_container_width=True, key="location_analysis")
@@ -462,12 +463,12 @@ def plot_serious_injury_age_severity(df):
         st.info("No high severity incidents found for age analysis")
 
 def add_age_and_age_range_columns(df):
-    # Assumes df['dob'] is in YYYY-MM-DD format
+    
     if 'dob' in df.columns:
         df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
-        today = pd.to_datetime('today')
+        today = pd.to_datetime('today').normalize()
         df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
-        # You can round or convert to int if you wish
+        df['participant_age'] = df['participant_age'].where(df['dob'].notnull())
         df['participant_age'] = df['participant_age'].astype('Int64')
 
     def get_age_range(age):
