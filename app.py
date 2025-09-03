@@ -149,6 +149,11 @@ def main():
         if selected_reporter_type != "All":
             filtered_df = filtered_df[filtered_df["reported_by"] == selected_reporter_type]
 
+   # Page-specific controls (in sidebar)
+    st.sidebar.markdown("---")
+    forecast_horizon = st.sidebar.slider("Forecast months", 3, 12, 6, 1, key="ml_forecast_months")
+    top_n_causes = st.sidebar.slider("Top N causes (time chart)", 3, 10, 5, 1, key="ml_top_n_causes")
+
     # ---- Filter summary ----
     if len(filtered_df) != len(df):
         st.sidebar.success(f"Applied filters: {len(filtered_df)} of {len(df)} records")
@@ -182,51 +187,8 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
-        elif page == "🤖 ML Insights":
+    elif page == "🤖 ML Insights":
     st.header("🤖 ML Insights")
-
-    # Page-specific controls (in sidebar)
-    st.sidebar.markdown("---")
-    forecast_horizon = st.sidebar.slider("Forecast months", 3, 12, 6, 1, key="ml_forecast_months")
-    top_n_causes = st.sidebar.slider("Top N causes (time chart)", 3, 10, 5, 1, key="ml_top_n_causes")
-
-    # Forecasting
-    incident_volume_forecasting(filtered_df, periods=forecast_horizon)
-
-    # Location Risk
-    location_risk_profiling(filtered_df)
-
-    # Seasonal & temporal
-    seasonal_temporal_patterns(filtered_df)
-
-    # Time + causes combo
-    st.markdown("### ⏰ Time vs Causes (Stacked Bars + Total Line)")
-    plot_time_with_causes(filtered_df, cause_col=None, top_n=top_n_causes)
-
-    # Carer performance scatter
-    st.markdown("### 🧑‍⚕️ Carer Performance Scatter")
-    plot_carer_performance_scatter(filtered_df)
-
-    # Features for correlation & clustering & model comparison
-    X, feature_names, features_df = create_comprehensive_features(filtered_df)
-    if X is not None and features_df is not None:
-        # Correlation
-        correlation_analysis(X, feature_names, features_df)
-
-        # Clustering
-        clustering_analysis(X, features_df, feature_names)
-
-        # Predictive models (if severity available)
-        if "severity" in filtered_df.columns:
-            sev_map = {"low":0, "minor":0, "medium":1, "moderate":1, "high":2, "major":2, "critical":2}
-            y = (
-                filtered_df["severity"]
-                .astype(str).str.strip().str.lower()
-                .map(sev_map)
-                .fillna(0).astype(int)
-            )
-            predictive_models_comparison(X, y, feature_names, target_name="severity")
-
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
 
