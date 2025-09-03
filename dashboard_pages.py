@@ -395,8 +395,8 @@ def display_executive_summary_section(df):
     import calendar
     
    st.markdown("""
-<style>
-.dashboard-card {
+   <style>
+   .dashboard-card {
     background: #fff;
     border: 1px solid #e3e3e3;
     border-radius: 14px;
