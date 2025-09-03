@@ -519,154 +519,203 @@ def display_executive_summary_section(df):
 
 # ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
 
-def display_operational_performance_cards(df):
-    """Display operational performance cards with trend indicators"""
-    if df.empty or 'incident_date' not in df.columns:
-        st.warning("No data available for operational performance cards")
-        return
-    
-    # Calculate current month and previous month data
-    current_date = df['incident_date'].max()
-    current_month = current_date.to_period('M')
-    previous_month = current_month - 1
-    
-    current_df = df[df['incident_date'].dt.to_period('M') == current_month]
-    previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
-    
-    st.markdown("### 📈 Operational Performance Metrics")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Location Reportable Rate
-        if 'location' in df.columns and 'reportable' in df.columns:
-            current_reportable_rate = (current_df['reportable'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_reportable_rate = (previous_df['reportable'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_reportable_rate, previous_reportable_rate)
-            
-            st.metric(
-                label="🏢 Location Reportable Rate",
-                value=f"{current_reportable_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents that are reportable by location"
-            )
-    
-    with col2:
-        # Average Participant Age
-        if 'participant_age' in df.columns:
-            current_avg_age = current_df['participant_age'].mean() if len(current_df) > 0 else 0
-            previous_avg_age = previous_df['participant_age'].mean() if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_avg_age, previous_avg_age)
-            
-            st.metric(
-                label="👥 Average Participant Age",
-                value=f"{current_avg_age:.1f} yrs",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="normal",
-                help="Average age of participants involved in incidents"
-            )
-    
-    with col3:
-        # Medical Attention Rate
-        if 'medical_attention_required' in df.columns:
-            current_medical_rate = (current_df['medical_attention_required'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_medical_rate = (previous_df['medical_attention_required'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_medical_rate, previous_medical_rate)
-            
-            st.metric(
-                label="🏥 Medical Attention Rate",
-                value=f"{current_medical_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents requiring medical attention"
-            )
+def display_executive_summary_section(df):
+    st.header("📊 Executive Summary")
+    st.markdown("---")
+    df = add_age_and_age_range_columns(df)
 
-def display_operational_performance_section(df):
-    st.header("📈 Operational Performance & Risk Analysis")
-    display_operational_performance_cards(df)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+
+    with col1:
+        top_type = (
+            df['incident_type'].value_counts().idxmax()
+            if 'incident_type' in df.columns and not df.empty
+            else "N/A"
+        )
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Top Incident<br>Type
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
+                  {top_type}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  Most frequent
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col2:
+        if 'incident_date' in df.columns and not df.empty:
+            latest_month = df['incident_date'].max().to_period('M')
+            latest_month_str = latest_month.strftime('%b %Y')
+            latest_month_count = df[df['incident_date'].dt.to_period('M') == latest_month].shape[0]
+        else:
+            latest_month_str = "N/A"
+            latest_month_count = 0
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Latest Month<br>Incidents
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
+                  {latest_month_count}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  {latest_month_str}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col3:
+        if 'incident_date' in df.columns and not df.empty:
+            prev_month = latest_month - 1
+            prev_month_str = prev_month.strftime('%b %Y')
+            prev_month_count = df[df['incident_date'].dt.to_period('M') == prev_month].shape[0]
+        else:
+            prev_month_str = "N/A"
+            prev_month_count = 0
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Previous Month<br>Incidents
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
+                  {prev_month_count}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  {prev_month_str}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col4:
+        high_severity = (
+            len(df[df['severity'].str.lower() == 'high'])
+            if 'severity' in df.columns
+            else 0
+        )
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  High Severity<br>Incidents
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#d9534f;line-height:1;">
+                  {high_severity}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  Critical cases
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col5:
+        reportable = (
+            int(df['reportable'].sum())
+            if 'reportable' in df.columns
+            else 0
+        )
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Reportable<br>Incidents
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#f0ad4e;line-height:1;">
+                  {reportable}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  Regulatory events
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Average Age card (calculated from DOB)
+    with col6:
+        avg_age = df['participant_age'].mean() if 'participant_age' in df.columns else None
+        avg_age_txt = f"{avg_age:.1f} yrs" if avg_age is not None else "N/A"
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Average<br>Age
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#5ad8a6;line-height:1;">
+                  {avg_age_txt}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  Avg participant age
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Most common age range card
+    with col7:
+        common_range = df['age_range'].value_counts().idxmax() if 'age_range' in df.columns else "N/A"
+        st.markdown(
+            f"""
+            <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
+                        padding:1rem 0.4rem;text-align:center;height:130px;
+                        display:flex;flex-direction:column;justify-content:space-between;">
+                <span style="font-size:0.85rem;font-weight:600;color:#222;line-height:1.1;">
+                  Most Common<br>Age Range
+                </span>
+                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;line-height:1;">
+                  {common_range}
+                </span>
+                <span style="font-size:0.75rem;color:#444;line-height:1.1;">
+                  Top age group
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
     st.markdown("---")
-    plot_reporter_type_metrics(df)
-    st.markdown("---")
+    # Keep your section plotting logic below
     col1, col2 = st.columns(2)
     with col1:
-        plot_incident_types_bar(df)
+        plot_severity_distribution(df)
     with col2:
-        plot_medical_outcomes(df)
+        plot_top_incidents_by_volume_severity(df)
     plot_monthly_incidents_by_severity(df)
-    plot_reporter_performance_scatter(df)
-    plot_serious_injury_age_severity(df)
-
-# ========== OPERATIONAL PERFORMANCE FUNCTIONS ==========
-
-def display_operational_performance_cards(df):
-    """Display operational performance cards with trend indicators"""
-    if df.empty or 'incident_date' not in df.columns:
-        st.warning("No data available for operational performance cards")
-        return
-    
-    # Calculate current month and previous month data
-    current_date = df['incident_date'].max()
-    current_month = current_date.to_period('M')
-    previous_month = current_month - 1
-    
-    current_df = df[df['incident_date'].dt.to_period('M') == current_month]
-    previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
-    
-    st.markdown("### 📈 Operational Performance Metrics")
-    
-    col1, col2, col3 = st.columns(3)
-    
+    plot_location_analysis(df)
+    plot_incident_trends(df)
+    col1, col2 = st.columns(2)
     with col1:
-        # Location Reportable Rate
-        if 'location' in df.columns and 'reportable' in df.columns:
-            current_reportable_rate = (current_df['reportable'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_reportable_rate = (previous_df['reportable'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_reportable_rate, previous_reportable_rate)
-            
-            st.metric(
-                label="🏢 Location Reportable Rate",
-                value=f"{current_reportable_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents that are reportable by location"
-            )
-    
+        plot_weekday_analysis(df)
     with col2:
-        # Average Participant Age
-        if 'participant_age' in df.columns:
-            current_avg_age = current_df['participant_age'].mean() if len(current_df) > 0 else 0
-            previous_avg_age = previous_df['participant_age'].mean() if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_avg_age, previous_avg_age)
-            
-            st.metric(
-                label="👥 Average Participant Age",
-                value=f"{current_avg_age:.1f} yrs",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="normal",
-                help="Average age of participants involved in incidents"
-            )
-    
-    with col3:
-        # Medical Attention Rate
-        if 'medical_attention_required' in df.columns:
-            current_medical_rate = (current_df['medical_attention_required'].sum() / len(current_df) * 100) if len(current_df) > 0 else 0
-            previous_medical_rate = (previous_df['medical_attention_required'].sum() / len(previous_df) * 100) if len(previous_df) > 0 else 0
-            
-            trend_pct, trend_arrow = calculate_trend(current_medical_rate, previous_medical_rate)
-            
-            st.metric(
-                label="🏥 Medical Attention Rate",
-                value=f"{current_medical_rate:.1f}%",
-                delta=f"{trend_arrow} {trend_pct:.1f}%",
-                delta_color="inverse",
-                help="Percentage of incidents requiring medical attention"
-            )
+        plot_time_analysis(df)
+    plot_reportable_analysis(df)
 
 def display_operational_performance_section(df):
     st.header("📈 Operational Performance & Risk Analysis")
