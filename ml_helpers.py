@@ -878,4 +878,103 @@ def correlation_analysis(X, feature_names, df):
         for j in range(i + 1, len(cols)):
             r = float(corr.iat[i, j])
             if abs(r) >= abs_thresh:
-                pairs.append({"Feature A": cols[i], "Feature B": cols[j], "
+                pairs.append({"Feature A": cols[i], "Feature B": cols[j], "Correlation (ρ)": r})
+
+    if pairs:
+        pairs_df = (
+            pd.DataFrame(pairs)
+              .sort_values(by="Correlation (ρ)", key=lambda s: s.abs(), ascending=False)
+              .reset_index(drop=True)
+        )
+        st.dataframe(pairs_df.head(100), use_container_width=True)
+    else:
+        st.info("No pairs exceed the selected threshold.")
+
+    avg_abs = corr.abs().replace(1.0, np.nan).mean().sort_values(ascending=False)
+    likely_redundant = avg_abs[avg_abs >= 0.6]
+    if not likely_redundant.empty:
+        st.warning(
+            f"Potential multicollinearity: {', '.join(likely_redundant.index[:8])} "
+            f"(avg |ρ| ≥ 0.6 to other features). Consider feature selection/regularization."
+        )
+
+    return corr
+
+# ----------------------------
+# Reporter metrics (optional small KPIs using carer_id fields)
+# ----------------------------
+def plot_reporter_type_metrics(df):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if 'carer_id' in df.columns:
+            value = df['carer_id'].nunique()
+            plot_metric("Carers (unique)", value, color_graph="#5B8FF9")
+    with col2:
+        if 'medical_attention_required' in df.columns:
+            value = int(df['medical_attention_required'].sum())
+            plot_metric("Medical Attention Required", value, color_graph="#F6BD16")
+    with col3:
+        if 'participant_age' in df.columns:
+            avg_age = round(df['participant_age'].mean(), 1)
+            plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
+
+# ----------------------------
+# Main App
+# ----------------------------
+def main():
+    st.markdown("<div class='main-header'>NDIS Advanced Analytics Dashboard</div>", unsafe_allow_html=True)
+
+    with st.sidebar:
+        st.header("⚙️ Controls")
+        uploaded = st.file_uploader("Upload CSV", type=["csv"])
+        forecast_horizon = st.slider("Forecast months", 3, 12, 6, 1)
+        top_n_causes = st.slider("Top N causes (time chart)", 3, 10, 5, 1)
+
+    if uploaded:
+        df = pd.read_csv(uploaded)
+    else:
+        st.info("Upload a CSV to begin. Expected columns like: incident_date, incident_time, location, severity, medical_attention_required, reportable, participant_id, carer_id, incident_type, notification_date.")
+        return
+
+    # Quick data preview
+    with st.expander("👀 Data preview"):
+        st.dataframe(df.head(30), use_container_width=True)
+
+    # Optional KPI cards
+    plot_reporter_type_metrics(df)
+
+    # Forecasting
+    incident_volume_forecasting(df, periods=forecast_horizon)
+
+    # Location Risk
+    location_risk_profiling(df)
+
+    # Seasonal & temporal
+    seasonal_temporal_patterns(df)
+
+    # Time + causes combo
+    st.markdown("### ⏰ Time vs Causes (Stacked Bars + Total Line)")
+    plot_time_with_causes(df, cause_col=None, top_n=top_n_causes)
+
+    # Carer performance scatter
+    st.markdown("### 🧑‍⚕️ Carer Performance Scatter")
+    plot_carer_performance_scatter(df)
+
+    # Features for clustering / modeling / correlation
+    X, feature_names, features_df = create_comprehensive_features(df)
+    if X is not None and features_df is not None:
+        # Correlation
+        correlation_analysis(X, feature_names, features_df)
+
+        # Clustering
+        clustering_analysis(X, features_df, feature_names)
+
+        # Predictive models (if severity available)
+        if 'severity' in df.columns:
+            # Example binary/ordinal target: map to numeric for modeling
+            target_map = {'Low': 0, 'Medium': 1, 'Moderate': 1, 'High': 2, 'Critical': 2}
+            y = df['severity'].map(target_map).fillna(0).astype(int)
+            predictive_models_comparison(X, y, feature_names, target_name="severity")
+
+if __name__ == "__main__":
+    main()
