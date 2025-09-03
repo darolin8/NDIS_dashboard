@@ -10,18 +10,6 @@ from dashboard_pages import (
     apply_investigation_rules
 )
 
-from ml_helpers import (
-    prepare_ml_features,
-    compare_models,
-    forecast_incident_volume,
-    profile_location_risk,
-    detect_seasonal_patterns,
-    perform_clustering_analysis,
-    plot_correlation_heatmap,
-    incident_type_risk_profiling as profile_incident_type_risk  # ← No comma here!
-)
-
-
 # ----- CONFIG -----
 st.set_page_config(
     page_title="Incident Management Dashboard",
@@ -74,8 +62,7 @@ def main():
             "📊 Executive Summary",
             "📈 Operational Performance & Risk Analysis",
             "📋 Compliance & Investigation",
-            "🤖 ML Insights",
-            "🧠 Advanced ML Analytics"
+            "🤖 ML Insights"
         ],
     )
 
@@ -192,78 +179,6 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
-    elif page == "🧠 Advanced ML Analytics":
-        st.header("🧠 Advanced ML Analytics")
-        # Add ML helpers section with subpage selection
-        ml_page = st.radio("Select ML Analysis", [
-            "Location Risk",
-            "Incident Type Risk",
-            "Seasonal Patterns",
-            "Severity ML Models",
-            "Anomaly Detection",
-            "Clustering",
-            "Correlation Matrix",
-            "Incident Forecast"
-        ], horizontal=True)
-        # Each ML analysis section
-        if ml_page == "Location Risk":
-            st.subheader("Incident Risk by Location")
-            risk_df, fig = profile_location_risk(filtered_df)
-            st.dataframe(risk_df, use_container_width=True)
-        elif ml_page == "Incident Type Risk":
-            st.subheader("Incident Risk by Type")
-            risk_df, fig = profile_incident_type_risk(filtered_df)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(risk_df, use_container_width=True)
-        elif ml_page == "Seasonal Patterns":
-            st.subheader("Seasonal & Temporal Patterns")
-            fig = detect_seasonal_patterns(filtered_df)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-        if ml_page == "Severity ML Models":
-            st.subheader("Severity ML Models")
-            X, y, feature_names = prepare_ml_features(filtered_df)  
-            results, rows, roc_fig = compare_models(X, y, feature_names)
-            if rows is not None and len(rows) > 0:
-                metrics_df = pd.DataFrame(rows)
-                st.dataframe(metrics_df)
-            if roc_fig is not None:
-                st.plotly_chart(roc_fig, use_container_width=True)
-        elif ml_page == "Anomaly Detection":
-            st.subheader("Anomaly Detection")
-            anomaly_df, feat_names = perform_anomaly_detection(filtered_df)
-            if anomaly_df is not None:
-                fig = plot_anomaly_scatter(anomaly_df, 'month', 'hour', axis_labels={'month':'Month', 'hour':'Hour'})
-                st.pyplot(fig)
-                st.dataframe(anomaly_df.head(20), use_container_width=True)
-        elif ml_page == "Clustering":
-            st.subheader("Clustering Analysis")
-            clustered_df, feat_names, sil_score, pca = perform_clustering_analysis(filtered_df)
-            if clustered_df is not None:
-                fig3d = plot_3d_clusters(clustered_df)
-                st.plotly_chart(fig3d, use_container_width=True)
-                cluster_info = analyze_cluster_characteristics(clustered_df)
-                st.write(cluster_info)
-        elif ml_page == "Correlation Matrix":
-            st.subheader("Correlation Matrix")
-            fig = plot_correlation_heatmap(filtered_df)
-            st.pyplot(fig)
-        elif ml_page == "Incident Forecast":
-            st.subheader("Incident Forecasting")
-            actual, forecast = forecast_incident_volume(filtered_df, periods=6)
-            import plotly.graph_objs as go
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=actual.index, y=actual.values, mode='lines+markers', name='Actual'))
-            if not forecast.empty:
-                fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode='lines+markers', name='Forecast'))
-            fig.update_layout(title="Incident Volume Forecast", xaxis_title="Month", yaxis_title="Incidents")
-            st.plotly_chart(fig, use_container_width=True)
-            st.write("Forecast Table")
-            if not forecast.empty:
-                forecast_df = pd.DataFrame({
-                    'Month': forecast.index.strftime('%Y-%m'),
-                    'Forecast': forecast.values
-                })
-                st.dataframe(forecast_df, use_container_width=True)
 
 if __name__ == "__main__":
     main()
