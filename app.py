@@ -187,8 +187,6 @@ def main():
         display_compliance_investigation_section(filtered_df)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
-    elif page == "🤖 ML Insights":
-    st.header("🤖 ML Insights")
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
 
