@@ -1194,11 +1194,13 @@ profile_incident_type_risk = incident_type_risk_profiling
 detect_seasonal_patterns = seasonal_temporal_patterns
 perform_clustering_analysis = clustering_analysis
 analyze_cluster_characteristics = None  # not required here
-plot_3d_clusters = your_plot_3d_fn  
 plot_correlation_heatmap = correlation_analysis
 train_severity_prediction_model = None  # optional external
 perform_anomaly_detection = None        # optional external
 plot_anomaly_scatter = None             # optional external
 train_severity_prediction_model = your_train_fn
 perform_anomaly_detection = your_anomaly_fn
+plot_3d_clusters = your_plot_3d_fn  # if you have one
+
+
 
