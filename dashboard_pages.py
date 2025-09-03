@@ -1457,23 +1457,33 @@ def display_operational_performance_section(df):
     plot_monthly_incidents_by_severity(df)  # <--- FIXED HERE!
     plot_reporter_performance_scatter(df)
     plot_serious_injury_age_severity(df)
-import streamlit as st
 
 def display_compliance_investigation_section(df):
     st.header("Compliance & Investigation Metrics")
     st.markdown("---")
 
-    # Calculate metrics (replace logic if needed)
-    reportable_incidents = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
-    compliance_24hr = int(df['compliance_24hr'].sum()) if 'compliance_24hr' in df.columns else 0
-    overdue_reports = int(df['overdue_report'].sum()) if 'overdue_report' in df.columns else 0
-    investigation_rate = (
-        100 * df['investigation_completed'].sum() / len(df)
-        if 'investigation_completed' in df.columns and len(df) > 0
-        else 0.0
-    )
+    # Compute reporting delay in hours
+    if 'incident_date' in df.columns and 'notification_date' in df.columns:
+        df = df.copy()
+        df['report_delay_hours'] = (
+            (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+        )
+        compliance_24hr = (df['report_delay_hours'] <= 24).sum()
+        overdue_reports = (df['report_delay_hours'] > 24).sum()
+    else:
+        compliance_24hr = 0
+        overdue_reports = 0
 
-    # Display all cards in one line
+    # Reportable incidents
+    reportable_incidents = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
+
+    # Investigation rate: percent of incidents completed for investigation, if available
+    if 'investigation_completed' in df.columns and len(df) > 0:
+        investigation_rate = 100 * df['investigation_completed'].sum() / len(df)
+    else:
+        investigation_rate = 0.0
+
+    # Display all cards in one row
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -1549,7 +1559,6 @@ def display_compliance_investigation_section(df):
         plot_24h_compliance_rate_by_location(df)
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
-
 
 
 from ml_helpers import (
