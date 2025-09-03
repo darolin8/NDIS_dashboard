@@ -30,7 +30,8 @@ from ml_helpers import (
     plot_correlation_heatmap,       # Returns corr_fig
     train_severity_prediction_model,
     perform_anomaly_detection,
-    analyze_cluster_characteristics
+    analyze_cluster_characteristics,
+    incident_type_risk_profiling as profile_incident_type_risk
 )
 
 
