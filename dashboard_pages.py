@@ -550,14 +550,14 @@ def display_executive_summary_section(df):
         st.markdown(
             f"""
             <div style="background:#fff;border:1px solid #e3e3e3;border-radius:14px;
-                        padding:1.2rem 0.5rem;text-align:center;min-height:120px;">
+                        padding:1.2rem 0.5rem;text-align:center;height:130px;">
                 <span style="font-size:1rem;font-weight:600;color:#222;">
                   Most Common Age Range
                 </span><br>
-                <span style="font-size:2rem;font-weight:700;color:#1769aa;">
+                <span style="font-size:1.6rem;font-weight:700;color:#1769aa;">
                   {common_range}
                 </span><br>
-                <span style="font-size:0.93rem;color:#444;">
+                <span style="font-size:0.75rem;color:#444;">
                   Age group with most participants
                 </span>
             </div>
