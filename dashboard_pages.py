@@ -13,6 +13,20 @@ st.warning("EXECUTIVE SUMMARY UPDATED")
 import os
 st.info(f"Loaded from: {os.path.abspath(__file__)}")
 
+from ml_helpers import (
+    compare_models,                 # Returns (metrics_df, roc_fig)
+    forecast_incident_volume,       # Returns (actual, forecast)
+    profile_location_risk,          # Returns (loc_df, loc_fig)
+    profile_incident_type_risk,     # Returns (type_df, type_fig)
+    detect_seasonal_patterns,       # Returns pattern_fig
+    perform_clustering_analysis,    # Returns (clustered, features, sil_score, pca)
+    plot_3d_clusters,               # Returns fig3d
+    plot_correlation_heatmap,       # Returns corr_fig
+    train_severity_prediction_model,
+    perform_anomaly_detection,
+    analyze_cluster_characteristics
+)
+
 
 # ================= UTILITY FUNCTIONS =================
 
@@ -1221,19 +1235,6 @@ def display_compliance_investigation_section(df):
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
 
-
-from ml_helpers import (
-    compare_models,                 # Returns (metrics_df, roc_fig)
-    forecast_incident_volume,       # Returns (actual, forecast)
-    profile_location_risk,          # Returns (loc_df, loc_fig)
-    profile_incident_type_risk,     # Returns (type_df, type_fig)
-    detect_seasonal_patterns,       # Returns pattern_fig
-    perform_clustering_analysis,    # Returns (clustered, features, sil_score, pca)
-    plot_3d_clusters,               # Returns fig3d
-    plot_correlation_heatmap,       # Returns corr_fig
-    train_severity_prediction_model,
-    perform_anomaly_detection,
-    analyze_cluster_characteristics
 )
 
 def display_ml_insights_section(df):
