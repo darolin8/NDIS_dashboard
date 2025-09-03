@@ -19,8 +19,8 @@ st.set_page_config(
 
 @st.cache_data
 def load_data():
-    file_path = "text data/ndis_incidents_1000.csv"
-    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incidents_1000.csv"
+    file_path = "text data/ndis_incident_1000.csv"
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
     # Try local file first
     if os.path.exists(file_path):
         df = pd.read_csv(file_path, parse_dates=["incident_date", "notification_date"])
