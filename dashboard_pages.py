@@ -162,6 +162,7 @@ def plot_time_analysis(df):
     ))
 
     fig.update_layout(
+        title="Incidents by Hour of Day",
         barmode="stack",
         xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
         yaxis=dict(title="Number of Incidents", side="left"),
@@ -207,10 +208,31 @@ def plot_reportable_analysis(df):
     fig = px.pie(
         values=reportable_counts.values,
         names=reportable_counts.index,
+        title="Reportable Incidents Distribution",
         color_discrete_sequence=['#90EE90', '#FFB6C1']
     )
     st.plotly_chart(fig, use_container_width=True, key="reportable_analysis")
 
+def plot_medical_outcomes(df):
+    if df.empty or 'treatment_required' not in df.columns or 'medical_attention_required' not in df.columns:
+        st.warning("No data available for medical outcomes")
+        return
+    medical_summary = {
+        'Treatment Required': df['treatment_required'].sum(),
+        'Medical Attention Required': df['medical_attention_required'].sum(),
+        'No Medical Intervention': len(df) - df[['treatment_required', 'medical_attention_required']].any(axis=1).sum()
+    }
+    fig = px.bar(
+        x=list(medical_summary.keys()),
+        y=list(medical_summary.values()),
+        title="Medical Intervention Requirements",
+        labels={'x': 'Medical Outcome', 'y': 'Number of Cases'},
+        color=list(medical_summary.values()),
+        color_continuous_scale='RdYlBu_r',
+        height=400
+    )
+    fig.update_layout(showlegend=False, xaxis_tickangle=-15)
+    st.plotly_chart(fig, use_container_width=True, key="medical_outcomes")
 
 def plot_reporter_type_metrics(df):
     col1, col2, col3 = st.columns(3)
@@ -237,6 +259,7 @@ def plot_severity_distribution(df):
     fig = px.pie(
         values=severity_counts.values,
         names=severity_counts.index,
+        title="Incident Severity Distribution",
         color=severity_counts.index,
         color_discrete_map=colors,
         height=400
@@ -311,6 +334,7 @@ def plot_incident_types_bar(df):
         x=incident_counts.values,
         y=incident_counts.index,
         orientation='h',
+        title="Top 10 Incident Types",
         labels={'x': 'Number of Incidents', 'y': 'Incident Type'},
         color=incident_counts.values,
         color_continuous_scale='Viridis',
@@ -345,6 +369,7 @@ def plot_location_analysis(df):
     fig = px.bar(
         x=location_counts.index,
         y=vals,
+        title="Incidents by Location",
         labels={'x': 'Location', 'y': 'Number of Incidents'},
         color=vals,
         color_continuous_scale=black_red_scale,
@@ -370,6 +395,7 @@ def plot_incident_trends(df):
         daily_counts,
         x='date',
         y='incidents',
+        title="Daily Incident Trends",
         markers=True
     )
     fig.update_layout(
@@ -379,6 +405,89 @@ def plot_incident_trends(df):
     )
     st.plotly_chart(fig, use_container_width=True, key="incident_trends")
 
+
+
+"""def plot_reporter_performance_scatter(df):
+    if df.empty or not {'reported_by','notification_date','incident_date'}.issubset(df.columns):
+        st.warning("No data available for reporter performance analysis")
+        return
+    df = df.copy()
+    perf = (
+        df.groupby('reported_by')
+        .agg(
+            avg_delay=('notification_date', lambda x: (x - df.loc[x.index, 'incident_date']).dt.days.mean()),
+            total_incidents=('incident_date', 'count')
+        ).reset_index()
+    )
+    fig = px.scatter(
+        perf,
+        x='avg_delay',
+        y='total_incidents',
+        color='reported_by',
+        size='total_incidents',
+        size_max=60,
+        labels={
+            'avg_delay': 'Average Notification Delay (Days)',
+            'total_incidents': 'Total Incidents',
+            'reported_by': 'Reporter Type'
+        },
+        title='Reporter Performance Analysis',
+        opacity=0.7
+    )
+    fig.update_xaxes(showgrid=True, gridwidth=2, gridcolor='lightblue', griddash='dash')
+    fig.update_yaxes(showgrid=True, gridwidth=2, gridcolor='lightblue', griddash='dash')
+    fig.update_traces(marker=dict(line=dict(width=2, color='rgba(0,0,0,0.3)')))
+    fig.update_layout(
+        legend_title_text='Reporter Type',
+        xaxis=dict(zeroline=True, zerolinecolor='lightblue', zerolinewidth=2),
+        yaxis=dict(zeroline=True, zerolinecolor='lightblue', zerolinewidth=2),
+        plot_bgcolor='white'
+    )
+    st.plotly_chart(fig, use_container_width=True, key="reporter_performance_scatter")"""
+
+def plot_serious_injury_age_severity(df):
+    if df.empty or 'severity' not in df.columns or 'participant_age' not in df.columns:
+        st.info("No high severity incidents found for age analysis")
+        return
+    serious_df = df[df['severity'].str.lower() == 'high']
+    if not serious_df.empty:
+        fig = px.histogram(
+            serious_df,
+            x='participant_age',
+            color='severity',
+            nbins=20,
+            title="High Severity Incidents: Age Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True, key="serious_injury_age_severity")
+    else:
+        st.info("No high severity incidents found for age analysis")
+
+def add_age_and_age_range_columns(df):
+    
+    if 'dob' in df.columns:
+        df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
+        today = pd.to_datetime('today').normalize()
+        df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
+        df['participant_age'] = df['participant_age'].where(df['dob'].notnull())
+        df['participant_age'] = df['participant_age'].astype('Int64')
+
+    def get_age_range(age):
+        if pd.isnull(age):
+            return "Unknown"
+        if age < 18:
+            return "Under 18"
+        elif age < 30:
+            return "18-29"
+        elif age < 45:
+            return "30-44"
+        elif age < 60:
+            return "45-59"
+        else:
+            return "60+"
+
+    if 'participant_age' in df.columns:
+        df['age_range'] = df['participant_age'].apply(get_age_range)
+    return df
 
 
 def plot_carer_performance_scatter(df):
