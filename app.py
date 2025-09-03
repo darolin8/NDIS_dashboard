@@ -11,6 +11,8 @@ from dashboard_pages import (
 )
 
 from incident_mapping import render_incident_mapping
+from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
+
 
 # ----- CONFIG -----
 st.set_page_config(
