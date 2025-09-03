@@ -1001,3 +1001,201 @@ def clustering_analysis(X, df, feature_names):
 
             pca_2d = PCA(n_components=2)
             pca_3d = PCA(n_components=3)
+            X2 = pca_2d.fit_transform(X_scaled)
+            X3 = pca_3d.fit_transform(X_scaled)
+
+            if algorithm == 'K-Means':
+                model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            elif algorithm == 'DBSCAN':
+                model = DBSCAN(eps=eps, min_samples=5)
+            else:
+                model = AgglomerativeClustering(n_clusters=n_clusters)
+
+            labels = model.fit_predict(X_scaled)
+
+            sil = None
+            if len(set(labels)) > 1 and -1 not in labels:
+                sil = silhouette_score(X_scaled, labels)
+
+            dfc = df.copy()
+            dfc['cluster'] = labels
+            dfc['pca_1'] = X2[:,0]
+            dfc['pca_2'] = X2[:,1]
+            dfc['pca_3'] = X3[:,2]
+
+            st.success("✅ Clustering complete!")
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                k = len(set(labels)) - (1 if -1 in labels else 0)
+                st.metric("Clusters", k)
+            with c2:
+                st.metric("Silhouette", f"{sil:.3f}" if sil is not None else "N/A")
+            with c3:
+                st.metric("Largest Cluster Size", pd.Series(labels).value_counts().iloc[0] if len(labels)>0 else 0)
+            with c4:
+                st.metric("Noise Points", int((labels == -1).sum()) if -1 in labels else 0)
+
+            st.markdown("#### 🎯 2D PCA View")
+            fig = px.scatter(x=X2[:,0], y=X2[:,1], color=[str(l) for l in labels],
+                             title=f"2D PCA Clustering View - {algorithm}",
+                             labels={'x':f'PC1 ({pca_2d.explained_variance_ratio_[0]:.1%})',
+                                     'y':f'PC2 ({pca_2d.explained_variance_ratio_[1]:.1%})'},
+                             hover_data={
+                                 'Incident Date': df['incident_date'] if 'incident_date' in df.columns else None,
+                                 'Location': df['location'] if 'location' in df.columns else None,
+                                 'Severity': df['severity'] if 'severity' in df.columns else None
+                             })
+            fig.update_layout(height=580)
+            st.plotly_chart(fig, use_container_width=True)
+
+            if show_3d:
+                st.markdown("#### 📊 3D PCA View")
+                fig = px.scatter_3d(x=X3[:,0], y=X3[:,1], z=X3[:,2], color=[str(l) for l in labels],
+                                    title=f"3D PCA Clustering View - {algorithm}",
+                                    labels={'x':f'PC1 ({pca_3d.explained_variance_ratio_[0]:.1%})',
+                                            'y':f'PC2 ({pca_3d.explained_variance_ratio_[1]:.1%})',
+                                            'z':f'PC3 ({pca_3d.explained_variance_ratio_[2]:.1%})'})
+                fig.update_layout(height=700)
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("#### 📋 Cluster Characteristics")
+            rows = []
+            for cl in sorted(set(labels)):
+                if cl == -1:
+                    continue
+                sub = dfc[dfc['cluster'] == cl]
+                if sub.empty: 
+                    continue
+                row = {'Cluster': cl, 'Size': len(sub), 'Size %': f"{100*len(sub)/len(dfc):.1f}%"}
+                for col in ['location','incident_type','severity']:
+                    if col in sub.columns and not sub[col].empty:
+                        row[f'Most Common {col.title()}'] = sub[col].mode().iloc[0]
+                for col in ['medical_attention_required','reportable']:
+                    if col in sub.columns:
+                        row[f'Avg {col.replace("_"," ").title()}'] = f"{ensure_bool01(sub[col]).mean():.1%}"
+                if 'hour' in sub.columns:
+                    row['Avg Hour'] = f"{sub['hour'].mean():.1f}"
+                rows.append(row)
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+            st.markdown("#### 🎯 PCA Component Analysis")
+            comp = pd.DataFrame(pca_3d.components_[:3].T, columns=['PC1','PC2','PC3'], index=feature_names)
+            for pc in ['PC1','PC2','PC3']:
+                st.write(f"**{pc} Top Contributors:**")
+                top = comp[pc].abs().nlargest(5)
+                for feat, contrib in top.items():
+                    sign = "+" if comp.loc[feat, pc] > 0 else "-"
+                    st.write(f"  {sign} {feat}: {abs(contrib):.3f}")
+
+            st.markdown("#### 💡 Clustering Insights")
+            sizes = pd.Series(labels).value_counts()
+            if len(sizes) > 1:
+                largest_pct = 100 * sizes.iloc[0] / len(labels)
+                if largest_pct > 70:
+                    st.write(f"📊 **Dominant Pattern**: One cluster contains {largest_pct:.1f}% of incidents.")
+                elif largest_pct < 30 and len(sizes) >= 4:
+                    st.write("📊 **Diverse Patterns**: Well-distributed clusters indicate diverse incident patterns.")
+            if sil is not None:
+                if sil > 0.7:
+                    st.write(f"✅ **Excellent Clustering**: Silhouette {sil:.3f}.")
+                elif sil > 0.5:
+                    st.write(f"👍 **Good Clustering**: Silhouette {sil:.3f}.")
+                elif sil > 0.25:
+                    st.write(f"⚠️ **Moderate Clustering**: Silhouette {sil:.3f}.")
+                else:
+                    st.write(f"❌ **Poor Clustering**: Silhouette {sil:.3f}.")
+
+# ----------------------------
+# Reporter metrics (optional small KPIs using carer_id fields)
+# ----------------------------
+def plot_reporter_type_metrics(df):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if 'carer_id' in df.columns:
+            value = df['carer_id'].nunique()
+            plot_metric("Carers (unique)", value)
+    with col2:
+        if 'medical_attention_required' in df.columns:
+            value = int(ensure_bool01(df['medical_attention_required']).sum())
+            plot_metric("Medical Attention Required", value)
+    with col3:
+        if 'participant_age' in df.columns:
+            avg_age = round(df['participant_age'].mean(), 1)
+            plot_metric("Avg Participant Age", avg_age, suffix=" yrs")
+
+# ----------------------------
+# Main App
+# ----------------------------
+def main():
+    st.markdown("<div class='main-header'>NDIS Advanced Analytics Dashboard</div>", unsafe_allow_html=True)
+
+    with st.sidebar:
+        st.header("⚙️ Controls")
+        uploaded = st.file_uploader("Upload CSV", type=["csv"])
+        forecast_horizon = st.slider("Forecast months", 3, 12, 6, 1)
+        top_n_causes = st.slider("Top N causes (time chart)", 3, 10, 5, 1)
+
+    if uploaded:
+        df = pd.read_csv(uploaded)
+    else:
+        st.info("Upload a CSV to begin. Expected columns like: incident_date, incident_time, location, severity, medical_attention_required, reportable, participant_id, carer_id, incident_type, notification_date.")
+        return
+
+    # Quick data preview
+    with st.expander("👀 Data preview"):
+        st.dataframe(df.head(30), use_container_width=True)
+
+    # Optional KPI cards
+    plot_reporter_type_metrics(df)
+
+    # Forecasting
+    incident_volume_forecasting(df, periods=forecast_horizon)
+
+    # Location Risk
+    location_risk_profiling(df)
+
+    # Seasonal & temporal
+    seasonal_temporal_patterns(df)
+
+    # Time + causes combo
+    st.markdown("### ⏰ Time vs Causes (Stacked Bars + Total Line)")
+    plot_time_with_causes(df, cause_col=None, top_n=top_n_causes)
+
+    # Carer performance scatter
+    st.markdown("### 🧑‍⚕️ Carer Performance Scatter")
+    plot_carer_performance_scatter(df)
+
+    # Features for clustering / modeling / correlation
+    X, feature_names, features_df = create_comprehensive_features(df)
+    if X is not None and features_df is not None:
+        # Correlation
+        correlation_analysis(X, feature_names, features_df)
+
+        # Clustering
+        clustering_analysis(X, features_df, feature_names)
+
+        # Predictive models (if severity available)
+        if 'severity' in df.columns:
+            y = norm_severity(df['severity']).fillna(0).astype(int)
+            predictive_models_comparison(X, y, feature_names, target_name="severity")
+
+if __name__ == "__main__":
+    main()
+
+
+# --- Export aliases for dashboard compatibility ---
+prepare_ml_features = create_comprehensive_features
+compare_models = predictive_models_comparison
+forecast_incident_volume = incident_volume_forecasting
+profile_location_risk = location_risk_profiling
+profile_incident_type_risk = incident_type_risk_profiling
+detect_seasonal_patterns = seasonal_temporal_patterns
+perform_clustering_analysis = clustering_analysis
+analyze_cluster_characteristics = None  # not required here
+plot_3d_clusters = None  # not required here
+plot_correlation_heatmap = correlation_analysis
+train_severity_prediction_model = None  # optional external
+perform_anomaly_detection = None        # optional external
+plot_anomaly_scatter = None             # optional external
