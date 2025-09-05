@@ -48,6 +48,9 @@ def create_comprehensive_features(df: pd.DataFrame):
 # Internal helpers
 # ---------------------------------------
 def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd.DataFrame:
+    """
+    Ensure a usable datetime column 'incident_datetime' exists (derived from incident_date if necessary).
+    """
     if date_col not in df.columns:
         base = "incident_date" if "incident_date" in df.columns else None
         if base is None:
@@ -61,40 +64,26 @@ def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> p
     return df
 
 
-def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd.Series:
-    df = _ensure_datetime(df, date_col=date_col)
-    s = (
-        df.set_index("incident_datetime")
-          .sort_index()
-          .assign(count=1)
-          .resample("MS")["count"]
-          .sum()
-          .asfreq("MS")
-          .fillna(0)
-    )
-    s.index.name = "Month"
-    return s
+def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str = "MS") -> pd.Series:
+    """
+    Aggregate 1-per-row incidents to monthly counts based on a date-like column.
+    """
+    if date_col not in df.columns:
+        # try fallback to incident_datetime
+        if "incident_datetime" in df.columns:
+            date_col = "incident_datetime"
+        else:
+            return pd.Series(dtype=float)
+    dt = pd.to_datetime(df[date_col], errors="coerce").dropna()
+    if dt.empty:
+        return pd.Series(dtype=float)
+    y = pd.Series(1, index=dt).resample(freq).sum().astype(int)
+    return y.asfreq(freq, fill_value=0)
 
 
 # ---------------------------------------
 # 1) Incident volume forecasting (+ alias)
 # ---------------------------------------
-from typing import Tuple, Optional
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-
-# Helper: monthly counts from a date column
-def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str = "MS") -> pd.Series:
-    if date_col not in df.columns:
-        return pd.Series(dtype=float)
-    dt = pd.to_datetime(df[date_col], errors="coerce").dropna()
-    if dt.empty:
-        return pd.Series(dtype=float)
-    # 1 per row, resample to month start
-    y = pd.Series(1, index=dt).resample(freq).sum().astype(int)
-    return y.asfreq(freq, fill_value=0)
-
 def incident_volume_forecasting(
     df: pd.DataFrame,
     horizon: Optional[int] = None,
@@ -126,10 +115,9 @@ def incident_volume_forecasting(
     forecast = None
     conf_int = None
 
-    # Try SARIMAX if available and we have enough history
+    # Try SARIMAX
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
-
         seasonal_order = (0, 1, 1, season_length) if len(y) >= 2 * season_length else (0, 0, 0, 0)
         model = SARIMAX(
             y,
@@ -142,13 +130,10 @@ def incident_volume_forecasting(
         fc = res.get_forecast(steps=H)
         forecast = fc.predicted_mean.rename("forecast")
         conf = fc.conf_int(alpha=0.2)  # 80% interval
-        conf_int = pd.DataFrame(
-            {"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values},
-            index=forecast.index,
-        )
+        conf_int = pd.DataFrame({"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values}, index=forecast.index)
         use_sarimax = True
     except Exception:
-        # Seasonal naive fallback: repeat last 'season_length' months
+        # Seasonal naive fallback
         idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
         if len(y) >= season_length:
             last_season = y[-season_length:].values
@@ -156,7 +141,6 @@ def incident_volume_forecasting(
         else:
             vals = np.repeat(y.iloc[-1], H)
         forecast = pd.Series(vals, index=idx, name="forecast")
-        # Rough interval: ±sqrt(value), clipped at zero
         conf_int = pd.DataFrame(
             {
                 "lower": np.maximum(0, forecast.values - np.sqrt(np.maximum(1, forecast.values))),
@@ -165,7 +149,7 @@ def incident_volume_forecasting(
             index=idx,
         )
 
-    # Build output frame
+    # Output frame
     out = pd.DataFrame({"actual": y})
     fc_df = pd.concat([forecast, conf_int], axis=1)
     merged = out.join(fc_df, how="outer")
@@ -175,17 +159,16 @@ def incident_volume_forecasting(
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
     fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
-    if conf_int is not None:
-        fig.add_trace(
-            go.Scatter(
-                x=list(conf_int.index) + list(conf_int.index[::-1]),
-                y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
-                fill="toself",
-                opacity=0.2,
-                line=dict(width=0),
-                name="80% interval",
-            )
+    fig.add_trace(
+        go.Scatter(
+            x=list(conf_int.index) + list(conf_int.index[::-1]),
+            y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
+            fill="toself",
+            opacity=0.2,
+            line=dict(width=0),
+            name="80% interval",
         )
+    )
     fig.update_layout(
         title=f"Monthly Incident Forecast ({'SARIMAX' if use_sarimax else 'Seasonal naive'})",
         xaxis_title="Month",
@@ -195,53 +178,9 @@ def incident_volume_forecasting(
     return fig, merged
 
 
-    def _naive_forecast(series: pd.Series, steps: int):
-        last_mean = series[-12:].mean() if len(series) >= 12 else series.mean()
-        pred = np.full(steps, float(last_mean))
-        sd = series[-12:].std(ddof=1) if len(series) >= 12 else series.std(ddof=1)
-        sd = 1.96 * (sd if np.isfinite(sd) and sd > 0 else max(1.0, np.sqrt(max(last_mean, 1))))
-        return pred, pred - sd, pred + sd
-
-    use_sarimax = True
-    try:
-        from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
-        model = SARIMAX(y, order=(1,1,1), seasonal_order=(1,1,1,12),
-                        enforce_stationarity=False, enforce_invertibility=False)
-        res = model.fit(disp=False)
-        pred_res = res.get_forecast(steps=periods)
-        pred_mean = pred_res.predicted_mean.values
-        conf = pred_res.conf_int(alpha=0.05).to_numpy()
-        lower, upper = conf[:, 0], conf[:, 1]
-    except Exception:
-        use_sarimax = False
-        pred_mean, lower, upper = _naive_forecast(y, periods)
-
-    last_date = y.index[-1] if len(y) else pd.Timestamp.today().normalize()
-    future_idx = pd.period_range(start=last_date.to_period("M") + 1, periods=periods, freq="M").to_timestamp()
-
-    forecast_df = pd.DataFrame({
-        "Month": future_idx.strftime("%Y-%m"),
-        "Predicted Incidents": np.clip(np.round(pred_mean, 0).astype(int), 0, None),
-        "Lower Bound": np.clip(np.round(lower, 0).astype(int), 0, None),
-        "Upper Bound": np.clip(np.round(upper, 0).astype(int), 0, None),
-    })
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=y.index, y=y.values, name="Historical", opacity=0.6))
-    fig.add_trace(go.Scatter(x=future_idx, y=pred_mean, mode="lines+markers",
-                             name=("SARIMAX Forecast" if use_sarimax else "Naive Forecast")))
-    fig.add_trace(go.Scatter(
-        x=np.concatenate([future_idx, future_idx[::-1]]),
-        y=np.concatenate([upper, lower[::-1]]),
-        fill="toself", name="95% CI", showlegend=True, opacity=0.2, mode="lines"
-    ))
-    fig.update_layout(title="Incident Volume Forecast (Monthly)", xaxis_title="Month", yaxis_title="Incidents")
-    return fig, forecast_df
-
-
 def forecast_incident_volume(df: pd.DataFrame, periods: int = 6):
-    """Backwards-compatible alias some of your code calls."""
-    return incident_volume_forecasting(df, periods=periods)
+    """Back-compat alias used elsewhere."""
+    return incident_volume_forecasting(df, months=periods)
 
 
 # ---------------------------------------
@@ -285,8 +224,9 @@ def plot_time_with_causes(
         if by is None:
             raise ValueError("Neither 'incident_type' nor the provided 'by' column is present.")
 
-    _ = _monthly_counts(df, date_col=date_col)  # ensures datetime ok
-    work = _ensure_datetime(df, date_col=date_col)
+    # Ensure datetime for grouping
+    df = _ensure_datetime(df, date_col=date_col)
+    work = df.copy()
 
     top_vals = work[by].astype(str).value_counts().head(top_k).index.tolist()
     work["_cat"] = work[by].astype(str).where(work[by].astype(str).isin(top_vals), other="Other")
@@ -368,21 +308,37 @@ def correlation_analysis(df: pd.DataFrame, include: Optional[list] = None) -> go
 # ---------------------------------------
 # 6) Clustering analysis (KMeans + PCA)
 # ---------------------------------------
-def clustering_analysis(features_df: pd.DataFrame, k: int = 4) -> Tuple[go.Figure, pd.Series]:
-    """KMeans on engineered features. Returns a 2D projection scatter (PCA) and labels."""
+def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
+    """
+    KMeans on engineered features. Accepts either the original df or a prebuilt feature frame.
+    Returns (fig_2d_plotly, labels_series).
+    """
     from sklearn.cluster import KMeans
     from sklearn.decomposition import PCA
 
-    X = features_df.to_numpy(dtype=float)
+    # Determine whether we received raw df or feature matrix
+    use_df = df_or_features.copy()
+    numeric_cols = use_df.select_dtypes(include=[np.number]).columns.tolist()
+    looks_like_raw = ("incident_id" in use_df.columns) or ("incident_date" in use_df.columns) or (len(numeric_cols) < 2)
+
+    if looks_like_raw:
+        # Build features from raw data
+        X, feature_names, features_df = create_comprehensive_features(use_df)
+        use_df = pd.DataFrame(X, columns=feature_names, index=features_df.index)
+    else:
+        # Already numeric feature frame
+        use_df = use_df.select_dtypes(include=[np.number]).copy()
+
+    X = use_df.to_numpy(dtype=float)
     kmeans = KMeans(n_clusters=k, n_init="auto", random_state=42)
     labels = kmeans.fit_predict(X)
 
     pca = PCA(n_components=2, random_state=42)
     XY = pca.fit_transform(X)
-    df_plot = pd.DataFrame({"pc1": XY[:,0], "pc2": XY[:,1], "cluster": labels})
+    df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels})
 
-    fig = px.scatter(df_plot, x="pc1", y="pc2", color="cluster", title=f"KMeans Clusters (k={k})")
-    return fig, pd.Series(labels, index=features_df.index, name="cluster")
+    fig = px.scatter(df_plot, x="pc1", y="pc2", color=df_plot["cluster"].astype(str), title=f"KMeans Clusters (k={k})")
+    return fig, pd.Series(labels, index=use_df.index, name="cluster")
 
 
 # ---------------------------------------
@@ -420,6 +376,7 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": rf_pred,
         "probabilities": rf_proba,
+        "feature_names": feature_names,
     }
 
     try:
@@ -435,6 +392,7 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": lg_pred,
         "probabilities": lg_proba,
+        "feature_names": feature_names,
     }
 
     return results
@@ -443,7 +401,7 @@ def predictive_models_comparison(
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
-def incident_type_risk_profiling(df: pd.DataFrame) -> Tuple[go.Figure, pd.DataFrame]:
+def incident_type_risk_profiling(df: pd.DataFrame) -> Tuple[pd.DataFrame, go.Figure]:
     """Summarise risk by incident_type: volume, % High/Critical, medical attention rate."""
     work = df.copy()
     if "incident_type" not in work.columns:
@@ -469,15 +427,45 @@ def incident_type_risk_profiling(df: pd.DataFrame) -> Tuple[go.Figure, pd.DataFr
         title="Incident Type Risk Profile (volume + rates)"
     )
     fig.update_layout(xaxis_title="Incident Type", yaxis_title="Incidents")
-    return fig, g
+    return g, fig
 
 
-# Friendly alias to match your import style:
+# Friendly alias to match possible imports:
 profile_incident_type_risk = incident_type_risk_profiling
 
 
+# (Optional) Location risk profiling if your dashboard calls it
+def profile_location_risk(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[go.Figure]]:
+    """Summarise risk by location: volume, % High/Critical, medical attention rate."""
+    work = df.copy()
+    if "location" not in work.columns:
+        work["location"] = "Unknown"
+
+    if "severity_numeric" not in work.columns:
+        sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+        work["severity_numeric"] = work["severity"].map(sev_map).fillna(2).astype(int)
+
+    if "medical_attention_required_bin" not in work.columns:
+        mar = work.get("medical_attention_required", pd.Series([0]*len(work)))
+        work["medical_attention_required_bin"] = mar.astype(str).str.lower().isin(["yes","true","1"]).astype(int)
+
+    g = work.groupby("location").agg(
+        incidents=("incident_id","count"),
+        high_crit_rate=("severity_numeric", lambda s: (s >= 3).mean()),
+        medical_rate=("medical_attention_required_bin","mean"),
+    ).reset_index().sort_values("incidents", ascending=False)
+
+    fig = px.bar(
+        g.head(25), x="location", y="incidents",
+        hover_data={"high_crit_rate":":.1%", "medical_rate":":.1%"},
+        title="Location Risk Profile (Top 25)"
+    )
+    fig.update_layout(xaxis_title="Location", yaxis_title="Incidents")
+    return g, fig
+
+
 # =====================================================================
-# =============== ENHANCED ANALYTICS (your requested set) =============
+# =============== ENHANCED ANALYTICS (requested set) ==================
 # =====================================================================
 
 # 9) Enhanced Confusion Matrix with ROC/PR + metrics table
@@ -586,7 +574,10 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
         return None
 
     participant_data = df[df['participant_id'] == participant_id].copy()
-    participant_data['incident_date'] = pd.to_datetime(participant_data.get('incident_date', participant_data.get('incident_datetime')), errors='coerce')
+    participant_data['incident_date'] = pd.to_datetime(
+        participant_data.get('incident_date', participant_data.get('incident_datetime')),
+        errors='coerce'
+    )
     participant_data = participant_data.sort_values('incident_date')
 
     colors = {'Low': 'green', 'Medium': 'yellow', 'High': 'orange', 'Critical': 'red'}
@@ -735,7 +726,7 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
     return alerts
 
 
-# 15) Streamlit integration helpers (safe-imported)
+# 15) Streamlit integration helpers (import Streamlit only inside)
 def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_names: List[str], trained_models: Dict[str, Dict[str, Any]]):
     """Render enhanced features inside a Streamlit app."""
     try:
