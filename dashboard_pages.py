@@ -1072,20 +1072,31 @@ def display_ml_insights_section(filtered_df):
     st.header("🤖 ML Insights")
 
     # --------- Scope selection ---------
-    use_filtered = st.toggle("Use filtered data for ML widgets", value=True,
-                             help="Turn off to use the full dataset.")
+    use_filtered = st.toggle(
+        "Use filtered data for ML widgets", value=True,
+        help="Turn off to use the full dataset."
+    )
     df_full = getattr(st.session_state, "df", None)
     if df_full is None:
         st.error("No dataframe in session. Make sure data was loaded successfully.")
         return
     df_used = filtered_df if use_filtered else df_full
 
-    # Build features for the current scope (used by parts 1–3)
+    # Build features for the current scope
     try:
         X, feature_names, features_df = create_comprehensive_features(df_used)
     except Exception as e:
         st.error(f"Feature engineering failed: {e}")
         return
+
+    # Optional: quick trainer so you can populate st.session_state['trained_models']
+    with st.expander("🔧 Train baseline models (optional)"):
+        if st.button("Train / Refresh"):
+            try:
+                st.session_state['trained_models'] = predictive_models_comparison(df_used)
+                st.success("Models trained and stored in session.")
+            except Exception as e:
+                st.warning(f"Training failed: {e}")
 
     # ---------------------------------
     # 1) Model evaluation
@@ -1093,7 +1104,7 @@ def display_ml_insights_section(filtered_df):
     st.subheader("📊 Model Evaluation")
     models = st.session_state.get("trained_models", {})
     if not models:
-        st.info("No trained models found. Use the sidebar **Train models** button to create baselines.")
+        st.info("No trained models found. Use the expander above to train baseline models.")
     else:
         for model_name, md in models.items():
             try:
@@ -1106,7 +1117,7 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Could not render metrics for {model_name}: {e}")
 
-        # (optional) feature importance of best model
+        # Feature importance of best model (if available)
         st.markdown("#### 🔍 Feature Importance (if available)")
         try:
             best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
@@ -1136,7 +1147,7 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
     if not models:
-        st.info("Train a model in the sidebar to enable risk scoring.")
+        st.info("Train a model to enable risk scoring.")
     else:
         risk_scorer = create_predictive_risk_scoring(df_used, models, feature_names)
         if risk_scorer is None:
@@ -1150,13 +1161,19 @@ def display_ml_insights_section(filtered_df):
                               ["kitchen", "bathroom", "living room", "activity room"]
                 location = st.selectbox("Location", options=loc_options[:25])
             with c3:
-                p_hist = st.slider("Participant prior incidents", 0, int(
-                    df_used.groupby("participant_id")["incident_id"].count().max() if "participant_id" in df_used.columns else 20
-                ), 3)
+                p_hist = st.slider(
+                    "Participant prior incidents", 0,
+                    int(df_used.groupby("participant_id")["incident_id"].count().max()
+                        if "participant_id" in df_used.columns else 20),
+                    3
+                )
             with c4:
-                c_hist = st.slider("Carer prior incidents", 0, int(
-                    df_used.groupby("carer_id")["incident_id"].count().max() if "carer_id" in df_used.columns else 20
-                ), 5)
+                c_hist = st.slider(
+                    "Carer prior incidents", 0,
+                    int(df_used.groupby("carer_id")["incident_id"].count().max()
+                        if "carer_id" in df_used.columns else 20),
+                    5
+                )
 
             try:
                 loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
@@ -1166,12 +1183,12 @@ def display_ml_insights_section(filtered_df):
                 loc_risk = 2.0
 
             scenario = {
-                "hour": hour,
+                "hour": int(hour),
                 "location": location,
                 "participant_history": int(p_hist),
                 "carer_history": int(c_hist),
                 "day_type": "weekend" if st.checkbox("Weekend?", value=False) else "weekday",
-                "location_risk": float(loc_risk) if np.isfinite(loc_risk) else 2.0,
+                "location_risk": float(loc_risk),
             }
             res = risk_scorer(scenario)
             if res["risk_level"] == "HIGH":
@@ -1206,9 +1223,6 @@ def display_ml_insights_section(filtered_df):
     else:
         st.info("Not enough rows to compute similarity.")
 
-    # =====================================================================
-    #                     4–6 ENABLED BELOW
-    # =====================================================================
     st.divider()
 
     # ---------------------------------
@@ -1216,53 +1230,44 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     st.subheader("📈 Forecasting & Seasonality")
     horizon = int(st.session_state.get("ml_forecast_months", 6))
-try:
-    fig, forecast_df = _call_incident_forecast(df_used, horizon)
-    st.plotly_chart(fig, use_container_width=True)
-except Exception as e:
-    st.warning(f"Forecasting failed: {e}")
+    try:
+        fig, forecast_df = _call_incident_forecast(df_used, horizon)
+        st.plotly_chart(fig, use_container_width=True)
+        with st.expander("Show forecast table"):
+            st.dataframe(forecast_df.reset_index().rename(columns={"index": "date"}), use_container_width=True)
+    except Exception as e:
+        st.warning(f"Forecasting failed: {e}")
 
+    try:
+        season_fig = seasonal_temporal_patterns(df_used, date_col="incident_datetime")
+        st.plotly_chart(season_fig, use_container_width=True)
+    except Exception:
+        # silently ignore if date col missing
+        pass
+
+    st.divider()
 
     # ---------------------------------
     # 5) Clustering & Risk Profiles
     # ---------------------------------
     st.subheader("🧱 Clustering & Risk Profiles")
     try:
-        cl_res = clustering_analysis(df_used)
-        # Accept common shapes
-        if isinstance(cl_res, tuple):
-            # e.g., (clustered_df, fig2d, silhouette) or (fig2d, meta)
-            clustered_df = None
-            fig_candidate = None
-            sil = None
-            for v in cl_res:
-                if isinstance(v, pd.DataFrame):
-                    clustered_df = v
-                elif hasattr(v, "to_json") and hasattr(v, "data"):
-                    fig_candidate = v
-                elif isinstance(v, (float, int)):
-                    sil = v
-            if fig_candidate is not None:
-                st.plotly_chart(fig_candidate, use_container_width=True)
-            if clustered_df is not None:
-                st.dataframe(clustered_df.head(30), use_container_width=True)
-            if sil is not None:
-                st.caption(f"Silhouette score: {sil:.3f}")
-        elif hasattr(cl_res, "to_json") and hasattr(cl_res, "data"):
-            st.plotly_chart(cl_res, use_container_width=True)
-        else:
-            st.write("Clustering output:", cl_res)
+        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
+        fig2d, labels = clustering_analysis(features_df, k=k)
+        st.plotly_chart(fig2d, use_container_width=True)
+        # Optional: attach labels back to the view
+        st.caption("Cluster labels computed on engineered features.")
     except Exception as e:
         st.warning(f"Clustering failed: {e}")
 
-    # Risk profile by incident type (if available)
+    # Risk profile by incident type
     try:
-        type_df, type_fig = profile_incident_type_risk(df_used)
+        type_fig, type_df = profile_incident_type_risk(df_used)
         st.markdown("#### ⚠️ Incident Type Risk Profile")
-        if type_df is not None:
-            st.dataframe(type_df, use_container_width=True)
         if hasattr(type_fig, "to_json") and hasattr(type_fig, "data"):
             st.plotly_chart(type_fig, use_container_width=True)
+        if type_df is not None:
+            st.dataframe(type_df, use_container_width=True)
     except Exception as e:
         st.caption(f"Incident type risk unavailable: {e}")
 
@@ -1273,7 +1278,7 @@ except Exception as e:
     # ---------------------------------
     st.subheader("📊 Correlations")
     try:
-        corr_res = correlation_analysis(df_used)
+        corr_res = correlation_analysis(features_df)
         if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):  # Plotly fig
             st.plotly_chart(corr_res, use_container_width=True)
         elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
@@ -1285,4 +1290,3 @@ except Exception as e:
             st.write("Correlation output:", corr_res)
     except Exception as e:
         st.warning(f"Correlation analysis failed: {e}")
-
