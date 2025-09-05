@@ -21,6 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
+
 # ---------------------------------------
 # Re-export feature preparation
 # ---------------------------------------
@@ -52,9 +53,7 @@ def create_comprehensive_features(df: pd.DataFrame):
 # Internal helpers (de-duplicated)
 # ---------------------------------------
 def ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed.
-    """
+    """Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed."""
     d = df.copy()
     if "incident_datetime" in d.columns:
         d["incident_datetime"] = pd.to_datetime(d["incident_datetime"], errors="coerce")
@@ -336,16 +335,18 @@ def plot_carer_performance_scatter(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------
 # 5) Correlation heatmap (now resizable)
 # ---------------------------------------
-def correlation_analysis(df: pd.DataFrame, include: Optional[List[str]] = None, height: int = 800) -> go.Figure:
+def correlation_analysis(df: pd.DataFrame, include: Optional[list] = None, height: int = 900) -> go.Figure:
     """Heatmap of correlations for numeric columns (optionally restrict to a whitelist)."""
     num = df.select_dtypes(include=[np.number]).copy()
     if include:
-        cols = [c for c in include if c in num.columns]
-        if cols:
-            num = num[cols]
+        existing = [c for c in include if c in num.columns]
+        if existing:
+            num = num[existing]
     corr = num.corr(numeric_only=True).fillna(0)
 
-    fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.columns, coloraxis="coloraxis"))
+    fig = go.Figure(data=go.Heatmap(
+        z=corr.values, x=corr.columns, y=corr.columns, coloraxis="coloraxis"
+    ))
     fig.update_layout(
         title="Correlation Matrix",
         coloraxis=dict(colorscale="RdBu", cmin=-1, cmax=1),
@@ -354,51 +355,53 @@ def correlation_analysis(df: pd.DataFrame, include: Optional[List[str]] = None, 
     return fig
 
 
+
 # ---------------------------------------
 # 6) Clustering analysis (KMeans + PCA) — 2D
 # ---------------------------------------
 def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
     """
-    KMeans on engineered features. Accepts either raw df or a prebuilt feature frame.
-    Returns (fig_2d_plotly, labels_series).
-
-    Note: color map used for clusters is stored on fig.layout.meta["cluster_color_map"]
-    so 3D plots can reuse the same palette without changing calling code.
+    KMeans on engineered features. Accepts either the original df or a prebuilt feature frame.
+    Returns (fig_2d_plotly, labels_series) and stores the palette in fig.layout.meta['cluster_color_map'].
     """
-    # Determine whether we received raw df or feature matrix
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+
     use_df = df_or_features.copy()
     numeric_cols = use_df.select_dtypes(include=[np.number]).columns.tolist()
     looks_like_raw = ("incident_id" in use_df.columns) or ("incident_date" in use_df.columns) or (len(numeric_cols) < 2)
 
     if looks_like_raw:
-        X_raw, feature_names, feats = create_comprehensive_features(use_df)
-        X = pd.DataFrame(X_raw, columns=feature_names, index=feats.index)
+        X, feature_names, features_df = create_comprehensive_features(use_df)
+        use_df = pd.DataFrame(X, columns=feature_names, index=features_df.index)
     else:
-        X = use_df.select_dtypes(include=[np.number]).copy()
+        use_df = use_df.select_dtypes(include=[np.number]).copy()
 
-    # Standardize before KMeans/PCA for stability
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X.values)
-
+    X = use_df.to_numpy(dtype=float)
     km = KMeans(n_clusters=int(k), n_init=10, random_state=42)
-    labels = km.fit_predict(Xs)
+    labels = km.fit_predict(X)
 
     pca = PCA(n_components=2, random_state=42)
-    XY = pca.fit_transform(Xs)
-    df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels}, index=X.index)
+    XY = pca.fit_transform(X)
+    df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels})
     df_plot["cluster_str"] = df_plot["cluster"].astype(str)
 
-    color_map = _make_color_map(labels)
+    # fixed palette so 3D can reuse
+    base_palette = px.colors.qualitative.Safe + px.colors.qualitative.Set3 + px.colors.qualitative.Pastel
+    uniq = sorted(df_plot["cluster_str"].unique(), key=lambda s: int(s))
+    discrete_map = {cid: base_palette[i % len(base_palette)] for i, cid in enumerate(uniq)}
 
     fig = px.scatter(
         df_plot, x="pc1", y="pc2",
         color="cluster_str",
-        color_discrete_map=color_map,
-        title=f"KMeans Clusters (k={k}) — 2D PCA"
+        color_discrete_map=discrete_map,
+        title=f"KMeans Clusters (k={k})"
     )
-    # Attach color map for downstream reuse (e.g., by 3D)
-    fig.update_layout(meta={"cluster_color_map": color_map})
-    return fig, pd.Series(labels, index=X.index, name="cluster")
+    # stash the palette for 3D
+    fig.update_layout(meta={"cluster_color_map": discrete_map})
+
+    return fig, pd.Series(labels, index=use_df.index, name="cluster")
+
 
 
 # ---------------------------------------
@@ -407,69 +410,43 @@ def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
 def plot_3d_clusters(
     features_df: pd.DataFrame,
     k: int = 4,
-    sample: Optional[int] = None,
-    color_map: Optional[Dict[str, str]] = None,
-    random_state: int = 42
+    sample: int = 2000,
+    color_map: Optional[Dict[str, str]] = None
 ):
     """
-    PCA->3D + KMeans on standardized numeric features.
-
-    - KMeans is fit on the FULL standardized feature space (not the sampled subset),
-      so labels are consistent with the 2D result (same random_state, same features).
-    - We then plot either all points or a sampled subset for performance, and reuse
-      the SAME label mapping for colors.
-
-    Returns (fig3d, labels_for_plotted_points, df3d_plotted).
-
-    If you already drew 2D clusters, you can do:
-        color_map = getattr(fig2d.layout, "meta", {}).get("cluster_color_map")
-        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=2000, color_map=color_map)
+    PCA->3D + KMeans clustering. Returns (fig, labels, df3d).
+    If 'color_map' is provided, reuse the 2D palette (keys should be str cluster labels).
     """
-    # Clean numeric features from the FULL frame (no sampling yet)
-    X_full = (
-        features_df.select_dtypes(include=[np.number])
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    from sklearn.cluster import KMeans
+
+    X = (
+        features_df
+        .select_dtypes(include=[np.number])
         .replace([np.inf, -np.inf], np.nan)
         .fillna(0.0)
     )
-    if X_full.empty:
-        raise ValueError("No numeric features available for clustering.")
+    if len(X) > sample:
+        X = X.sample(sample, random_state=42)
 
-    scaler = StandardScaler()
-    Xs_full = scaler.fit_transform(X_full.values)
+    Xs = StandardScaler().fit_transform(X.values)
+    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
+    # fit in feature space (Xs), not on Z
+    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Xs)
 
-    km = KMeans(n_clusters=int(k), n_init=10, random_state=random_state)
-    labels_full = km.fit_predict(Xs_full).astype(int)
+    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
+    df3d["cluster_str"] = df3d["cluster"].astype(str)
 
-    # Decide what to plot: all points or a sampled subset (for speed)
-    if sample and len(X_full) > sample:
-        X_plot = X_full.sample(sample, random_state=random_state)
-    else:
-        X_plot = X_full
-
-    # Indices to pull labels
-    idx_plot = X_plot.index
-    labels_plot = pd.Series(labels_full, index=X_full.index).loc[idx_plot].values
-
-    # 3D coords via PCA on the PLOTTED subset (for speed)
-    Xs_plot = scaler.transform(X_plot.values)  # use same scaler as full
-    coords = PCA(n_components=3, random_state=random_state).fit_transform(Xs_plot)
-
-    df3d = pd.DataFrame(
-        {"PC1": coords[:, 0], "PC2": coords[:, 1], "PC3": coords[:, 2], "cluster": labels_plot.astype(str)},
-        index=idx_plot
-    )
-
-    # Use provided color_map (from 2D) or build a matching one from FULL labels
-    cmap = color_map or _make_color_map(labels_full)
-    fig3d = px.scatter_3d(
-        df3d, x="PC1", y="PC2", z="PC3",
-        color="cluster",
-        color_discrete_map=cmap,
+    fig = px.scatter_3d(
+        df3d,
+        x="PC1", y="PC2", z="PC3",
+        color="cluster_str",
         opacity=0.8,
-        title=f"3D Clusters (k={k}) — PCA"
+        color_discrete_map=(color_map or {})
     )
-    fig3d.update_layout(legend_title="Cluster", height=600)
-    return fig3d, labels_plot, df3d
+    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
+    return fig, labels, df3d
 
 
 # ---------------------------------------
