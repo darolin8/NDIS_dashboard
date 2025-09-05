@@ -63,6 +63,29 @@ def _call_incident_forecast(df, horizon):
         return _ivf(df, int(horizon))
 
 
+# ---- Datetime safety helper (needed for seasonality) ----
+def _ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed."""
+    d = df.copy()
+    if "incident_datetime" in d.columns:
+        d["incident_datetime"] = pd.to_datetime(d["incident_datetime"], errors="coerce")
+        return d
+
+    # Start from incident_date if present
+    if "incident_date" in d.columns:
+        d["incident_datetime"] = pd.to_datetime(d["incident_date"], errors="coerce")
+    else:
+        d["incident_datetime"] = pd.NaT
+
+    # If a time column exists, combine where both are valid
+    if "incident_time" in d.columns:
+        t = pd.to_datetime(d["incident_time"], errors="coerce")
+        mask = d["incident_datetime"].notna() & t.notna()
+        d.loc[mask, "incident_datetime"] = pd.to_datetime(
+            d.loc[mask, "incident_datetime"].dt.date.astype(str) + " " + t.dt.time.astype(str),
+            errors="coerce"
+        )
+    return d
 
 
 # ----------------------------
@@ -1228,24 +1251,39 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     # 4) Forecasting & Seasonality
     # ---------------------------------
+  
     st.subheader("📈 Forecasting & Seasonality")
+
+    # Ensure we have a datetime column for the seasonality chart
+    df_used = _ensure_incident_datetime(df_used)
+
+    # Forecast
     horizon = int(st.session_state.get("ml_forecast_months", 6))
     try:
         fig, forecast_df = _call_incident_forecast(df_used, horizon)
+        st.caption(f"Forecast horizon: {horizon} months")
         st.plotly_chart(fig, use_container_width=True)
         with st.expander("Show forecast table"):
-            st.dataframe(forecast_df.reset_index().rename(columns={"index": "date"}), use_container_width=True)
+            st.dataframe(
+                forecast_df.reset_index().rename(columns={"index": "date"}),
+                use_container_width=True
+            )
     except Exception as e:
         st.warning(f"Forecasting failed: {e}")
 
+    # Seasonality heatmap
     try:
-        season_fig = seasonal_temporal_patterns(df_used, date_col="incident_datetime")
-        st.plotly_chart(season_fig, use_container_width=True)
-    except Exception:
-        # silently ignore if date col missing
-        pass
+        valid_dt = int(df_used["incident_datetime"].notna().sum())
+        if valid_dt >= 3:
+            season_fig = seasonal_temporal_patterns(df_used, date_col="incident_datetime")
+            st.plotly_chart(season_fig, use_container_width=True)
+        else:
+            st.info("Not enough valid datetimes to render seasonal heatmap.")
+    except Exception as e:
+        st.warning(f"Seasonality plot failed: {e}")
 
     st.divider()
+
 
     # ---------------------------------
     # 5) Clustering & Risk Profiles
