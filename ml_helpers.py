@@ -79,10 +79,9 @@ def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd
 # ---------------------------------------
 # 1) Incident volume forecasting (+ alias)
 # ---------------------------------------
-def incident_volume_forecasting(
-    df: pd.DataFrame,
-    date_col: str = "incident_datetime",
-    periods: int = 6,
+def incident_volume_forecasting(df, horizon=None, horizon_months=None, months=None, n_periods=None, ...):
+    if horizon is None:
+        horizon = horizon_months or months or n_periods or 6
 ) -> Tuple[go.Figure, pd.DataFrame]:
     """Forecast monthly incident volumes via SARIMAX (if available) with naive fallback."""
     y = _monthly_counts(df, date_col=date_col)
