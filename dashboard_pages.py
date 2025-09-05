@@ -40,28 +40,28 @@ from ml_helpers import (
 
 from utils.factor_labels import shorten_factor
 
-# --- Compatibility wrapper for different forecast signatures ---
+# Compatibility wrapper so we don't care which signature ml_helpers currently exposes
 def _call_incident_forecast(df, horizon):
-    """
-    Tries several common signatures for incident_volume_forecasting so we
-    don't care whether your function expects horizon, months, n_periods, etc.
-    """
-    attempts = [
-        lambda: incident_volume_forecasting(df, horizon_months=horizon),
-        lambda: incident_volume_forecasting(df, horizon=horizon),
-        lambda: incident_volume_forecasting(df, months=horizon),
-        lambda: incident_volume_forecasting(df, n_periods=horizon),
-        lambda: incident_volume_forecasting(df, horizon),  # positional
-    ]
-    last_err = None
-    for fn in attempts:
-        try:
-            return fn()
-        except TypeError as e:
-            last_err = e
-            continue
-    # If all failed, re-raise the last TypeError so Streamlit shows it
-    raise last_err if last_err else RuntimeError("No valid forecast signature found")
+    try:
+        # preferred alias that accepts `periods`
+        from ml_helpers import forecast_incident_volume
+        return forecast_incident_volume(df, periods=int(horizon))
+    except Exception:
+        # fall back to the direct function, try several kwargs
+        from ml_helpers import incident_volume_forecasting as _ivf
+        for kwargs in (
+            {"horizon_months": int(horizon)},
+            {"months": int(horizon)},
+            {"n_periods": int(horizon)},
+            {"horizon": int(horizon)},
+        ):
+            try:
+                return _ivf(df, **kwargs)
+            except TypeError:
+                continue
+        # last resort: positional
+        return _ivf(df, int(horizon))
+
 
 
 
@@ -1217,20 +1217,11 @@ def display_ml_insights_section(filtered_df):
     st.subheader("📈 Forecasting & Seasonality")
     horizon = int(st.session_state.get("ml_forecast_months", 6))
 try:
-    fc_res = _call_incident_forecast(df_used, horizon)
-    # Flexible handling: function may return a fig or (actual, forecast, fig)
-    if hasattr(fc_res, "to_json") and hasattr(fc_res, "data"):  # Plotly figure
-        st.plotly_chart(fc_res, use_container_width=True)
-    elif isinstance(fc_res, tuple):
-        *rest, maybe_fig = fc_res
-        if hasattr(maybe_fig, "to_json") and hasattr(maybe_fig, "data"):
-            st.plotly_chart(maybe_fig, use_container_width=True)
-        else:
-            st.write("Forecast output:", fc_res)
-    else:
-        st.write("Forecast output:", fc_res)
+    fig, forecast_df = _call_incident_forecast(df_used, horizon)
+    st.plotly_chart(fig, use_container_width=True)
 except Exception as e:
     st.warning(f"Forecasting failed: {e}")
+
 
     # ---------------------------------
     # 5) Clustering & Risk Profiles
