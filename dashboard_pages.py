@@ -87,34 +87,35 @@ def _ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
         )
     return d
 
-# ---- 3D clustering helper (PCA + KMeans) ----
-def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int = 2000):
-    """
-    Reduce engineered features to 3D with PCA, cluster with KMeans,
-    and return a Plotly 3D scatter + labels + the plotted dataframe.
-    """
-    try:
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.decomposition import PCA
-        from sklearn.cluster import KMeans
-    except Exception as e:
-        raise ImportError(
-            "scikit-learn is required for 3D clustering. "
-            "Add 'scikit-learn' to requirements.txt and reinstall."
-        ) from e
+def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int = 2000, color_map: dict | None = None):
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    from sklearn.cluster import KMeans
 
-    # numeric-only, clean, optional sampling
     X = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     if len(X) > sample:
         X = X.sample(sample, random_state=42)
 
     Xs = StandardScaler().fit_transform(X.values)
     Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
-
     labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
 
     df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
-    fig = px.scatter_3d(df3d, x="PC1", y="PC2", z="PC3", color="cluster", opacity=0.7)
+    df3d["cluster_str"] = df3d["cluster"].astype(str)
+
+    # If we got a color map from the 2D plot, use it
+    cmap = None
+    if color_map:
+        # keys must be strings for discrete mapping
+        cmap = {str(k): v for k, v in color_map.items()}
+
+    fig = px.scatter_3d(
+        df3d,
+        x="PC1", y="PC2", z="PC3",
+        color="cluster_str",
+        opacity=0.75,
+        color_discrete_map=cmap  # None = default colors
+    )
     fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
     return fig, labels, df3d
 
@@ -1322,11 +1323,13 @@ def display_ml_insights_section(filtered_df):
     st.subheader("🧱 Clustering & Risk Profiles")
 
     # 2D clustering (existing API)
+    color_map_2d = {}
     try:
         k2d = st.slider("Clusters (k) — 2D", 2, 8, 4, key="ml_k_clusters_2d")
         fig2d, labels2d = clustering_analysis(features_df, k=int(k2d))
         st.plotly_chart(fig2d, use_container_width=True)
         st.caption("2D projection provided by `clustering_analysis` on engineered features.")
+        color_map_2d = _extract_color_map_from_2d(fig2d)
     except Exception as e:
         st.warning(f"Clustering (2D) failed: {e}")
 
@@ -1346,50 +1349,39 @@ def display_ml_insights_section(filtered_df):
                 key="ml_k_clusters_3d_sample",
             )
         try:
-            fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=int(k3d), sample=int(sample_3d))
+            fig3d, labels3d, df3d = plot_3d_clusters(
+                features_df,
+                k=int(k3d),
+                sample=int(sample_3d),
+                color_map=color_map_2d,  # 👈 match 2D colors
+            )
             st.plotly_chart(fig3d, use_container_width=True)
             st.caption("3D PCA projection with KMeans labels. Hover for point index.")
         except Exception as e:
             st.warning(f"Clustering (3D) failed: {e}")
 
-    # Optional: incident-type risk profile
-    try:
-        out = profile_incident_type_risk(df_used)
-        st.markdown("#### ⚠️ Incident Type Risk Profile")
-        type_fig, type_df = None, None
-        if isinstance(out, tuple):
-            for v in out:
-                if hasattr(v, "to_json") and hasattr(v, "data"):
-                    type_fig = v
-                elif isinstance(v, pd.DataFrame):
-                    type_df = v
-        elif hasattr(out, "to_json") and hasattr(out, "data"):
-            type_fig = out
-        elif isinstance(out, pd.DataFrame):
-            type_df = out
-        if type_fig is not None:
-            st.plotly_chart(type_fig, use_container_width=True)
-        if type_df is not None:
-            st.dataframe(type_df, use_container_width=True)
-    except Exception as e:
-        st.caption(f"Incident type risk unavailable: {e}")
-
-    st.divider()
 
     # ---------------------------------
     # 6) Correlations
     # ---------------------------------
+
     st.subheader("📊 Correlations")
     try:
         corr_res = correlation_analysis(features_df)
         if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):
+            # If your helper returns a Plotly fig, just enlarge it
+            corr_res.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
             st.plotly_chart(corr_res, use_container_width=True)
         elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
             mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
             fig = px.imshow(
-                mat, color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
-                title="Feature Correlation Matrix"
+                mat,
+                color_continuous_scale="RdBu_r",
+                zmin=-1, zmax=1,
+                title="Feature Correlation Matrix",
             )
+            fig.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
+            fig.update_xaxes(tickangle=45)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.write("Correlation output:", corr_res)
