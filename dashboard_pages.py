@@ -1264,31 +1264,31 @@ def display_ml_insights_section(filtered_df):
 # ---------------------------------
 # 5) Clustering & Risk Profiles
 # ---------------------------------
-st.subheader("🧩 Clustering & Risk Profiles")
+    st.subheader("🧱 Clustering & Risk Profiles")
+    try:
+        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
+        try:
+            cl_res = clustering_analysis(features_df, k=k)
+        except Exception:
+            cl_res = clustering_analysis(df_used, k=k)
 
-with st.expander("Clustering controls", expanded=True):
-    k = st.slider("k (number of clusters)", min_value=2, max_value=12, value=4, step=1)
-    sample3d = st.slider("Max points in 3D plot", min_value=500, max_value=10000, value=2000, step=500)
+        fig_candidate = None
+        if isinstance(cl_res, tuple):
+            for v in cl_res:
+                if hasattr(v, "to_json") and hasattr(v, "data"):
+                    fig_candidate = v
+        elif hasattr(cl_res, "to_json") and hasattr(cl_res, "data"):
+            fig_candidate = cl_res
 
-# 2D clustering (emit a palette in fig.layout.meta)
-try:
-    fig2d, labels2d = clustering_analysis(features_df, k=k)
-    st.plotly_chart(fig2d, use_container_width=True)
-    color_map = {}
-    if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
-        color_map = fig2d.layout.meta["cluster_color_map"]
-except Exception as e:
-    color_map = {}
-    st.warning(f"2D clustering failed: {e}")
+        if fig_candidate is not None:
+            st.plotly_chart(fig_candidate, use_container_width=True)
+        else:
+            st.write("Clustering output:", cl_res)
 
-# 3D clustering with the same colors
-try:
-    fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
-    st.plotly_chart(fig3d, use_container_width=True)
-except Exception as e:
-    st.warning(f"3D clustering failed: {e}")
+        st.caption("Cluster labels computed on engineered features (if available).")
+    except Exception as e:
+        st.warning(f"Clustering failed: {e}")
 
-st.divider()
 
 # ---------------------------------
 # 6) Correlations
