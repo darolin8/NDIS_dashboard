@@ -1327,27 +1327,32 @@ def display_ml_insights_section(filtered_df):
     # 6) Correlations
     # ---------------------------------
 
-    st.subheader("🧱 Clustering & Risk Profiles")
+   st.subheader("🧱 Clustering & Risk Profiles")
+
+# --- 2D (existing) ---
+try:
+    k2d = st.slider("Clusters (k) — 2D", 2, 8, 4, key="ml_k_clusters_insights")
+    fig2d, labels2d = clustering_analysis(features_df, k=k2d)
+    st.plotly_chart(fig2d, use_container_width=True)
+    st.caption("2D projection provided by `clustering_analysis` on engineered features.")
+except Exception as e:
+    st.warning(f"Clustering (2D) failed: {e}")
+
+# --- 3D (new) ---
+with st.expander("Show 3D clustering (PCA)", expanded=True):
+    col_3d_a, col_3d_b = st.columns([2, 1])
+    with col_3d_a:
+        k3d = st.slider("Clusters (k) — 3D", 2, 10, 4, key="ml_k_clusters_3d")
+    with col_3d_b:
+        max_points_default = min(2000, len(features_df))
+        sample_3d = st.number_input(
+            "Max points to plot", min_value=200, max_value=max(200, len(features_df)),
+            value=max_points_default, step=100, key="ml_k_clusters_3d_sample"
+        )
+
     try:
-        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
-        try:
-            cl_res = clustering_analysis(features_df, k=k)
-        except Exception:
-            cl_res = clustering_analysis(df_used, k=k)
-
-        fig_candidate = None
-        if isinstance(cl_res, tuple):
-            for v in cl_res:
-                if hasattr(v, "to_json") and hasattr(v, "data"):
-                    fig_candidate = v
-        elif hasattr(cl_res, "to_json") and hasattr(cl_res, "data"):
-            fig_candidate = cl_res
-
-        if fig_candidate is not None:
-            st.plotly_chart(fig_candidate, use_container_width=True)
-        else:
-            st.write("Clustering output:", cl_res)
-
-        st.caption("Cluster labels computed on engineered features (if available).")
+        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=int(k3d), sample=int(sample_3d))
+        st.plotly_chart(fig3d, use_container_width=True)
+        st.caption("3D PCA projection with KMeans labels. Hover for point index.")
     except Exception as e:
-        st.warning(f"Clustering failed: {e}")
+        st.warning(f"Clustering (3D) failed: {e}")
