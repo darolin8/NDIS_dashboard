@@ -66,65 +66,6 @@ def _call_incident_forecast(df, horizon):
         # last resort: positional
         return _ivf(df, int(horizon))
 
-
-# ---- Datetime safety helper (needed for seasonality) ----
-def _ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
-    """Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed."""
-    d = df.copy()
-    if "incident_datetime" in d.columns:
-        d["incident_datetime"] = pd.to_datetime(d["incident_datetime"], errors="coerce")
-        return d
-
-    # Start from incident_date if present
-    if "incident_date" in d.columns:
-        d["incident_datetime"] = pd.to_datetime(d["incident_date"], errors="coerce")
-    else:
-        d["incident_datetime"] = pd.NaT
-
-    # If a time column exists, combine where both are valid
-    if "incident_time" in d.columns:
-        t = pd.to_datetime(d["incident_time"], errors="coerce")
-        mask = d["incident_datetime"].notna() & t.notna()
-        d.loc[mask, "incident_datetime"] = pd.to_datetime(
-            d.loc[mask, "incident_datetime"].dt.date.astype(str) + " " + t.dt.time.astype(str),
-            errors="coerce"
-        )
-    return d
-
-def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int = 2000, color_map: dict | None = None):
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.decomposition import PCA
-    from sklearn.cluster import KMeans
-
-    X = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    if len(X) > sample:
-        X = X.sample(sample, random_state=42)
-
-    Xs = StandardScaler().fit_transform(X.values)
-    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
-    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
-
-    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
-    df3d["cluster_str"] = df3d["cluster"].astype(str)
-
-    # If we got a color map from the 2D plot, use it
-    cmap = None
-    if color_map:
-        # keys must be strings for discrete mapping
-        cmap = {str(k): v for k, v in color_map.items()}
-
-    fig = px.scatter_3d(
-        df3d,
-        x="PC1", y="PC2", z="PC3",
-        color="cluster_str",
-        opacity=0.75,
-        color_discrete_map=cmap  # None = default colors
-    )
-    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
-    return fig, labels, df3d
-
-
-
 # ----------------------------
 # Utility
 # ----------------------------
