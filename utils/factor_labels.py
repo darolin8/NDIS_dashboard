@@ -1,4 +1,18 @@
+
+# utils/factor_labels.py
 import re
+
+def shorten_factor(text: str) -> str:
+    """
+    Collapse long factor labels to 1–2 words for compact plots.
+    Example rules: keep first 1–2 words, strip punctuation, title-case.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return "Unknown"
+    # remove non-word chars, split, keep up to 2 tokens
+    tokens = re.sub(r"[^\w\s-]", "", text).split()
+    return " ".join(tokens[:2]).title()
+
 
 PHRASE_MAP = {
     # keys must be lowercase
