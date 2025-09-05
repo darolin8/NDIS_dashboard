@@ -40,7 +40,6 @@ from ml_helpers import (
     plot_3d_clusters,
 )
 
-)
 
 from utils.factor_labels import shorten_factor
 
@@ -1262,33 +1261,29 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-    # ---------------------------------
+# ---------------------------------
 # 5) Clustering & Risk Profiles
 # ---------------------------------
 st.subheader("🧩 Clustering & Risk Profiles")
 
 with st.expander("Clustering controls", expanded=True):
     k = st.slider("k (number of clusters)", min_value=2, max_value=12, value=4, step=1)
-    sample3d = st.slider("Max points in 3D plot", min_value=500, max_value=10000, value=2000, step=500,
-                         help="KMeans is fit on ALL features; this only limits how many points are drawn in 3D for speed.")
+    sample3d = st.slider("Max points in 3D plot", min_value=500, max_value=10000, value=2000, step=500)
 
-# 2D clustering (returns a color map we’ll reuse)
+# 2D clustering (emit a palette in fig.layout.meta)
 try:
     fig2d, labels2d = clustering_analysis(features_df, k=k)
     st.plotly_chart(fig2d, use_container_width=True)
-    color_map = getattr(fig2d.layout, "meta", {}).get("cluster_color_map")
+    color_map = {}
+    if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
+        color_map = fig2d.layout.meta["cluster_color_map"]
 except Exception as e:
-    color_map = None
+    color_map = {}
     st.warning(f"2D clustering failed: {e}")
 
-# 3D clustering, reusing 2D palette if available
+# 3D clustering with the same colors
 try:
-    fig3d, labels3d, df3d = plot_3d_clusters(
-        features_df,
-        k=k,
-        sample=sample3d,
-        color_map=color_map  # <- reuse colors from 2D
-    )
+    fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
     st.plotly_chart(fig3d, use_container_width=True)
 except Exception as e:
     st.warning(f"3D clustering failed: {e}")
@@ -1304,4 +1299,5 @@ try:
     st.plotly_chart(corr_fig, use_container_width=True)
 except Exception as e:
     st.warning(f"Correlation analysis failed: {e}")
+
 
