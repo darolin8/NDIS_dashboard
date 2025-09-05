@@ -1293,11 +1293,21 @@ def display_ml_insights_section(filtered_df):
 # ---------------------------------
 # 6) Correlations
 # ---------------------------------
-st.subheader("🔗 Correlations")
-try:
-    corr_fig = correlation_analysis(features_df, height=900)  # bigger heatmap
-    st.plotly_chart(corr_fig, use_container_width=True)
-except Exception as e:
-    st.warning(f"Correlation analysis failed: {e}")
+ st.subheader("📊 Correlations")
+    try:
+        corr_res = correlation_analysis(features_df)
+        if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):
+            st.plotly_chart(corr_res, use_container_width=True)
+        elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
+            mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
+            fig = px.imshow(
+                mat, color_continuous_scale="RdBu_r", zmin=-5, zmax=5,
+                title="Feature Correlation Matrix"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.write("Correlation output:", corr_res)
+    except Exception as e:
+        st.warning(f"Correlation analysis failed: {e}")
 
 
