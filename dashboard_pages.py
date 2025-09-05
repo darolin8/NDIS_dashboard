@@ -36,6 +36,10 @@ from ml_helpers import (
     enhanced_confusion_matrix_analysis,
     create_predictive_risk_scoring,
     incident_similarity_analysis,
+    ensure_incident_datetime,
+    plot_3d_clusters,
+)
+
 )
 
 from utils.factor_labels import shorten_factor
