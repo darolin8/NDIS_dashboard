@@ -3,8 +3,8 @@
 # - Re-exports feature builders from utils.ndis_enhanced_prep
 # - Baseline visuals + models
 # - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
-from __future__ import annotations
 
+from __future__ import annotations
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -12,13 +12,14 @@ from typing import Tuple, Dict, Any, Optional, List, Callable
 
 import numpy as np
 import pandas as pd
+
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-from typing import Optional, Dict
 
 # ---------------------------------------
 # Re-export feature preparation
@@ -48,16 +49,11 @@ def create_comprehensive_features(df: pd.DataFrame):
 
 
 # ---------------------------------------
-# Internal helpers
+# Internal helpers (de-duplicated)
 # ---------------------------------------
-
-# ml_helpers.py (paste below your other helpers)
-
 def ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
     """
     Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed.
-    - If 'incident_datetime' exists, coerce to datetime and return.
-    - Else build it from 'incident_date' (and 'incident_time' if present).
     """
     d = df.copy()
     if "incident_datetime" in d.columns:
@@ -78,29 +74,25 @@ def ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
         )
     return d
 
+
 def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd.DataFrame:
     """
-    Ensure a usable datetime column 'incident_datetime' exists (derived from incident_date if necessary).
+    Back-compat wrapper used by a few functions. Uses ensure_incident_datetime().
     """
-    if date_col not in df.columns:
-        base = "incident_date" if "incident_date" in df.columns else None
-        if base is None:
-            raise ValueError("No datetime column found. Expected 'incident_datetime' or 'incident_date'.")
-        df = df.copy()
-        df[base] = pd.to_datetime(df[base], errors="coerce")
-        df["incident_datetime"] = df[base]
-    else:
-        df = df.copy()
-        df["incident_datetime"] = pd.to_datetime(df["incident_datetime"], errors="coerce")
-    return df
+    if date_col == "incident_datetime":
+        return ensure_incident_datetime(df)
+    out = df.copy()
+    out[date_col] = pd.to_datetime(out[date_col], errors="coerce")
+    if "incident_datetime" not in out.columns:
+        out["incident_datetime"] = out[date_col]
+    return out
 
 
 def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str = "MS") -> pd.Series:
     """
-    Aggregate 1-per-row incidents to monthly counts based on a date-like column.
+    Aggregate 1-per-row incidents to monthly counts.
     """
     if date_col not in df.columns:
-        # try fallback to incident_datetime
         if "incident_datetime" in df.columns:
             date_col = "incident_datetime"
         else:
@@ -110,6 +102,30 @@ def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str
         return pd.Series(dtype=float)
     y = pd.Series(1, index=dt).resample(freq).sum().astype(int)
     return y.asfreq(freq, fill_value=0)
+
+
+def _numeric_features(features_df: pd.DataFrame, sample: Optional[int] = None, random_state: int = 42):
+    """
+    Select, clean, and (optionally) downsample numeric features. Returns (X, index).
+    """
+    X = (
+        features_df.select_dtypes(include=[np.number])
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    if sample and len(X) > sample:
+        X = X.sample(sample, random_state=random_state)
+    return X, X.index
+
+
+def _make_color_map(labels: np.ndarray) -> Dict[str, str]:
+    """
+    Stable discrete color map for cluster labels 0..k-1.
+    Ensures consistent mapping across 2D/3D when labels are the same.
+    """
+    palette = px.colors.qualitative.Plotly + px.colors.qualitative.Safe
+    labs = [str(x) for x in sorted(pd.Series(labels).unique(), key=lambda v: int(v))]
+    return {lab: palette[i % len(palette)] for i, lab in enumerate(labs)}
 
 
 # ---------------------------------------
@@ -318,149 +334,142 @@ def plot_carer_performance_scatter(df: pd.DataFrame) -> go.Figure:
 
 
 # ---------------------------------------
-# 5) Correlation heatmap
+# 5) Correlation heatmap (now resizable)
 # ---------------------------------------
-def correlation_analysis(df: pd.DataFrame, include: Optional[list] = None) -> go.Figure:
+def correlation_analysis(df: pd.DataFrame, include: Optional[List[str]] = None, height: int = 800) -> go.Figure:
     """Heatmap of correlations for numeric columns (optionally restrict to a whitelist)."""
     num = df.select_dtypes(include=[np.number]).copy()
     if include:
-        existing = [c for c in include if c in num.columns]
-        if existing:
-            num = num[existing]
+        cols = [c for c in include if c in num.columns]
+        if cols:
+            num = num[cols]
     corr = num.corr(numeric_only=True).fillna(0)
 
-    fig = go.Figure(data=go.Heatmap(
-        z=corr.values, x=corr.columns, y=corr.columns, coloraxis="coloraxis"
-    ))
-    fig.update_layout(title="Correlation Matrix", coloraxis=dict(colorscale="RdBu", cmin=-1, cmax=1))
+    fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.columns, coloraxis="coloraxis"))
+    fig.update_layout(
+        title="Correlation Matrix",
+        coloraxis=dict(colorscale="RdBu", cmin=-1, cmax=1),
+        height=height
+    )
     return fig
 
 
 # ---------------------------------------
-# 6) Clustering analysis (KMeans + PCA)
+# 6) Clustering analysis (KMeans + PCA) — 2D
 # ---------------------------------------
 def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
     """
-    KMeans on engineered features. Accepts either the original df or a prebuilt feature frame.
+    KMeans on engineered features. Accepts either raw df or a prebuilt feature frame.
     Returns (fig_2d_plotly, labels_series).
-    """
-    from sklearn.cluster import KMeans
-    from sklearn.decomposition import PCA
 
+    Note: color map used for clusters is stored on fig.layout.meta["cluster_color_map"]
+    so 3D plots can reuse the same palette without changing calling code.
+    """
     # Determine whether we received raw df or feature matrix
     use_df = df_or_features.copy()
     numeric_cols = use_df.select_dtypes(include=[np.number]).columns.tolist()
     looks_like_raw = ("incident_id" in use_df.columns) or ("incident_date" in use_df.columns) or (len(numeric_cols) < 2)
 
     if looks_like_raw:
-        # Build features from raw data
-        X, feature_names, features_df = create_comprehensive_features(use_df)
-        use_df = pd.DataFrame(X, columns=feature_names, index=features_df.index)
+        X_raw, feature_names, feats = create_comprehensive_features(use_df)
+        X = pd.DataFrame(X_raw, columns=feature_names, index=feats.index)
     else:
-        # Already numeric feature frame
-        use_df = use_df.select_dtypes(include=[np.number]).copy()
+        X = use_df.select_dtypes(include=[np.number]).copy()
 
-    X = use_df.to_numpy(dtype=float)
-    kmeans = KMeans(n_clusters=k, n_init="auto", random_state=42)
-    labels = kmeans.fit_predict(X)
+    # Standardize before KMeans/PCA for stability
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X.values)
+
+    km = KMeans(n_clusters=int(k), n_init=10, random_state=42)
+    labels = km.fit_predict(Xs)
 
     pca = PCA(n_components=2, random_state=42)
-    XY = pca.fit_transform(X)
-    df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels})
+    XY = pca.fit_transform(Xs)
+    df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels}, index=X.index)
+    df_plot["cluster_str"] = df_plot["cluster"].astype(str)
 
-    fig = px.scatter(df_plot, x="pc1", y="pc2", color=df_plot["cluster"].astype(str), title=f"KMeans Clusters (k={k})")
-    return fig, pd.Series(labels, index=use_df.index, name="cluster")
+    color_map = _make_color_map(labels)
 
-
-
-def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int | None = None, random_state: int = 42):
-    """
-    Creates a 3D PCA projection and KMeans clusters on engineered numeric features.
-    Returns (fig3d, labels, df_plot).
-    """
-    # Keep only numeric features; clean NaNs/Infs
-    Xnum = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    if Xnum.empty:
-        raise ValueError("No numeric features available for clustering.")
-    # Optional downsample for speed
-    if sample and len(Xnum) > sample:
-        Xnum = Xnum.sample(sample, random_state=random_state)
-
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(Xnum.values)
-
-    # PCA -> 3 components
-    pca = PCA(n_components=3, random_state=random_state)
-    coords = pca.fit_transform(Xs)
-
-    # KMeans on the (scaled) feature space (not the PCA coords)
-    km = KMeans(n_clusters=int(k), n_init=10, random_state=random_state)
-    labels = km.fit_predict(Xs).astype(str)
-
-    df_plot = pd.DataFrame({
-        "PC1": coords[:, 0],
-        "PC2": coords[:, 1],
-        "PC3": coords[:, 2],
-        "cluster": labels,
-        "point_index": Xnum.index.astype(str),
-    })
-
-    fig3d = px.scatter_3d(
-        df_plot, x="PC1", y="PC2", z="PC3",
-        color="cluster", hover_data=["point_index"],
-        title=f"3D Clusters (k={k}) — PCA projection"
+    fig = px.scatter(
+        df_plot, x="pc1", y="pc2",
+        color="cluster_str",
+        color_discrete_map=color_map,
+        title=f"KMeans Clusters (k={k}) — 2D PCA"
     )
-    fig3d.update_layout(legend_title="Cluster", height=600)
-    return fig3d, labels, df_plot
+    # Attach color map for downstream reuse (e.g., by 3D)
+    fig.update_layout(meta={"cluster_color_map": color_map})
+    return fig, pd.Series(labels, index=X.index, name="cluster")
 
+
+# ---------------------------------------
+# 6b) Clustering — 3D (PCA) with color matching to 2D
+# ---------------------------------------
 def plot_3d_clusters(
     features_df: pd.DataFrame,
     k: int = 4,
-    sample: int = 2000,
-    color_map: Optional[Dict[str, str]] = None
+    sample: Optional[int] = None,
+    color_map: Optional[Dict[str, str]] = None,
+    random_state: int = 42
 ):
     """
-    PCA->3D + KMeans clustering.
-    Returns (fig, labels, df3d). If 'color_map' is provided, it should map cluster
-    labels (as strings) to colors; we'll reuse your 2D palette.
-    """
-    try:
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.decomposition import PCA
-        from sklearn.cluster import KMeans
-    except Exception as e:
-        raise ImportError(
-            "scikit-learn is required for 3D clustering. Add 'scikit-learn' to requirements.txt."
-        ) from e
+    PCA->3D + KMeans on standardized numeric features.
 
-    # numeric-only features, clean, optional sampling
-    X = (
-        features_df
-        .select_dtypes(include=[np.number])
+    - KMeans is fit on the FULL standardized feature space (not the sampled subset),
+      so labels are consistent with the 2D result (same random_state, same features).
+    - We then plot either all points or a sampled subset for performance, and reuse
+      the SAME label mapping for colors.
+
+    Returns (fig3d, labels_for_plotted_points, df3d_plotted).
+
+    If you already drew 2D clusters, you can do:
+        color_map = getattr(fig2d.layout, "meta", {}).get("cluster_color_map")
+        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=2000, color_map=color_map)
+    """
+    # Clean numeric features from the FULL frame (no sampling yet)
+    X_full = (
+        features_df.select_dtypes(include=[np.number])
         .replace([np.inf, -np.inf], np.nan)
         .fillna(0.0)
     )
-    if len(X) > sample:
-        X = X.sample(sample, random_state=42)
+    if X_full.empty:
+        raise ValueError("No numeric features available for clustering.")
 
-    Xs = StandardScaler().fit_transform(X.values)
-    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
-    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
+    scaler = StandardScaler()
+    Xs_full = scaler.fit_transform(X_full.values)
 
-    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
-    df3d["cluster_str"] = df3d["cluster"].astype(str)
+    km = KMeans(n_clusters=int(k), n_init=10, random_state=random_state)
+    labels_full = km.fit_predict(Xs_full).astype(int)
 
-    cmap = {str(k): v for k, v in (color_map or {}).items()} if color_map else None
-    fig = px.scatter_3d(
-        df3d, x="PC1", y="PC2", z="PC3",
-        color="cluster_str",
-        opacity=0.75,
-        color_discrete_map=cmap  # None -> default Plotly colors
+    # Decide what to plot: all points or a sampled subset (for speed)
+    if sample and len(X_full) > sample:
+        X_plot = X_full.sample(sample, random_state=random_state)
+    else:
+        X_plot = X_full
+
+    # Indices to pull labels
+    idx_plot = X_plot.index
+    labels_plot = pd.Series(labels_full, index=X_full.index).loc[idx_plot].values
+
+    # 3D coords via PCA on the PLOTTED subset (for speed)
+    Xs_plot = scaler.transform(X_plot.values)  # use same scaler as full
+    coords = PCA(n_components=3, random_state=random_state).fit_transform(Xs_plot)
+
+    df3d = pd.DataFrame(
+        {"PC1": coords[:, 0], "PC2": coords[:, 1], "PC3": coords[:, 2], "cluster": labels_plot.astype(str)},
+        index=idx_plot
     )
-    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
-    return fig, labels, df3d
 
-
+    # Use provided color_map (from 2D) or build a matching one from FULL labels
+    cmap = color_map or _make_color_map(labels_full)
+    fig3d = px.scatter_3d(
+        df3d, x="PC1", y="PC2", z="PC3",
+        color="cluster",
+        color_discrete_map=cmap,
+        opacity=0.8,
+        title=f"3D Clusters (k={k}) — PCA"
+    )
+    fig3d.update_layout(legend_title="Cluster", height=600)
+    return fig3d, labels_plot, df3d
 
 
 # ---------------------------------------
@@ -848,7 +857,7 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
     return alerts
 
 
-# 15) Streamlit integration helpers (import Streamlit only inside)
+# 15) Streamlit integration helpers (optional)
 def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_names: List[str], trained_models: Dict[str, Dict[str, Any]]):
     """Render enhanced features inside a Streamlit app."""
     try:
