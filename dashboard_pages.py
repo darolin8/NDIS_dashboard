@@ -1232,8 +1232,8 @@ def display_ml_insights_section(filtered_df):
   
     st.subheader("📈 Forecasting & Seasonality")
 
-    # Ensure we have a datetime column for the seasonality chart
-    df_used = _ensure_incident_datetime(df_used)
+    df_used = ensure_incident_datetime(df_used)
+
 
     # Forecast
     horizon = int(st.session_state.get("ml_forecast_months", 6))
@@ -1263,72 +1263,45 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 5) Clustering & Risk Profiles
-    # ---------------------------------
-    st.subheader("🧱 Clustering & Risk Profiles")
+# 5) Clustering & Risk Profiles
+# ---------------------------------
+st.subheader("🧩 Clustering & Risk Profiles")
 
-    # 2D clustering (existing API)
-    color_map_2d = {}
-    try:
-        k2d = st.slider("Clusters (k) — 2D", 2, 8, 4, key="ml_k_clusters_2d")
-        fig2d, labels2d = clustering_analysis(features_df, k=int(k2d))
-        st.plotly_chart(fig2d, use_container_width=True)
-        st.caption("2D projection provided by `clustering_analysis` on engineered features.")
-        color_map_2d = _extract_color_map_from_2d(fig2d)
-    except Exception as e:
-        st.warning(f"Clustering (2D) failed: {e}")
+with st.expander("Clustering controls", expanded=True):
+    k = st.slider("k (number of clusters)", min_value=2, max_value=12, value=4, step=1)
+    sample3d = st.slider("Max points in 3D plot", min_value=500, max_value=10000, value=2000, step=500,
+                         help="KMeans is fit on ALL features; this only limits how many points are drawn in 3D for speed.")
 
-    # 3D clustering (PCA + KMeans)
-    with st.expander("Show 3D clustering (PCA)", expanded=False):
-        col_3d_a, col_3d_b = st.columns([2, 1])
-        with col_3d_a:
-            k3d = st.slider("Clusters (k) — 3D", 2, 10, 4, key="ml_k_clusters_3d")
-        with col_3d_b:
-            max_points_default = min(2000, len(features_df))
-            sample_3d = st.number_input(
-                "Max points to plot",
-                min_value=200,
-                max_value=max(200, len(features_df)),
-                value=max_points_default,
-                step=100,
-                key="ml_k_clusters_3d_sample",
-            )
-        try:
-            fig3d, labels3d, df3d = plot_3d_clusters(
-                features_df,
-                k=int(k3d),
-                sample=int(sample_3d),
-                color_map=color_map_2d,  # 👈 match 2D colors
-            )
-            st.plotly_chart(fig3d, use_container_width=True)
-            st.caption("3D PCA projection with KMeans labels. Hover for point index.")
-        except Exception as e:
-            st.warning(f"Clustering (3D) failed: {e}")
+# 2D clustering (returns a color map we’ll reuse)
+try:
+    fig2d, labels2d = clustering_analysis(features_df, k=k)
+    st.plotly_chart(fig2d, use_container_width=True)
+    color_map = getattr(fig2d.layout, "meta", {}).get("cluster_color_map")
+except Exception as e:
+    color_map = None
+    st.warning(f"2D clustering failed: {e}")
 
+# 3D clustering, reusing 2D palette if available
+try:
+    fig3d, labels3d, df3d = plot_3d_clusters(
+        features_df,
+        k=k,
+        sample=sample3d,
+        color_map=color_map  # <- reuse colors from 2D
+    )
+    st.plotly_chart(fig3d, use_container_width=True)
+except Exception as e:
+    st.warning(f"3D clustering failed: {e}")
 
-    # ---------------------------------
-    # 6) Correlations
-    # ---------------------------------
+st.divider()
 
-    st.subheader("📊 Correlations")
-    try:
-        corr_res = correlation_analysis(features_df)
-        if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):
-            # If your helper returns a Plotly fig, just enlarge it
-            corr_res.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
-            st.plotly_chart(corr_res, use_container_width=True)
-        elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
-            mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
-            fig = px.imshow(
-                mat,
-                color_continuous_scale="RdBu_r",
-                zmin=-1, zmax=1,
-                title="Feature Correlation Matrix",
-            )
-            fig.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
-            fig.update_xaxes(tickangle=45)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.write("Correlation output:", corr_res)
-    except Exception as e:
-        st.warning(f"Correlation analysis failed: {e}")
+# ---------------------------------
+# 6) Correlations
+# ---------------------------------
+st.subheader("🔗 Correlations")
+try:
+    corr_fig = correlation_analysis(features_df, height=900)  # bigger heatmap
+    st.plotly_chart(corr_fig, use_container_width=True)
+except Exception as e:
+    st.warning(f"Correlation analysis failed: {e}")
+
