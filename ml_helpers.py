@@ -15,6 +15,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+
 
 
 # ---------------------------------------
@@ -339,6 +343,49 @@ def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
 
     fig = px.scatter(df_plot, x="pc1", y="pc2", color=df_plot["cluster"].astype(str), title=f"KMeans Clusters (k={k})")
     return fig, pd.Series(labels, index=use_df.index, name="cluster")
+
+
+
+def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int | None = None, random_state: int = 42):
+    """
+    Creates a 3D PCA projection and KMeans clusters on engineered numeric features.
+    Returns (fig3d, labels, df_plot).
+    """
+    # Keep only numeric features; clean NaNs/Infs
+    Xnum = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if Xnum.empty:
+        raise ValueError("No numeric features available for clustering.")
+    # Optional downsample for speed
+    if sample and len(Xnum) > sample:
+        Xnum = Xnum.sample(sample, random_state=random_state)
+
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(Xnum.values)
+
+    # PCA -> 3 components
+    pca = PCA(n_components=3, random_state=random_state)
+    coords = pca.fit_transform(Xs)
+
+    # KMeans on the (scaled) feature space (not the PCA coords)
+    km = KMeans(n_clusters=int(k), n_init=10, random_state=random_state)
+    labels = km.fit_predict(Xs).astype(str)
+
+    df_plot = pd.DataFrame({
+        "PC1": coords[:, 0],
+        "PC2": coords[:, 1],
+        "PC3": coords[:, 2],
+        "cluster": labels,
+        "point_index": Xnum.index.astype(str),
+    })
+
+    fig3d = px.scatter_3d(
+        df_plot, x="PC1", y="PC2", z="PC3",
+        color="cluster", hover_data=["point_index"],
+        title=f"3D Clusters (k={k}) — PCA projection"
+    )
+    fig3d.update_layout(legend_title="Cluster", height=600)
+    return fig3d, labels, df_plot
+
 
 
 # ---------------------------------------
