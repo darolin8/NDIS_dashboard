@@ -1293,17 +1293,23 @@ def display_ml_insights_section(filtered_df):
 # ---------------------------------
 # 6) Correlations
 # ---------------------------------
- st.subheader("📊 Correlations")
+st.subheader("📊 Correlations")
     try:
         corr_res = correlation_analysis(features_df)
         if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):
+            # If your helper returns a Plotly fig, just enlarge it
+            corr_res.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
             st.plotly_chart(corr_res, use_container_width=True)
         elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
             mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
             fig = px.imshow(
-                mat, color_continuous_scale="RdBu_r", zmin=-5, zmax=5,
-                title="Feature Correlation Matrix"
+                mat,
+                color_continuous_scale="RdBu_r",
+                zmin=-1, zmax=1,
+                title="Feature Correlation Matrix",
             )
+            fig.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
+            fig.update_xaxes(tickangle=45)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.write("Correlation output:", corr_res)
