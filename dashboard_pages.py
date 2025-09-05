@@ -1298,33 +1298,56 @@ def display_ml_insights_section(filtered_df):
     except Exception as e:
         st.warning(f"Clustering failed: {e}")
 
-    # Risk profile by incident type
+        # Risk profile by incident type
     try:
-        type_fig, type_df = profile_incident_type_risk(df_used)
+        out = profile_incident_type_risk(df_used)
         st.markdown("#### ⚠️ Incident Type Risk Profile")
-        if hasattr(type_fig, "to_json") and hasattr(type_fig, "data"):
+        type_fig, type_df = None, None
+
+        if isinstance(out, tuple):
+            for v in out:
+                if hasattr(v, "to_json") and hasattr(v, "data"):
+                    type_fig = v
+                elif isinstance(v, pd.DataFrame):
+                    type_df = v
+        elif hasattr(out, "to_json") and hasattr(out, "data"):
+            type_fig = out
+        elif isinstance(out, pd.DataFrame):
+            type_df = out
+
+        if type_fig is not None:
             st.plotly_chart(type_fig, use_container_width=True)
         if type_df is not None:
             st.dataframe(type_df, use_container_width=True)
     except Exception as e:
         st.caption(f"Incident type risk unavailable: {e}")
 
-    st.divider()
 
     # ---------------------------------
     # 6) Correlations
     # ---------------------------------
-    st.subheader("📊 Correlations")
+
+    st.subheader("🧱 Clustering & Risk Profiles")
     try:
-        corr_res = correlation_analysis(features_df)
-        if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):  # Plotly fig
-            st.plotly_chart(corr_res, use_container_width=True)
-        elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
-            mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
-            fig = px.imshow(mat, color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
-                            title="Feature Correlation Matrix")
-            st.plotly_chart(fig, use_container_width=True)
+        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
+        try:
+            cl_res = clustering_analysis(features_df, k=k)
+        except Exception:
+            cl_res = clustering_analysis(df_used, k=k)
+
+        fig_candidate = None
+        if isinstance(cl_res, tuple):
+            for v in cl_res:
+                if hasattr(v, "to_json") and hasattr(v, "data"):
+                    fig_candidate = v
+        elif hasattr(cl_res, "to_json") and hasattr(cl_res, "data"):
+            fig_candidate = cl_res
+
+        if fig_candidate is not None:
+            st.plotly_chart(fig_candidate, use_container_width=True)
         else:
-            st.write("Correlation output:", corr_res)
+            st.write("Clustering output:", cl_res)
+
+        st.caption("Cluster labels computed on engineered features (if available).")
     except Exception as e:
-        st.warning(f"Correlation analysis failed: {e}")
+        st.warning(f"Clustering failed: {e}")
