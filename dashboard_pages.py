@@ -87,6 +87,38 @@ def _ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
         )
     return d
 
+# ---- 3D clustering helper (PCA + KMeans) ----
+def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int = 2000):
+    """
+    Reduce engineered features to 3D with PCA, cluster with KMeans,
+    and return a Plotly 3D scatter + labels + the plotted dataframe.
+    """
+    try:
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        from sklearn.cluster import KMeans
+    except Exception as e:
+        raise ImportError(
+            "scikit-learn is required for 3D clustering. "
+            "Add 'scikit-learn' to requirements.txt and reinstall."
+        ) from e
+
+    # numeric-only, clean, optional sampling
+    X = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if len(X) > sample:
+        X = X.sample(sample, random_state=42)
+
+    Xs = StandardScaler().fit_transform(X.values)
+    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
+
+    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
+
+    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
+    fig = px.scatter_3d(df3d, x="PC1", y="PC2", z="PC3", color="cluster", opacity=0.7)
+    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
+    return fig, labels, df3d
+
+
 
 # ----------------------------
 # Utility
@@ -1288,71 +1320,33 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     # 5) Clustering & Risk Profiles
     # ---------------------------------
-    st.subheader("🧱 Clustering & Risk Profiles")
+   # ---- 3D clustering helper (PCA + KMeans) ----
+def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int = 2000):
+    """
+    Reduce engineered features to 3D with PCA, cluster with KMeans,
+    and return a Plotly 3D scatter + labels + the plotted dataframe.
+    """
     try:
-        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
-        fig2d, labels = clustering_analysis(features_df, k=k)
-        st.plotly_chart(fig2d, use_container_width=True)
-        # Optional: attach labels back to the view
-        st.caption("Cluster labels computed on engineered features.")
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        from sklearn.cluster import KMeans
     except Exception as e:
-        st.warning(f"Clustering failed: {e}")
+        raise ImportError(
+            "scikit-learn is required for 3D clustering. "
+            "Add 'scikit-learn' to requirements.txt and reinstall."
+        ) from e
 
-        # Risk profile by incident type
-    try:
-        out = profile_incident_type_risk(df_used)
-        st.markdown("#### ⚠️ Incident Type Risk Profile")
-        type_fig, type_df = None, None
+    # numeric-only, clean, optional sampling
+    X = features_df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if len(X) > sample:
+        X = X.sample(sample, random_state=42)
 
-        if isinstance(out, tuple):
-            for v in out:
-                if hasattr(v, "to_json") and hasattr(v, "data"):
-                    type_fig = v
-                elif isinstance(v, pd.DataFrame):
-                    type_df = v
-        elif hasattr(out, "to_json") and hasattr(out, "data"):
-            type_fig = out
-        elif isinstance(out, pd.DataFrame):
-            type_df = out
+    Xs = StandardScaler().fit_transform(X.values)
+    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
 
-        if type_fig is not None:
-            st.plotly_chart(type_fig, use_container_width=True)
-        if type_df is not None:
-            st.dataframe(type_df, use_container_width=True)
-    except Exception as e:
-        st.caption(f"Incident type risk unavailable: {e}")
+    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
 
-
-    # ---------------------------------
-    # 6) Correlations
-    # ---------------------------------
-
-   st.subheader("🧱 Clustering & Risk Profiles")
-
-# --- 2D (existing) ---
-try:
-    k2d = st.slider("Clusters (k) — 2D", 2, 8, 4, key="ml_k_clusters_insights")
-    fig2d, labels2d = clustering_analysis(features_df, k=k2d)
-    st.plotly_chart(fig2d, use_container_width=True)
-    st.caption("2D projection provided by `clustering_analysis` on engineered features.")
-except Exception as e:
-    st.warning(f"Clustering (2D) failed: {e}")
-
-# --- 3D (new) ---
-with st.expander("Show 3D clustering (PCA)", expanded=True):
-    col_3d_a, col_3d_b = st.columns([2, 1])
-    with col_3d_a:
-        k3d = st.slider("Clusters (k) — 3D", 2, 10, 4, key="ml_k_clusters_3d")
-    with col_3d_b:
-        max_points_default = min(2000, len(features_df))
-        sample_3d = st.number_input(
-            "Max points to plot", min_value=200, max_value=max(200, len(features_df)),
-            value=max_points_default, step=100, key="ml_k_clusters_3d_sample"
-        )
-
-    try:
-        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=int(k3d), sample=int(sample_3d))
-        st.plotly_chart(fig3d, use_container_width=True)
-        st.caption("3D PCA projection with KMeans labels. Hover for point index.")
-    except Exception as e:
-        st.warning(f"Clustering (3D) failed: {e}")
+    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
+    fig = px.scatter_3d(df3d, x="PC1", y="PC2", z="PC3", color="cluster", opacity=0.7)
+    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
+    return fig, labels, df3d
