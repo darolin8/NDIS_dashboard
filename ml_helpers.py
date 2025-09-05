@@ -79,12 +79,121 @@ def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd
 # ---------------------------------------
 # 1) Incident volume forecasting (+ alias)
 # ---------------------------------------
-def incident_volume_forecasting(df, horizon=None, horizon_months=None, months=None, n_periods=None, ...):
-    if horizon is None:
-        horizon = horizon_months or months or n_periods or 6
+from typing import Tuple, Optional
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+# Helper: monthly counts from a date column
+def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str = "MS") -> pd.Series:
+    if date_col not in df.columns:
+        return pd.Series(dtype=float)
+    dt = pd.to_datetime(df[date_col], errors="coerce").dropna()
+    if dt.empty:
+        return pd.Series(dtype=float)
+    # 1 per row, resample to month start
+    y = pd.Series(1, index=dt).resample(freq).sum().astype(int)
+    return y.asfreq(freq, fill_value=0)
+
+def incident_volume_forecasting(
+    df: pd.DataFrame,
+    horizon: Optional[int] = None,
+    horizon_months: Optional[int] = None,
+    months: Optional[int] = None,
+    n_periods: Optional[int] = None,
+    date_col: str = "incident_date",
+    season_length: int = 12,
 ) -> Tuple[go.Figure, pd.DataFrame]:
-    """Forecast monthly incident volumes via SARIMAX (if available) with naive fallback."""
-    y = _monthly_counts(df, date_col=date_col)
+    """
+    Forecast monthly incident volumes. Tries SARIMAX; falls back to seasonal naive.
+    Returns (plotly Figure, DataFrame with columns: actual, forecast, lower, upper).
+    Accepts horizon via any of: horizon, horizon_months, months, n_periods.
+    """
+    # Resolve horizon robustly
+    resolved = next((v for v in [horizon, horizon_months, months, n_periods] if v is not None), 6)
+    try:
+        H = int(resolved)
+    except Exception:
+        H = 6
+
+    y = _monthly_counts(df, date_col=date_col, freq="MS")
+    if y.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Incident Forecast: no date data", xaxis_title="Month", yaxis_title="Incidents")
+        return fig, pd.DataFrame(columns=["actual", "forecast", "lower", "upper"])
+
+    use_sarimax = False
+    forecast = None
+    conf_int = None
+
+    # Try SARIMAX if available and we have enough history
+    try:
+        from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
+
+        seasonal_order = (0, 1, 1, season_length) if len(y) >= 2 * season_length else (0, 0, 0, 0)
+        model = SARIMAX(
+            y,
+            order=(1, 1, 1),
+            seasonal_order=seasonal_order,
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        )
+        res = model.fit(disp=False)
+        fc = res.get_forecast(steps=H)
+        forecast = fc.predicted_mean.rename("forecast")
+        conf = fc.conf_int(alpha=0.2)  # 80% interval
+        conf_int = pd.DataFrame(
+            {"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values},
+            index=forecast.index,
+        )
+        use_sarimax = True
+    except Exception:
+        # Seasonal naive fallback: repeat last 'season_length' months
+        idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
+        if len(y) >= season_length:
+            last_season = y[-season_length:].values
+            vals = np.tile(last_season, int(np.ceil(H / season_length)))[:H]
+        else:
+            vals = np.repeat(y.iloc[-1], H)
+        forecast = pd.Series(vals, index=idx, name="forecast")
+        # Rough interval: ±sqrt(value), clipped at zero
+        conf_int = pd.DataFrame(
+            {
+                "lower": np.maximum(0, forecast.values - np.sqrt(np.maximum(1, forecast.values))),
+                "upper": forecast.values + np.sqrt(np.maximum(1, forecast.values)),
+            },
+            index=idx,
+        )
+
+    # Build output frame
+    out = pd.DataFrame({"actual": y})
+    fc_df = pd.concat([forecast, conf_int], axis=1)
+    merged = out.join(fc_df, how="outer")
+    merged.index.name = "date"
+
+    # Figure
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
+    fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
+    if conf_int is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=list(conf_int.index) + list(conf_int.index[::-1]),
+                y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
+                fill="toself",
+                opacity=0.2,
+                line=dict(width=0),
+                name="80% interval",
+            )
+        )
+    fig.update_layout(
+        title=f"Monthly Incident Forecast ({'SARIMAX' if use_sarimax else 'Seasonal naive'})",
+        xaxis_title="Month",
+        yaxis_title="Incidents",
+        hovermode="x unified",
+    )
+    return fig, merged
+
 
     def _naive_forecast(series: pd.Series, steps: int):
         last_mean = series[-12:].mean() if len(series) >= 12 else series.mean()
