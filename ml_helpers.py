@@ -18,8 +18,7 @@ from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-
-
+from typing import Optional, Dict
 
 # ---------------------------------------
 # Re-export feature preparation
@@ -51,6 +50,34 @@ def create_comprehensive_features(df: pd.DataFrame):
 # ---------------------------------------
 # Internal helpers
 # ---------------------------------------
+
+# ml_helpers.py (paste below your other helpers)
+
+def ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Guarantee a usable 'incident_datetime' from incident_date/incident_time if needed.
+    - If 'incident_datetime' exists, coerce to datetime and return.
+    - Else build it from 'incident_date' (and 'incident_time' if present).
+    """
+    d = df.copy()
+    if "incident_datetime" in d.columns:
+        d["incident_datetime"] = pd.to_datetime(d["incident_datetime"], errors="coerce")
+        return d
+
+    if "incident_date" in d.columns:
+        d["incident_datetime"] = pd.to_datetime(d["incident_date"], errors="coerce")
+    else:
+        d["incident_datetime"] = pd.NaT
+
+    if "incident_time" in d.columns:
+        t = pd.to_datetime(d["incident_time"], errors="coerce")
+        mask = d["incident_datetime"].notna() & t.notna()
+        d.loc[mask, "incident_datetime"] = pd.to_datetime(
+            d.loc[mask, "incident_datetime"].dt.date.astype(str) + " " + t.dt.time.astype(str),
+            errors="coerce"
+        )
+    return d
+
 def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd.DataFrame:
     """
     Ensure a usable datetime column 'incident_datetime' exists (derived from incident_date if necessary).
@@ -385,6 +412,54 @@ def plot_3d_clusters(features_df: pd.DataFrame, k: int = 4, sample: int | None =
     )
     fig3d.update_layout(legend_title="Cluster", height=600)
     return fig3d, labels, df_plot
+
+def plot_3d_clusters(
+    features_df: pd.DataFrame,
+    k: int = 4,
+    sample: int = 2000,
+    color_map: Optional[Dict[str, str]] = None
+):
+    """
+    PCA->3D + KMeans clustering.
+    Returns (fig, labels, df3d). If 'color_map' is provided, it should map cluster
+    labels (as strings) to colors; we'll reuse your 2D palette.
+    """
+    try:
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        from sklearn.cluster import KMeans
+    except Exception as e:
+        raise ImportError(
+            "scikit-learn is required for 3D clustering. Add 'scikit-learn' to requirements.txt."
+        ) from e
+
+    # numeric-only features, clean, optional sampling
+    X = (
+        features_df
+        .select_dtypes(include=[np.number])
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    if len(X) > sample:
+        X = X.sample(sample, random_state=42)
+
+    Xs = StandardScaler().fit_transform(X.values)
+    Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
+    labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Z)
+
+    df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
+    df3d["cluster_str"] = df3d["cluster"].astype(str)
+
+    cmap = {str(k): v for k, v in (color_map or {}).items()} if color_map else None
+    fig = px.scatter_3d(
+        df3d, x="PC1", y="PC2", z="PC3",
+        color="cluster_str",
+        opacity=0.75,
+        color_discrete_map=cmap  # None -> default Plotly colors
+    )
+    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
+    return fig, labels, df3d
+
 
 
 
