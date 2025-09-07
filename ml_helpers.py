@@ -23,7 +23,7 @@ from sklearn.cluster import KMeans
 
 
 # ---------------------------------------
-# Re-export feature preparation
+# Optional enhanced prep from utils/ (no __init__.py required)
 # ---------------------------------------
 try:
     from utils.ndis_enhanced_prep import (
@@ -36,17 +36,83 @@ except Exception:
 
 
 def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Thin wrapper so legacy imports keep working."""
-    if _prepare_ndis_data is None:
-        raise ImportError("utils.ndis_enhanced_prep.prepare_ndis_data not found. Ensure utils/ exists with __init__.py.")
-    return _prepare_ndis_data(df)
+    """Thin wrapper; if utils version is missing, return df unchanged."""
+    if _prepare_ndis_data is not None:
+        return _prepare_ndis_data(df)
+    return df.copy()
+
+
+def _fallback_features(df: pd.DataFrame):
+    """
+    Minimal feature builder used if utils.create_comprehensive_features is unavailable.
+    Matches the names your live risk-scorer expects so the UI keeps working.
+    Returns (X, feature_names, features_df).
+    """
+    d = ensure_incident_datetime(df)
+
+    base = pd.DataFrame(index=d.index)
+    base["hour"] = d["incident_datetime"].dt.hour.fillna(0).astype(int)
+
+    dow = d["incident_datetime"].dt.dayofweek
+    base["is_weekend"] = (dow >= 5).astype(int)
+
+    loc = d.get("location", pd.Series([""], index=d.index)).astype(str).str.lower()
+    base["is_kitchen"] = loc.str.contains("kitchen", na=False).astype(int)
+    base["is_bathroom"] = loc.str.contains("bath|toilet|washroom|restroom", regex=True, na=False).astype(int)
+
+    # history counts (0 if ids missing)
+    if "participant_id" in d.columns and "incident_id" in d.columns:
+        base["participant_incident_count"] = d.groupby("participant_id")["incident_id"].transform("count")
+    else:
+        base["participant_incident_count"] = 0
+    if "carer_id" in d.columns and "incident_id" in d.columns:
+        base["carer_incident_count"] = d.groupby("carer_id")["incident_id"].transform("count")
+    else:
+        base["carer_incident_count"] = 0
+
+    # coarse location risk proxy
+    base["location_risk_score"] = (
+        3*base["is_kitchen"] + 3*base["is_bathroom"] + 1
+    ).clip(lower=1)
+
+    base = base.fillna(0).astype(float)
+    return base.values, list(base.columns), base
 
 
 def create_comprehensive_features(df: pd.DataFrame):
-    """Thin wrapper so legacy imports keep working."""
-    if _create_comprehensive_features is None:
-        raise ImportError("utils.ndis_enhanced_prep.create_comprehensive_features not found. Ensure utils/ exists with __init__.py.")
-    return _create_comprehensive_features(df)
+    """
+    Wrapper: use utils version if present, otherwise fall back to a minimal, safe feature set.
+    """
+    if _create_comprehensive_features is not None:
+        return _create_comprehensive_features(df)
+    return _fallback_features(df)
+
+
+# ---------------------------------------
+# Re-export feature preparation
+# ---------------------------------------
+#try:
+    #from utils.ndis_enhanced_prep import (
+        #prepare_ndis_data as _prepare_ndis_data,
+        #create_comprehensive_features as _create_comprehensive_features,
+    #)
+#except Exception:
+    #_prepare_ndis_data = None
+    #_create_comprehensive_features = None
+
+
+#def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
+    #"""Thin wrapper so legacy imports keep working."""
+    #if _prepare_ndis_data is None:
+        #raise ImportError("utils.ndis_enhanced_prep.prepare_ndis_data not found. Ensure utils/ exists with __init__.py.")
+    #return _prepare_ndis_data(df)
+
+
+#def create_comprehensive_features(df: pd.DataFrame):
+    #"""Thin wrapper so legacy imports keep working."""
+  #  if _create_comprehensive_features is None:
+    #    raise ImportError("utils.ndis_enhanced_prep.create_comprehensive_features not found. Ensure utils/ exists with __init__.py.")
+    #return _create_comprehensive_features(df)
 
 
 # ---------------------------------------
