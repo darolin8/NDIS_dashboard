@@ -458,11 +458,6 @@ def predictive_models_comparison(
     test_size: float = 0.25,
     random_state: int = 42,
 ) -> dict:
-    """
-    Train baseline models and return a dict suitable for dashboard analysis.
-    Ensures target and derived columns are NOT present in features.
-    Prints feature-target correlations and group means to diagnose leakage.
-    """
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
@@ -481,27 +476,27 @@ def predictive_models_comparison(
         df.get("severity_numeric", pd.Series([2]*len(df))) >= 3
     ).astype(int)
 
-    # Remove target and common proxies
+    # Remove target and known proxies
     drop_cols = [
         target,
         "reportable",
         "reportable_bin",
         "severity_numeric",
-        "medical_attention_required",  # add any other columns you suspect!
+        "medical_attention_required"
     ]
     for col in drop_cols:
         if col in features_df.columns:
             features_df = features_df.drop(columns=[col])
 
-    # ---- Diagnostic: Show features used ----
+    # ---- Diagnostic: Print feature-target relationships ----
     print("\nFeature columns for training:", features_df.columns.tolist())
     print("Target value counts:", y.value_counts())
     print("First few rows of features_df:\n", features_df.head())
 
-    # ---- Diagnostic: Check for proxy features ----
     correlations = {}
     for col in features_df.columns:
         try:
+            # For categorical features, print groupby mean
             if features_df[col].dtype == 'object' or 'category' in str(features_df[col].dtype):
                 group_means = df.groupby(col)[target].mean()
                 print(f"\nFeature '{col}' groupby mean target:\n{group_means}")
@@ -510,6 +505,7 @@ def predictive_models_comparison(
                 correlations[col] = corr
         except Exception as e:
             print(f"Could not correlate {col}: {e}")
+
     print("\nFeature-target correlations:", correlations)
     # -------------------------------------------
 
