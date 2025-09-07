@@ -465,12 +465,13 @@ def predictive_models_comparison(
     X, feature_names, features_df = create_comprehensive_features(df)
     y = df[target].copy() if target in df.columns else (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
 
-    # ----------- PATCH: Remove target from features! -----------
-    if target in features_df.columns:
-        features_df = features_df.drop(columns=[target])
+    # ----- PATCH: REMOVE TARGET/DERIVED COLUMNS FROM FEATURES -----
+    for col in [target, "severity_numeric"]:
+        if col in features_df.columns:
+            features_df = features_df.drop(columns=[col])
     X = features_df.values
     feature_names = features_df.columns.tolist()
-    # -----------------------------------------------------------
+    # -------------------------------------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
@@ -508,8 +509,6 @@ def predictive_models_comparison(
     }
 
     return results
-
-
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
