@@ -563,14 +563,44 @@ def predictive_models_comparison(
 
     return results
 
-def calculate_risk_score(scenario, best_model, feature_names):
-    import numpy as np
-    vec = [scenario[feat] for feat in feature_names]
-    vec_np = np.array(vec).reshape(1, -1)
-    print("vec_np shape:", vec_np.shape)
-    print("Model expects:", best_model.n_features_in_)
-    proba = best_model.predict_proba(vec_np)[0]
-    return proba
+def calculate_risk_score(scenario: Dict[str, Any]) -> Dict[str, Any]:
+    pipe: Pipeline = _GLOBAL_RISK["pipe"]
+    cols_meta = _GLOBAL_RISK["cols_meta"]
+    if pipe is None or cols_meta is None:
+        raise RuntimeError("Risk model not initialised. Call ensure_risk_model(df) first.")
+
+    # Build single-row DataFrame with named columns
+    X_one = pd.DataFrame([scenario])
+
+    # Ensure expected columns exist; fill numerics with 0 if missing/NaN
+    expected_cols = cols_meta["num"] + cols_meta["cat"]
+    for col in expected_cols:
+        if col not in X_one.columns:
+            X_one[col] = np.nan
+    for col in cols_meta["num"]:
+        if X_one[col].isna().any():
+            X_one[col] = 0.0
+
+    # Keep only training-time columns (order matters for transformers)
+    X_one = X_one[expected_cols]
+
+    proba_pos = float(pipe.predict_proba(X_one)[0, 1])
+    label = "High" if proba_pos >= 0.5 else "Low"
+
+    # Optional: surface top features (RF importances over transformed space)
+    top_features = []
+    try:
+        pre = pipe.named_steps["pre"]
+        clf = pipe.named_steps["clf"]
+        feat_names = pre.get_feature_names_out()
+        importances = getattr(clf, "feature_importances_", None)
+        if importances is not None:
+            pairs = sorted(zip(feat_names, importances), key=lambda t: t[1], reverse=True)
+            top_features = pairs[:8]
+    except Exception:
+        pass
+
+    return {"probability": proba_pos, "label": label, "top_features": top_features}
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
