@@ -41,7 +41,18 @@ from ml_helpers import (
 )
 
 
-from utils.factor_labels import shorten_factor
+# Try optional utils import; fall back to a noop helper.
+try:
+    from utils.factor_labels import shorten_factor  # optional
+except Exception:
+    def shorten_factor(x):
+        # simple, safe fallback to keep the app running
+        if x is None:
+            return ""
+        s = str(x)
+        # keep first token or first 30 chars
+        return (s.split(";")[0] or s)[:30]
+
 
 # Compatibility wrapper so we don't care which signature ml_helpers currently exposes
 def _call_incident_forecast(df, horizon):
