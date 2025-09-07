@@ -1,8 +1,15 @@
 # app.py
+
+# ---- BEGIN: path bootstrap (no __init__.py needed) ----
 import os, sys
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
+UTILS_DIR = os.path.join(APP_DIR, "utils")
+if os.path.isdir(UTILS_DIR) and UTILS_DIR not in sys.path:
+    sys.path.insert(0, UTILS_DIR)
+# ---- END: path bootstrap ----
+
 
 import os
 import pandas as pd
