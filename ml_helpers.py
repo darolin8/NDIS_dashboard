@@ -795,40 +795,69 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
 
 
 # 12) Predictive Risk Scoring System
-def create_predictive_risk_scoring(df: pd.DataFrame, trained_models: Dict[str, Dict[str, Any]], feature_names: List[str]):
-    """Return a function calculate_risk_score(scenario_data) using the best model in trained_models."""
+def create_predictive_risk_scoring(
+    df: pd.DataFrame,
+    trained_models: Dict[str, Dict[str, Any]],
+    feature_names: List[str],
+):
+    """
+    Return calculate_risk_score(scenario) using the best model.
+    Uses the model's TRAINING feature list (stored in trained_models[...]['feature_names'])
+    to avoid n_features_in_ mismatches.
+    """
     if not trained_models:
         return None
 
-    best_model_name = max(trained_models.keys(), key=lambda x: trained_models[x].get('accuracy', 0))
+    # pick best model
+    best_model_name = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
     best_model = trained_models[best_model_name]['model']
 
+    # always prefer training-time features saved with the model; fall back to arg
+    train_feats = list(trained_models[best_model_name].get('feature_names', feature_names))
+    n_expected = getattr(best_model, "n_features_in_", len(train_feats))
+
+    # final safety: if saved list length doesn't match model metadata, trim/pad
+    if len(train_feats) != n_expected:
+        if len(train_feats) > n_expected:
+            train_feats = train_feats[:n_expected]
+        else:
+            # pad with dummy columns so shape matches; they will stay zero
+            train_feats = train_feats + [f"__pad_{i}__" for i in range(n_expected - len(train_feats))]
+
     def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
-        vec = np.zeros(len(feature_names))
+        # simple name→value mapping for your demo features
         mapping = {
             'hour': scenario_data.get('hour', 12),
             'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
-            'is_kitchen': 1 if 'kitchen' in scenario_data.get('location', '').lower() else 0,
-            'is_bathroom': 1 if any(k in scenario_data.get('location', '').lower() for k in ['bathroom','toilet','washroom','restroom']) else 0,
+            'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
+            'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
+                                    for k in ['bathroom','toilet','washroom','restroom']) else 0,
             'participant_incident_count': scenario_data.get('participant_history', 1),
             'carer_incident_count': scenario_data.get('carer_history', 1),
-            'location_risk_score': scenario_data.get('location_risk', 2)
+            'location_risk_score': scenario_data.get('location_risk', 2),
         }
-        for i, fn in enumerate(feature_names):
-            if fn in mapping:
-                vec[i] = mapping[fn]
+
+        # build vector aligned to TRAINING feature order
+        vec = np.zeros(len(train_feats), dtype=float)
+        for i, fn in enumerate(train_feats):
+            vec[i] = float(mapping.get(fn, 0.0))  # 0.0 for any features not in the mapping
+
+        X_one = vec.reshape(1, -1)
 
         if hasattr(best_model, 'predict_proba'):
-            proba = best_model.predict_proba([vec])[0]
-            max_risk = float(np.max(proba))
+            proba = best_model.predict_proba(X_one)[0]
+            # for binary classifiers this is usually prob of positive class; max() keeps it robust
+            score = float(np.max(proba))
         else:
-            pred = best_model.predict([vec])[0]
-            max_risk = float(pred) / 3.0  # crude normalization
+            pred = best_model.predict(X_one)[0]
+            score = float(pred) / 3.0  # crude normalisation fallback
 
-        level = 'HIGH' if max_risk > 0.7 else 'MEDIUM' if max_risk > 0.4 else 'LOW'
-        return {'risk_score': max_risk, 'risk_level': level, 'confidence': max_risk, 'model_used': best_model_name}
+        level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
+        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_model_name}
 
     return calculate_risk_score
+
+
 
 
 # 13) Incident Similarity Analysis
