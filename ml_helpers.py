@@ -563,30 +563,23 @@ def predictive_models_comparison(
 
     return results
 
-def calculate_risk_score(
-    scenario: Union[Dict[str, Any], pd.Series],
-    best_model,
-    feature_names: List[str]
-) -> np.ndarray:
+def calculate_risk_score(scenario, best_model, feature_names):
     """
-    Build input vector from scenario using only feature_names, in order.
-    Returns model predicted probabilities.
-    Raises KeyError if feature missing.
+    scenario: dict or pd.Series with all possible fields
+    best_model: trained sklearn model
+    feature_names: list of columns used for training the model
+    Returns: predicted probability from best_model
     """
-    # Build vector ONLY with the features used for training, in order
-    try:
-        if isinstance(scenario, dict):
-            vec = [scenario[feat] for feat in feature_names]
-        elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
-            vec = [scenario[feat] for feat in feature_names]
-        else:
-            raise TypeError("Scenario must be dict or pandas Series.")
+    import numpy as np
 
+    try:
+        # Build vector ONLY with the features used for training, in order
+        vec = [scenario[feat] for feat in feature_names]
         vec_np = np.array(vec, dtype=float).reshape(1, -1)  # Shape (1, n_features) for sklearn
         proba = best_model.predict_proba(vec_np)[0]
         return proba
     except KeyError as e:
-        raise KeyError(f"Feature missing in scenario: {e}.\nRequired features: {feature_names}")
+        raise KeyError(f"Feature missing in scenario: {e}. Required features: {feature_names}")
     except Exception as e:
         raise RuntimeError(f"Error in calculate_risk_score: {e}")
 # ---------------------------------------
