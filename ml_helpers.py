@@ -452,31 +452,39 @@ def plot_3d_clusters(
 # ---------------------------------------
 # 7) Predictive models comparison (baselines)
 # ---------------------------------------
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from typing import Dict, List, Any, Union
+
 def predictive_models_comparison(
     df: pd.DataFrame,
     target: str = "reportable_bin",
     test_size: float = 0.25,
     random_state: int = 42,
-) -> dict:
-    from sklearn.model_selection import train_test_split
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.linear_model import LogisticRegression
-    import pandas as pd
-
+    extra_leaky_features: List[str] = None,  # Optionally pass more leaky features
+) -> Dict[str, Any]:
+    """
+    Trains RandomForest and LogisticRegression models, returns results and diagnostics.
+    Ensures feature_names matches training columns (after dropping leaks).
+    """
     # Feature engineering
     out = create_comprehensive_features(df)
     if isinstance(out, tuple) and len(out) == 3:
-        X, feature_names, features_df = out
+        _, _, features_df = out
         features_df = features_df.copy()
     elif isinstance(out, pd.DataFrame):
         features_df = out.copy()
-        feature_names = features_df.columns.tolist()
     else:
         features_df = pd.DataFrame(out)
-        feature_names = features_df.columns.tolist()
-    y = df[target].copy() if target in df.columns else (
-        df.get("severity_numeric", pd.Series([2]*len(df))) >= 3
-    ).astype(int)
+
+    # Determine target vector
+    if target in df.columns:
+        y = df[target].copy()
+    else:
+        y = (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
 
     # Remove target and known proxies
     drop_cols = [
@@ -485,8 +493,9 @@ def predictive_models_comparison(
         "reportable_bin",
         "severity_numeric",
         "medical_attention_required"
-        # Add more leaky features here after diagnostics!
     ]
+    if extra_leaky_features:
+        drop_cols.extend(extra_leaky_features)
     for col in drop_cols:
         if col in features_df.columns:
             features_df = features_df.drop(columns=[col])
@@ -512,6 +521,7 @@ def predictive_models_comparison(
     print("\nFeature-target correlations:", correlations)
     # -------------------------------------------
 
+    # Prepare train/test split
     X = features_df.values
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -520,6 +530,7 @@ def predictive_models_comparison(
 
     results = {}
 
+    # RandomForest
     rf = RandomForestClassifier(n_estimators=200, random_state=random_state)
     rf.fit(X_train, y_train)
     rf_pred = rf.predict(X_test)
@@ -533,6 +544,7 @@ def predictive_models_comparison(
         "feature_names": feature_names,  # Save features used for training!
     }
 
+    # LogisticRegression
     try:
         logreg = LogisticRegression(max_iter=2000, solver="saga", n_jobs=-1)
     except TypeError:
@@ -546,32 +558,37 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": lg_pred,
         "probabilities": lg_proba,
-        "feature_names": feature_names,  # Save features used for training!
+        "feature_names": feature_names,
     }
 
     return results
 
-def calculate_risk_score(scenario, best_model, feature_names):
+def calculate_risk_score(
+    scenario: Union[Dict[str, Any], pd.Series],
+    best_model,
+    feature_names: List[str]
+) -> np.ndarray:
     """
-    scenario: dict or pd.Series with all possible fields
-    best_model: trained sklearn model
-    feature_names: list of columns used for training the model
-    Returns: predicted probability from best_model
+    Build input vector from scenario using only feature_names, in order.
+    Returns model predicted probabilities.
+    Raises KeyError if feature missing.
     """
-    import numpy as np
-
     # Build vector ONLY with the features used for training, in order
-    if isinstance(scenario, dict):
-        vec = [scenario[feat] for feat in feature_names]
-    elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
-        vec = [scenario[feat] for feat in feature_names]
-    else:
-        raise TypeError("Scenario must be dict or pandas Series.")
+    try:
+        if isinstance(scenario, dict):
+            vec = [scenario[feat] for feat in feature_names]
+        elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
+            vec = [scenario[feat] for feat in feature_names]
+        else:
+            raise TypeError("Scenario must be dict or pandas Series.")
 
-    vec_np = np.array(vec).reshape(1, -1)  # Shape (1, n_features) for sklearn
-    proba = best_model.predict_proba(vec_np)[0]
-
-    return proba
+        vec_np = np.array(vec, dtype=float).reshape(1, -1)  # Shape (1, n_features) for sklearn
+        proba = best_model.predict_proba(vec_np)[0]
+        return proba
+    except KeyError as e:
+        raise KeyError(f"Feature missing in scenario: {e}.\nRequired features: {feature_names}")
+    except Exception as e:
+        raise RuntimeError(f"Error in calculate_risk_score: {e}")
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
