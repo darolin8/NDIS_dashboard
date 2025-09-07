@@ -566,18 +566,10 @@ def predictive_models_comparison(
 def calculate_risk_score(scenario, best_model, feature_names):
     import numpy as np
 
-    # Build vector ONLY with the features used for training, in order
-    if isinstance(scenario, dict):
-        vec = [scenario[feat] for feat in feature_names]
-    elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
-        vec = [scenario[feat] for feat in feature_names]
-    else:
-        raise TypeError("Scenario must be dict or pandas Series.")
-
-    # FIXED: Use np.array and reshape, NOT [vec]
-    vec_np = np.array(vec).reshape(1, -1)  # Shape (1, n_features) for sklearn
+    # Ensure correct feature order and count
+    vec = [scenario[feat] for feat in feature_names]
+    vec_np = np.array(vec).reshape(1, -1)
     proba = best_model.predict_proba(vec_np)[0]
-
     return proba
 # ---------------------------------------
 # 8) Incident type risk profiling
