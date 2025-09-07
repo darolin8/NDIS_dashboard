@@ -1256,7 +1256,6 @@ def display_ml_insights_section(filtered_df):
         st.warning(f"Seasonality plot failed: {e}")
 
     st.divider()
-
     # ---------------------------------
     # 5) Clustering & Risk Profiles
     # ---------------------------------
@@ -1266,7 +1265,15 @@ def display_ml_insights_section(filtered_df):
         k = st.slider("k (number of clusters)", 2, 12, 4, step=1, key="ml_k_clusters_insights")
         sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
 
-    # 2D
+    # >>>>>>> ADD DEBUG HERE <<<<<<<
+    st.write("DEBUG: features_df type:", type(features_df))
+    if features_df is not None:
+        st.write("DEBUG: features_df shape:", features_df.shape)
+        st.write("DEBUG: features_df columns:", features_df.columns)
+    else:
+        st.error("features_df is None! Clustering and correlation won't run.")
+
+    # 2D Clustering
     color_map = {}
     try:
         fig2d, labels2d = clustering_analysis(features_df, k=k)
@@ -1276,7 +1283,7 @@ def display_ml_insights_section(filtered_df):
     except Exception as e:
         st.warning(f"2D clustering failed: {e}")
 
-    # 3D (reuse colors)
+    # 3D Clustering
     try:
         fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
         st.plotly_chart(fig3d, use_container_width=True)
@@ -1294,4 +1301,3 @@ def display_ml_insights_section(filtered_df):
         st.plotly_chart(corr_fig, use_container_width=True)
     except Exception as e:
         st.warning(f"Correlation analysis failed: {e}")
-
