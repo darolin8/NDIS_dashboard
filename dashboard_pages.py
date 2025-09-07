@@ -1268,20 +1268,20 @@ def display_ml_insights_section(filtered_df):
         sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
 
     # >>>>>>> DEBUG BLOCK <<<<<<<
-    st.markdown("### DEBUG: Clustering & Correlations Input")
-    st.write("features_df type:", type(features_df))
-    if features_df is not None:
-        st.write("features_df shape:", features_df.shape)
-        st.write("features_df columns:", features_df.columns.tolist())
-        st.write("features_df head:", features_df.head())
-        st.write("features_df dtypes:", features_df.dtypes)
-    else:
-        st.error("features_df is None! Clustering/correlation will not run.")
+    #st.markdown("### DEBUG: Clustering & Correlations Input")
+    #st.write("features_df type:", type(features_df))
+    #if features_df is not None:
+        #st.write("features_df shape:", features_df.shape)
+        #st.write("features_df columns:", features_df.columns.tolist())
+        #st.write("features_df head:", features_df.head())
+        #st.write("features_df dtypes:", features_df.dtypes)
+    #else:
+        #st.error("features_df is None! Clustering/correlation will not run.")
 
-    numeric_cols = features_df.select_dtypes(include='number').columns if features_df is not None else []
-    st.write("Numeric columns for clustering/correlation:", list(numeric_cols))
-    if features_df is not None and len(numeric_cols) == 0:
-        st.warning("No numeric columns found in features_df. Clustering and correlation require numeric data!")
+    #numeric_cols = features_df.select_dtypes(include='number').columns if features_df is not None else []
+    #st.write("Numeric columns for clustering/correlation:", list(numeric_cols))
+    #if features_df is not None and len(numeric_cols) == 0:
+        #st.warning("No numeric columns found in features_df. Clustering and correlation require numeric data!")
 
     # 2D Clustering
     color_map = {}
