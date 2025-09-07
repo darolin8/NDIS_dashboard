@@ -572,16 +572,18 @@ def calculate_risk_score(scenario, best_model, feature_names):
     """
     import numpy as np
 
-    try:
-        # Build vector ONLY with the features used for training, in order
+    # Build vector ONLY with the features used for training, in order
+    if isinstance(scenario, dict):
         vec = [scenario[feat] for feat in feature_names]
-        vec_np = np.array(vec, dtype=float).reshape(1, -1)  # Shape (1, n_features) for sklearn
-        proba = best_model.predict_proba(vec_np)[0]
-        return proba
-    except KeyError as e:
-        raise KeyError(f"Feature missing in scenario: {e}. Required features: {feature_names}")
-    except Exception as e:
-        raise RuntimeError(f"Error in calculate_risk_score: {e}")
+    elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
+        vec = [scenario[feat] for feat in feature_names]
+    else:
+        raise TypeError("Scenario must be dict or pandas Series.")
+
+    vec_np = np.array(vec).reshape(1, -1)  # Shape (1, n_features) for sklearn
+    proba = best_model.predict_proba(vec_np)[0]
+
+    return proba
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
