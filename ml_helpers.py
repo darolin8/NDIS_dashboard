@@ -457,49 +457,70 @@ def predictive_models_comparison(
     target: str = "reportable_bin",
     test_size: float = 0.25,
     random_state: int = 42,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict:
+    """
+    Train baseline models and return a dict suitable for dashboard analysis.
+    Ensures target and derived columns are NOT present in features.
+    Prints feature-target correlations and group means to diagnose leakage.
+    """
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
+    import pandas as pd
 
-    # Feature engineering, handle different return types
+    # Feature engineering
     out = create_comprehensive_features(df)
-    # If create_comprehensive_features returns 3 values:
     if isinstance(out, tuple) and len(out) == 3:
         X, feature_names, features_df = out
-        # Use features_df for column dropping
-        for col in [target, "severity_numeric", "reportable", "reportable_bin"]:
-            if col in features_df.columns:
-                features_df = features_df.drop(columns=[col])
-        X = features_df.values
-        feature_names = features_df.columns.tolist()
-    # If it only returns a DataFrame:
+        features_df = features_df.copy()
     elif isinstance(out, pd.DataFrame):
         features_df = out.copy()
-        for col in [target, "severity_numeric", "reportable", "reportable_bin"]:
-            if col in features_df.columns:
-                features_df = features_df.drop(columns=[col])
-        X = features_df.values
-        feature_names = features_df.columns.tolist()
-    # If it only returns an array:
     else:
-        X = out
-        feature_names = [f"f{i}" for i in range(X.shape[1])]
-        features_df = pd.DataFrame(X, columns=feature_names)
+        features_df = pd.DataFrame(out)
+    y = df[target].copy() if target in df.columns else (
+        df.get("severity_numeric", pd.Series([2]*len(df))) >= 3
+    ).astype(int)
 
-    y = df[target].copy() if target in df.columns else (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
+    # Remove target and common proxies
+    drop_cols = [
+        target,
+        "reportable",
+        "reportable_bin",
+        "severity_numeric",
+        "medical_attention_required",  # add any other columns you suspect!
+    ]
+    for col in drop_cols:
+        if col in features_df.columns:
+            features_df = features_df.drop(columns=[col])
 
-    # Optional debug
-    import streamlit as st
-    st.write("Feature columns for training:", feature_names)
-    st.write("First few rows of features_df:", features_df.head())
-    st.write("Target value counts:", y.value_counts())
+    # ---- Diagnostic: Show features used ----
+    print("\nFeature columns for training:", features_df.columns.tolist())
+    print("Target value counts:", y.value_counts())
+    print("First few rows of features_df:\n", features_df.head())
+
+    # ---- Diagnostic: Check for proxy features ----
+    correlations = {}
+    for col in features_df.columns:
+        try:
+            if features_df[col].dtype == 'object' or 'category' in str(features_df[col].dtype):
+                group_means = df.groupby(col)[target].mean()
+                print(f"\nFeature '{col}' groupby mean target:\n{group_means}")
+            else:
+                corr = pd.Series(features_df[col]).corr(y)
+                correlations[col] = corr
+        except Exception as e:
+            print(f"Could not correlate {col}: {e}")
+    print("\nFeature-target correlations:", correlations)
+    # -------------------------------------------
+
+    X = features_df.values
+    feature_names = features_df.columns.tolist()
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
     )
 
-    results: Dict[str, Dict[str, Any]] = {}
+    results = {}
 
     rf = RandomForestClassifier(n_estimators=200, random_state=random_state)
     rf.fit(X_train, y_train)
