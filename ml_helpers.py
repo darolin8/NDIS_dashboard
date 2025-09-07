@@ -458,15 +458,19 @@ def predictive_models_comparison(
     test_size: float = 0.25,
     random_state: int = 42,
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Train baseline models and return a dict suitable for the enhanced confusion matrix UI.
-    """
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
 
     X, feature_names, features_df = create_comprehensive_features(df)
     y = df[target].copy() if target in df.columns else (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
+
+    # ----------- PATCH: Remove target from features! -----------
+    if target in features_df.columns:
+        features_df = features_df.drop(columns=[target])
+    X = features_df.values
+    feature_names = features_df.columns.tolist()
+    # -----------------------------------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
