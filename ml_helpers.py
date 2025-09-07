@@ -565,10 +565,10 @@ def predictive_models_comparison(
 
 def calculate_risk_score(scenario, best_model, feature_names):
     import numpy as np
-
-    # Ensure correct feature order and count
     vec = [scenario[feat] for feat in feature_names]
     vec_np = np.array(vec).reshape(1, -1)
+    print("vec_np shape:", vec_np.shape)
+    print("Model expects:", best_model.n_features_in_)
     proba = best_model.predict_proba(vec_np)[0]
     return proba
 # ---------------------------------------
