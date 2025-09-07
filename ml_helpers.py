@@ -574,7 +574,7 @@ def calculate_risk_score(scenario, best_model, feature_names):
     else:
         raise TypeError("Scenario must be dict or pandas Series.")
 
-    # **THIS IS THE IMPORTANT PART:**
+    # FIXED: Use np.array and reshape, NOT [vec]
     vec_np = np.array(vec).reshape(1, -1)  # Shape (1, n_features) for sklearn
     proba = best_model.predict_proba(vec_np)[0]
 
