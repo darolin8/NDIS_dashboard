@@ -44,7 +44,15 @@ from ml_helpers import (
 from utils.factor_labels import shorten_factor
 
 
-# Train/cache on the filtered data that powers the page
+# Load your CSV data
+DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "text data", "ndis_incident_1000.csv")
+df = pd.read_csv(DATA_PATH)
+
+# Example: filter to rows with severity not null (customize as needed)
+filtered_df = df[df["severity"].notnull()].copy()
+
+# Now you can safely call
+from ml_helpers import ensure_risk_model
 ensure_risk_model(filtered_df, target_col="severity", positive_labels={"Critical", "High"})
 
 
