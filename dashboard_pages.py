@@ -1089,7 +1089,7 @@ def display_ml_insights_section(filtered_df):
         st.error(f"Feature engineering failed: {e}")
         return
 
-    # Optional: quick trainer so you can populate st.session_state['trained_models']
+    # Optional: quick trainer
     with st.expander("🔧 Train baseline models (optional)"):
         if st.button("Train / Refresh"):
             try:
@@ -1117,7 +1117,7 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Could not render metrics for {model_name}: {e}")
 
-        # Feature importance of best model (if available)
+        # Feature importance
         st.markdown("#### 🔍 Feature Importance (if available)")
         try:
             best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
@@ -1228,13 +1228,10 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     # 4) Forecasting & Seasonality
     # ---------------------------------
-  
     st.subheader("📈 Forecasting & Seasonality")
 
     df_used = ensure_incident_datetime(df_used)
 
-
-    # Forecast
     horizon = int(st.session_state.get("ml_forecast_months", 6))
     try:
         fig, forecast_df = _call_incident_forecast(df_used, horizon)
@@ -1248,7 +1245,6 @@ def display_ml_insights_section(filtered_df):
     except Exception as e:
         st.warning(f"Forecasting failed: {e}")
 
-    # Seasonality heatmap
     try:
         valid_dt = int(df_used["incident_datetime"].notna().sum())
         if valid_dt >= 3:
@@ -1261,43 +1257,41 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-# ---------------------------------
-# 5) Clustering & Risk Profiles
-# ---------------------------------
-st.subheader("🧩 Clustering & Risk Profiles")
+    # ---------------------------------
+    # 5) Clustering & Risk Profiles
+    # ---------------------------------
+    st.subheader("🧩 Clustering & Risk Profiles")
 
-with st.expander("Clustering controls", expanded=True):
-    k = st.slider("k (number of clusters)", 2, 12, 4, step=1, key="ml_k_clusters_insights")
-    sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
+    with st.expander("Clustering controls", expanded=True):
+        k = st.slider("k (number of clusters)", 2, 12, 4, step=1, key="ml_k_clusters_insights")
+        sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
 
-# 2D
-color_map = {}
-try:
-    fig2d, labels2d = clustering_analysis(features_df, k=k)
-    st.plotly_chart(fig2d, use_container_width=True)
-    if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
-        color_map = fig2d.layout.meta["cluster_color_map"]
-except Exception as e:
-    st.warning(f"2D clustering failed: {e}")
+    # 2D
+    color_map = {}
+    try:
+        fig2d, labels2d = clustering_analysis(features_df, k=k)
+        st.plotly_chart(fig2d, use_container_width=True)
+        if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
+            color_map = fig2d.layout.meta["cluster_color_map"]
+    except Exception as e:
+        st.warning(f"2D clustering failed: {e}")
 
-# 3D (reuse colors)
-try:
-    fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
-    st.plotly_chart(fig3d, use_container_width=True)
-except Exception as e:
-    st.warning(f"3D clustering failed: {e}")
+    # 3D (reuse colors)
+    try:
+        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
+        st.plotly_chart(fig3d, use_container_width=True)
+    except Exception as e:
+        st.warning(f"3D clustering failed: {e}")
 
-st.divider()
+    st.divider()
 
-# ---------------------------------
-# 6) Correlations
-# ---------------------------------
-st.subheader("🔗 Correlations")
-try:
-    corr_fig = correlation_analysis(features_df, height=900)
-    st.plotly_chart(corr_fig, use_container_width=True)
-except Exception as e:
-    st.warning(f"Correlation analysis failed: {e}")
-
-
+    # ---------------------------------
+    # 6) Correlations
+    # ---------------------------------
+    st.subheader("🔗 Correlations")
+    try:
+        corr_fig = correlation_analysis(features_df, height=900)
+        st.plotly_chart(corr_fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Correlation analysis failed: {e}")
 
