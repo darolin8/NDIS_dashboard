@@ -1,3 +1,56 @@
+# dashboard_pages.py (top of file)
+
+# 1) Safe fallback for shorten_factor (keeps app running even if utils/ isn’t a package)
+try:
+    from utils.factor_labels import shorten_factor  # optional
+except Exception:
+    def shorten_factor(x):
+        if x is None: return ""
+        s = str(x)
+        return (s.split(";")[0] or s)[:30]
+
+# 2) Ensure repo dir is on path (no __init__.py needed)
+import os, sys
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+# 3) Import ml_helpers as a module and validate required symbols
+import streamlit as st
+import importlib
+ML = importlib.import_module("ml_helpers")
+
+REQUIRED = [
+    "incident_volume_forecasting",
+    "seasonal_temporal_patterns",
+    "plot_time_with_causes",
+    "plot_carer_performance_scatter",
+    "create_comprehensive_features",
+    "correlation_analysis",
+    "clustering_analysis",
+    "predictive_models_comparison",
+    "incident_type_risk_profiling",
+    "create_predictive_risk_scoring",   # if you call it from this file
+]
+_missing = [name for name in REQUIRED if not hasattr(ML, name)]
+if _missing:
+    st.error(f"ml_helpers is missing: {_missing}. Check function names in ml_helpers.py.")
+    # You can st.stop() here if you prefer hard fail:
+    # st.stop()
+
+# 4) Bind the names you use later in this file
+incident_volume_forecasting      = getattr(ML, "incident_volume_forecasting")
+seasonal_temporal_patterns       = getattr(ML, "seasonal_temporal_patterns")
+plot_time_with_causes            = getattr(ML, "plot_time_with_causes")
+plot_carer_performance_scatter   = getattr(ML, "plot_carer_performance_scatter")
+create_comprehensive_features    = getattr(ML, "create_comprehensive_features")
+correlation_analysis             = getattr(ML, "correlation_analysis")
+clustering_analysis              = getattr(ML, "clustering_analysis")
+predictive_models_comparison     = getattr(ML, "predictive_models_comparison")
+# prefer the alias if present, otherwise the canonical name
+profile_incident_type_risk       = getattr(ML, "profile_incident_type_risk",
+                                           getattr(ML, "incident_type_risk_profiling"))
+create_predictive_risk_scoring   = getattr(ML, "create_predictive_risk_scoring", None)
 
 # ----------------------------
 # Imports
@@ -39,19 +92,6 @@ from ml_helpers import (
     ensure_incident_datetime,
     plot_3d_clusters,
 )
-
-
-# Try optional utils import; fall back to a noop helper.
-try:
-    from utils.factor_labels import shorten_factor  # optional
-except Exception:
-    def shorten_factor(x):
-        # simple, safe fallback to keep the app running
-        if x is None:
-            return ""
-        s = str(x)
-        # keep first token or first 30 chars
-        return (s.split(";")[0] or s)[:30]
 
 
 # Compatibility wrapper so we don't care which signature ml_helpers currently exposes
