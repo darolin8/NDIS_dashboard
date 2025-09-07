@@ -458,34 +458,42 @@ def predictive_models_comparison(
     test_size: float = 0.25,
     random_state: int = 42,
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Train baseline models and return a dict suitable for the enhanced confusion matrix UI.
-    Ensures target and derived columns are NOT present in features.
-    """
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
 
+    # Feature engineering, handle different return types
+    out = create_comprehensive_features(df)
+    # If create_comprehensive_features returns 3 values:
+    if isinstance(out, tuple) and len(out) == 3:
+        X, feature_names, features_df = out
+        # Use features_df for column dropping
+        for col in [target, "severity_numeric", "reportable", "reportable_bin"]:
+            if col in features_df.columns:
+                features_df = features_df.drop(columns=[col])
+        X = features_df.values
+        feature_names = features_df.columns.tolist()
+    # If it only returns a DataFrame:
+    elif isinstance(out, pd.DataFrame):
+        features_df = out.copy()
+        for col in [target, "severity_numeric", "reportable", "reportable_bin"]:
+            if col in features_df.columns:
+                features_df = features_df.drop(columns=[col])
+        X = features_df.values
+        feature_names = features_df.columns.tolist()
+    # If it only returns an array:
+    else:
+        X = out
+        feature_names = [f"f{i}" for i in range(X.shape[1])]
+        features_df = pd.DataFrame(X, columns=feature_names)
+
+    y = df[target].copy() if target in df.columns else (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
+
+    # Optional debug
     import streamlit as st
     st.write("Feature columns for training:", feature_names)
     st.write("First few rows of features_df:", features_df.head())
     st.write("Target value counts:", y.value_counts())
-
-    # Feature engineering
-    X, feature_names, features_df = create_comprehensive_features(df)
-    y = df[target].copy() if target in df.columns else (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
-
-    # Remove target and any direct/derived target columns from features
-    for col in [target, "severity_numeric", "reportable", "reportable_bin"]:
-        if col in features_df.columns:
-            features_df = features_df.drop(columns=[col])
-    X = features_df.values
-    feature_names = features_df.columns.tolist()
-
-    # Optional debug: print features used
-    # import streamlit as st
-    # st.write("Feature columns for training:", feature_names)
-    # st.write("Target value counts:", y.value_counts())
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
