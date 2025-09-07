@@ -1264,56 +1264,40 @@ def display_ml_insights_section(filtered_df):
 # ---------------------------------
 # 5) Clustering & Risk Profiles
 # ---------------------------------
-    st.subheader("🧱 Clustering & Risk Profiles")
-    try:
-        k = st.slider("Clusters (k)", 2, 8, 4, key="ml_k_clusters")
-        try:
-            cl_res = clustering_analysis(features_df, k=k)
-        except Exception:
-            cl_res = clustering_analysis(df_used, k=k)
+st.subheader("🧩 Clustering & Risk Profiles")
 
-        fig_candidate = None
-        if isinstance(cl_res, tuple):
-            for v in cl_res:
-                if hasattr(v, "to_json") and hasattr(v, "data"):
-                    fig_candidate = v
-        elif hasattr(cl_res, "to_json") and hasattr(cl_res, "data"):
-            fig_candidate = cl_res
+with st.expander("Clustering controls", expanded=True):
+    k = st.slider("k (number of clusters)", 2, 12, 4, step=1, key="ml_k_clusters_insights")
+    sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
 
-        if fig_candidate is not None:
-            st.plotly_chart(fig_candidate, use_container_width=True)
-        else:
-            st.write("Clustering output:", cl_res)
+# 2D
+color_map = {}
+try:
+    fig2d, labels2d = clustering_analysis(features_df, k=k)
+    st.plotly_chart(fig2d, use_container_width=True)
+    if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
+        color_map = fig2d.layout.meta["cluster_color_map"]
+except Exception as e:
+    st.warning(f"2D clustering failed: {e}")
 
-        st.caption("Cluster labels computed on engineered features (if available).")
-    except Exception as e:
-        st.warning(f"Clustering failed: {e}")
+# 3D (reuse colors)
+try:
+    fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
+    st.plotly_chart(fig3d, use_container_width=True)
+except Exception as e:
+    st.warning(f"3D clustering failed: {e}")
 
+st.divider()
 
 # ---------------------------------
 # 6) Correlations
 # ---------------------------------
-st.subheader("📊 Correlations")
-    try:
-        corr_res = correlation_analysis(features_df)
-        if hasattr(corr_res, "to_json") and hasattr(corr_res, "data"):
-            # If your helper returns a Plotly fig, just enlarge it
-            corr_res.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
-            st.plotly_chart(corr_res, use_container_width=True)
-        elif isinstance(corr_res, (pd.DataFrame, np.ndarray)):
-            mat = corr_res if isinstance(corr_res, pd.DataFrame) else pd.DataFrame(corr_res)
-            fig = px.imshow(
-                mat,
-                color_continuous_scale="RdBu_r",
-                zmin=-1, zmax=1,
-                title="Feature Correlation Matrix",
-            )
-            fig.update_layout(height=700, margin=dict(t=60, r=20, l=80, b=80))
-            fig.update_xaxes(tickangle=45)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.write("Correlation output:", corr_res)
-    except Exception as e:
-        st.warning(f"Correlation analysis failed: {e}")
+st.subheader("🔗 Correlations")
+try:
+    corr_fig = correlation_analysis(features_df, height=900)
+    st.plotly_chart(corr_fig, use_container_width=True)
+except Exception as e:
+    st.warning(f"Correlation analysis failed: {e}")
+
 
 
