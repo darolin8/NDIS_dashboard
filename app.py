@@ -1,14 +1,19 @@
 # app.py
 
-# ---- BEGIN: path bootstrap (no __init__.py needed) ----
-import os, sys
+# app.py (very top, before any other imports)
+import os, sys, streamlit as st
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
-UTILS_DIR = os.path.join(APP_DIR, "utils")
-if os.path.isdir(UTILS_DIR) and UTILS_DIR not in sys.path:
-    sys.path.insert(0, UTILS_DIR)
-# ---- END: path bootstrap ----
+
+try:
+    import ml_helpers as ML
+    st.info(f"ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
+except Exception as e:
+    st.error("Failed to import ml_helpers. See details below:")
+    st.exception(e)
+    st.stop()  # prevent the redacted ImportError from masking the root cause
+
 
 
 import os
