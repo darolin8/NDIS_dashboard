@@ -470,8 +470,10 @@ def predictive_models_comparison(
         features_df = features_df.copy()
     elif isinstance(out, pd.DataFrame):
         features_df = out.copy()
+        feature_names = features_df.columns.tolist()
     else:
         features_df = pd.DataFrame(out)
+        feature_names = features_df.columns.tolist()
     y = df[target].copy() if target in df.columns else (
         df.get("severity_numeric", pd.Series([2]*len(df))) >= 3
     ).astype(int)
@@ -483,18 +485,19 @@ def predictive_models_comparison(
         "reportable_bin",
         "severity_numeric",
         "medical_attention_required"
+        # Add more leaky features here after diagnostics!
     ]
     for col in drop_cols:
         if col in features_df.columns:
             features_df = features_df.drop(columns=[col])
+    feature_names = features_df.columns.tolist()
 
     # ---- Diagnostic: Print feature-target relationships ----
-    print("\nFeature columns for training:", features_df.columns.tolist())
+    print("\nFeature columns for training:", feature_names)
     print("Target value counts:", y.value_counts())
     print("First few rows of features_df:\n", features_df.head())
-
     correlations = {}
-    for col in features_df.columns:
+    for col in feature_names:
         try:
             # For categorical features, print groupby mean
             if features_df[col].dtype == 'object' or 'category' in str(features_df[col].dtype):
@@ -502,15 +505,14 @@ def predictive_models_comparison(
                 print(f"\nFeature '{col}' groupby mean target:\n{group_means}")
             else:
                 corr = pd.Series(features_df[col]).corr(y)
+                print(f"Feature '{col}' correlation with target: {corr}")
                 correlations[col] = corr
         except Exception as e:
             print(f"Could not correlate {col}: {e}")
-
     print("\nFeature-target correlations:", correlations)
     # -------------------------------------------
 
     X = features_df.values
-    feature_names = features_df.columns.tolist()
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
@@ -528,7 +530,7 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": rf_pred,
         "probabilities": rf_proba,
-        "feature_names": feature_names,
+        "feature_names": feature_names,  # Save features used for training!
     }
 
     try:
@@ -544,10 +546,34 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": lg_pred,
         "probabilities": lg_proba,
-        "feature_names": feature_names,
+        "feature_names": feature_names,  # Save features used for training!
     }
 
     return results
+
+def calculate_risk_score(scenario, best_model, feature_names):
+    """
+    Calculate risk score for a scenario using a trained model and feature_names.
+    scenario: dict or pd.Series with all possible fields
+    best_model: trained sklearn model
+    feature_names: list of columns used for training the model
+    """
+    import numpy as np
+
+    # If scenario is a dictionary
+    if isinstance(scenario, dict):
+        vec = [scenario[feat] for feat in feature_names]
+    # If scenario is a pandas Series or row
+    elif hasattr(scenario, "to_dict"):
+        vec = [scenario[feat] for feat in feature_names]
+    else:
+        raise TypeError("Scenario must be dict or pandas Series.")
+
+    # Reshape and predict
+    vec_np = np.array(vec).reshape(1, -1)
+    proba = best_model.predict_proba(vec_np)[0]  # This matches n_features
+
+    return proba
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
