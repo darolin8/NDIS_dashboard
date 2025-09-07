@@ -43,6 +43,12 @@ from ml_helpers import (
 
 from utils.factor_labels import shorten_factor
 
+from ml_helpers import ensure_risk_model
+
+# Train/cache on the filtered data that powers the page
+ensure_risk_model(filtered_df, target_col="severity", positive_labels={"Critical", "High"})
+
+
 # Compatibility wrapper so we don't care which signature ml_helpers currently exposes
 def _call_incident_forecast(df, horizon):
     try:
