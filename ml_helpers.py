@@ -553,25 +553,23 @@ def predictive_models_comparison(
 
 def calculate_risk_score(scenario, best_model, feature_names):
     """
-    Calculate risk score for a scenario using a trained model and feature_names.
     scenario: dict or pd.Series with all possible fields
     best_model: trained sklearn model
     feature_names: list of columns used for training the model
+    Returns: predicted probability from best_model
     """
     import numpy as np
 
-    # If scenario is a dictionary
+    # Build vector ONLY with the features used for training, in order
     if isinstance(scenario, dict):
         vec = [scenario[feat] for feat in feature_names]
-    # If scenario is a pandas Series or row
-    elif hasattr(scenario, "to_dict"):
+    elif hasattr(scenario, "to_dict"):  # pandas Series or DataFrame row
         vec = [scenario[feat] for feat in feature_names]
     else:
         raise TypeError("Scenario must be dict or pandas Series.")
 
-    # Reshape and predict
-    vec_np = np.array(vec).reshape(1, -1)
-    proba = best_model.predict_proba(vec_np)[0]  # This matches n_features
+    vec_np = np.array(vec).reshape(1, -1)  # Shape (1, n_features) for sklearn
+    proba = best_model.predict_proba(vec_np)[0]
 
     return proba
 # ---------------------------------------
