@@ -452,85 +452,109 @@ def plot_3d_clusters(
 # ---------------------------------------
 # 7) Predictive models comparison (baselines)
 # ---------------------------------------
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
+from typing import Dict, List, Any, Optional, Union
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from typing import Dict, List, Any, Union
 
 def predictive_models_comparison(
     df: pd.DataFrame,
     target: str = "reportable_bin",
     test_size: float = 0.25,
     random_state: int = 42,
-    extra_leaky_features: List[str] = None,  # Optionally pass more leaky features
+    extra_leaky_features: Optional[List[str]] = None,
+    split_strategy: str = "random",       # "random" | "time" | "group"
+    time_col: Optional[str] = "incident_date",
+    group_col: Optional[str] = None,
+    leak_corr_threshold: float = 0.98,
+    leak_name_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Trains RandomForest and LogisticRegression models, returns results and diagnostics.
-    Ensures feature_names matches training columns (after dropping leaks).
+    Trains RF & LogReg with leak defenses and safer splitting.
     """
-    # Feature engineering
+    # ---- Build features the same way as the app
     out = create_comprehensive_features(df)
     if isinstance(out, tuple) and len(out) == 3:
         _, _, features_df = out
-        features_df = features_df.copy()
     elif isinstance(out, pd.DataFrame):
-        features_df = out.copy()
+        features_df = out
     else:
         features_df = pd.DataFrame(out)
+    features_df = features_df.copy()
 
-    # Determine target vector
+    # ---- Target vector (align to features_df index)
     if target in df.columns:
         y = df[target].copy()
     else:
         y = (df.get("severity_numeric", pd.Series([2]*len(df))) >= 3).astype(int)
+    y = y.loc[features_df.index]
 
-    # Remove target and known proxies
-    drop_cols = [
-        target,
-        "reportable",
-        "reportable_bin",
-        "severity_numeric",
-        "medical_attention_required"
+    # ---- Drop known/post-outcome columns
+    drop_cols = set([
+        target, "reportable", "reportable_bin",
+        "severity", "severity_numeric",
+        "medical_attention_required",
+        "notified_to_commission", "reporting_timeframe",
+        "investigation_required", "incident_resolved",
+    ])
+    if extra_leaky_features: 
+        drop_cols.update(extra_leaky_features)
+
+    leak_name_patterns = leak_name_patterns or [
+        "report", "reportable", "notify", "notified",
+        "investigat", "severity", "medical", "outcome",
+        "resolution", "timeframe"
     ]
-    if extra_leaky_features:
-        drop_cols.extend(extra_leaky_features)
-    for col in drop_cols:
-        if col in features_df.columns:
-            features_df = features_df.drop(columns=[col])
-    feature_names = features_df.columns.tolist()
+    by_name = [c for c in features_df.columns if any(p in c.lower() for p in leak_name_patterns)]
+    drop_cols.update(by_name)
 
-    # ---- Diagnostic: Print feature-target relationships ----
-    print("\nFeature columns for training:", feature_names)
-    print("Target value counts:", y.value_counts())
-    print("First few rows of features_df:\n", features_df.head())
-    correlations = {}
-    for col in feature_names:
+    drop_cols = [c for c in drop_cols if c in features_df.columns]
+    if drop_cols:
+        print(f"Dropping by name/known leaks: {sorted(drop_cols)[:40]}{' …' if len(drop_cols)>40 else ''}")
+        features_df = features_df.drop(columns=drop_cols)
+
+    # ---- Auto-drop near-perfectly correlated columns
+    to_drop_corr = []
+    for c in features_df.columns:
+        s = pd.Series(features_df[c]).astype(float)
+        if s.std(ddof=0) == 0:
+            to_drop_corr.append(c)
+            continue
         try:
-            # For categorical features, print groupby mean
-            if features_df[col].dtype == 'object' or 'category' in str(features_df[col].dtype):
-                group_means = df.groupby(col)[target].mean()
-                print(f"\nFeature '{col}' groupby mean target:\n{group_means}")
-            else:
-                corr = pd.Series(features_df[col]).corr(y)
-                print(f"Feature '{col}' correlation with target: {corr}")
-                correlations[col] = corr
-        except Exception as e:
-            print(f"Could not correlate {col}: {e}")
-    print("\nFeature-target correlations:", correlations)
-    # -------------------------------------------
+            corr = abs(s.corr(y))
+            if corr >= leak_corr_threshold:
+                to_drop_corr.append(c)
+        except Exception:
+            pass
+    if to_drop_corr:
+        print(f"Dropping by correlation≥{leak_corr_threshold}: {sorted(to_drop_corr)[:40]}{' …' if len(to_drop_corr)>40 else ''}")
+        features_df = features_df.drop(columns=to_drop_corr)
 
-    # Prepare train/test split
+    feature_names = features_df.columns.tolist()
     X = features_df.values
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y
-    )
+    # ---- Split
+    if split_strategy == "time" and time_col and time_col in df.columns:
+        dt = pd.to_datetime(df.loc[features_df.index, time_col], errors="coerce")
+        cutoff = dt.quantile(0.8)
+        mask_train = dt <= cutoff
+        mask_test  = dt > cutoff
+        X_train, X_test = X[mask_train], X[mask_test]
+        y_train, y_test = y[mask_train], y[mask_test]
+    elif split_strategy == "group" and group_col and group_col in df.columns:
+        groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
+        gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+        train_idx, test_idx = next(gss.split(X, y, groups))
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state, stratify=y
+        )
 
-    results = {}
+    results: Dict[str, Any] = {}
 
-    # RandomForest
+    # ---- RandomForest
     rf = RandomForestClassifier(n_estimators=200, random_state=random_state)
     rf.fit(X_train, y_train)
     rf_pred = rf.predict(X_test)
@@ -541,10 +565,10 @@ def predictive_models_comparison(
         "y_test": y_test,
         "predictions": rf_pred,
         "probabilities": rf_proba,
-        "feature_names": feature_names,  # Save features used for training!
+        "feature_names": feature_names,
     }
 
-    # LogisticRegression
+    # ---- LogisticRegression
     try:
         logreg = LogisticRegression(max_iter=2000, solver="saga", n_jobs=-1)
     except TypeError:
@@ -563,44 +587,6 @@ def predictive_models_comparison(
 
     return results
 
-def calculate_risk_score(scenario: Dict[str, Any]) -> Dict[str, Any]:
-    pipe: Pipeline = _GLOBAL_RISK["pipe"]
-    cols_meta = _GLOBAL_RISK["cols_meta"]
-    if pipe is None or cols_meta is None:
-        raise RuntimeError("Risk model not initialised. Call ensure_risk_model(df) first.")
-
-    # Build single-row DataFrame with named columns
-    X_one = pd.DataFrame([scenario])
-
-    # Ensure expected columns exist; fill numerics with 0 if missing/NaN
-    expected_cols = cols_meta["num"] + cols_meta["cat"]
-    for col in expected_cols:
-        if col not in X_one.columns:
-            X_one[col] = np.nan
-    for col in cols_meta["num"]:
-        if X_one[col].isna().any():
-            X_one[col] = 0.0
-
-    # Keep only training-time columns (order matters for transformers)
-    X_one = X_one[expected_cols]
-
-    proba_pos = float(pipe.predict_proba(X_one)[0, 1])
-    label = "High" if proba_pos >= 0.5 else "Low"
-
-    # Optional: surface top features (RF importances over transformed space)
-    top_features = []
-    try:
-        pre = pipe.named_steps["pre"]
-        clf = pipe.named_steps["clf"]
-        feat_names = pre.get_feature_names_out()
-        importances = getattr(clf, "feature_importances_", None)
-        if importances is not None:
-            pairs = sorted(zip(feat_names, importances), key=lambda t: t[1], reverse=True)
-            top_features = pairs[:8]
-    except Exception:
-        pass
-
-    return {"probability": proba_pos, "label": label, "top_features": top_features}
 # ---------------------------------------
 # 8) Incident type risk profiling
 # ---------------------------------------
