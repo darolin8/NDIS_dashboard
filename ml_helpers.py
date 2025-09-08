@@ -776,7 +776,7 @@ class EnhancedLeakageGuard(BaseEstimator, TransformerMixin):
                 print()
 
 
-def improved_predictive_models_comparison(
+def predictive_models_comparison(
     df: pd.DataFrame,
     target: str = "reportable_bin",
     test_size: float = 0.25,
@@ -866,7 +866,7 @@ def improved_predictive_models_comparison(
     print(f"Test set size: {len(X_test_df)}")
 
     # Enhanced leakage guard
-    guard = EnhancedLeakageGuard(
+    guard = LeakageGuard(
         drop_names=comprehensive_leaky_features,
         drop_patterns=enhanced_leak_patterns,
         corr_threshold=leak_corr_threshold,
