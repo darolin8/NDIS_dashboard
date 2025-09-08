@@ -70,12 +70,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Optional banner (kept from your version)
-st.warning("EXECUTIVE SUMMARY UPDATED")
-st.info(f"Loaded from: {os.path.abspath(__file__)}")
 
 from ml_helpers import (
     # Charts/utilities you already used
@@ -1112,6 +1106,9 @@ def display_compliance_investigation_section(df):
 # ----------------------------
 # ML Insights (robust, minimal dependencies)
 # ----------------------------
+# ----------------------------
+# ML Insights (robust, minimal dependencies)
+# ----------------------------
 def display_ml_insights_section(filtered_df):
     """
     ML-focused page:
@@ -1122,6 +1119,11 @@ def display_ml_insights_section(filtered_df):
       5) Clustering & risk profiles
       6) Correlations
     """
+    import numpy as np
+    import pandas as pd
+    import plotly.express as px
+    import streamlit as st
+
     st.header("🤖 ML Insights")
 
     # --------- Scope selection ---------
@@ -1142,11 +1144,13 @@ def display_ml_insights_section(filtered_df):
         st.error(f"Feature engineering failed: {e}")
         return
 
-    # Optional: quick trainer
+    # ---------------------------------
+    # Quick trainer (optional)
+    # ---------------------------------
     with st.expander("🔧 Train baseline models (optional)"):
         if st.button("Train / Refresh"):
             try:
-                st.session_state['trained_models'] = predictive_models_comparison(df_used)
+                st.session_state["trained_models"] = predictive_models_comparison(df_used)
                 st.success("Models trained and stored in session.")
             except Exception as e:
                 st.warning(f"Training failed: {e}")
@@ -1170,7 +1174,7 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Could not render metrics for {model_name}: {e}")
 
-        # Feature importance
+        # Feature importance preview
         st.markdown("#### 🔍 Feature Importance (if available)")
         try:
             best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
@@ -1196,44 +1200,34 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 2) Predictive Risk Scoring
+    # 2) Predictive Risk Scoring (Sandbox)
     # ---------------------------------
-  def display_ml_insights_section(df_used, trained_models=None):
-    import numpy as np
-    import streamlit as st
-    # If your file already imports ML functions globally, you can remove the next import line.
-    from ml_helpers import create_predictive_risk_scoring
-
-    # Ensure a models dict exists
-    models = trained_models if trained_models is not None else getattr(st.session_state, "trained_models", {})
-
-    # ... any other ML insights UI above ...
-
-    # --- Predictive Risk Scoring (Sandbox) ---
     st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
 
     if not models:
         st.info("Train a model to enable risk scoring.")
     else:
         # ✅ Use the model's TRAINING feature order to avoid n_features_in_ mismatches
+        best_key = None
+        trained_feature_names = []
         try:
             best_key = max(models, key=lambda k: models[k].get("accuracy", 0))
-            trained_feature_names = models[best_key].get("feature_names", [])
+            trained_feature_names = models.get(best_key, {}).get("feature_names", []) or []
         except Exception:
-            best_key = None
-            trained_feature_names = []
+            pass
 
-        if not trained_feature_names:
-            st.warning("No training feature list stored with the model; risk scorer may mismatch.")
-
-        risk_scorer = None
-        if best_key and "model" in models.get(best_key, {}):
+        if not best_key or "model" not in models.get(best_key, {}):
+            st.warning("Models exist, but the best model entry is missing or malformed.")
+            risk_scorer = None
+        else:
+            if not trained_feature_names:
+                st.warning("No training feature list stored with the model; risk scorer may mismatch.")
             risk_scorer = create_predictive_risk_scoring(df_used, models, trained_feature_names)
 
         if risk_scorer is None:
             st.warning("Risk scorer could not be created from the current models.")
         else:
-            # Optional: one-line sanity check on shape expectations
+            # Optional: sanity caption about expected feature count
             try:
                 n_expected = getattr(models[best_key]["model"], "n_features_in_", "?")
                 st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
@@ -1262,7 +1256,7 @@ def display_ml_insights_section(filtered_df):
                 )
                 c_hist = st.slider("Carer prior incidents", 0, max_c_hist, min(5, max_c_hist))
 
-            # Estimate a coarse location risk proxy from your data (fallback to 2.0)
+            # Coarse location risk proxy
             try:
                 if "severity_numeric" in df_used.columns and "location" in df_used.columns:
                     loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
@@ -1294,9 +1288,6 @@ def display_ml_insights_section(filtered_df):
                 st.exception(e)
 
     st.divider()
-    
-
-
 
     # ---------------------------------
     # 3) Similar Incident Finder
@@ -1354,7 +1345,6 @@ def display_ml_insights_section(filtered_df):
         st.warning(f"Seasonality plot failed: {e}")
 
     st.divider()
- 
 
     # ---------------------------------
     # 5) Clustering & Risk Profiles
