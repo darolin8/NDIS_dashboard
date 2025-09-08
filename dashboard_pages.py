@@ -33,7 +33,7 @@ REQUIRED = [
     "clustering_analysis",
     "predictive_models_comparison",
     "incident_type_risk_profiling",
-    "create_predictive_risk_scoring",  # if you call it here
+    "create_predictive_risk_scoring",# if you call it here
 ]
 _missing = [name for name in REQUIRED if not hasattr(ML, name)]
 if _missing:
@@ -623,6 +623,74 @@ def apply_investigation_rules(df):
     df['investigation_required'] = df.apply(requires_investigation, axis=1)
     df['action_complete'] = df.apply(action_completed, axis=1)
     return df
+
+
+
+
+def display_enhanced_investigation_pipeline(df, group_by="carer_id"):
+    """
+    Enhanced Investigation Pipeline visualization with more stages and grouping options.
+    group_by: "carer_id", "severity", "incident_type", or "location"
+    """
+    st.header(f"Investigation Pipeline by {group_by.replace('_', ' ').title()}")
+    st.markdown("---")
+
+    # Required columns
+    required = {"incident_id", "investigation_required", "action_complete", "incident_date", "notification_date"}
+    if group_by not in df.columns or not required.issubset(df.columns):
+        st.warning(f"Missing columns for enhanced investigation pipeline: {required | {group_by}}")
+        return
+
+    df = df.copy()
+    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
+    df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+    df['within_24h'] = df['report_delay_hours'] <= 24
+    df['overdue_action'] = (~df['action_complete'].astype(bool)) & (df['report_delay_hours'] > 24)
+    df['under_investigation'] = df['investigation_required'].astype(bool) & (~df['action_complete'].astype(bool))
+
+    agg = df.groupby(group_by).agg(
+        All_Incidents=('incident_id', 'count'),
+        Required_Investigation=('investigation_required', 'sum'),
+        Under_Investigation=('under_investigation', 'sum'),
+        Action_Complete=('action_complete', 'sum'),
+        Overdue_Actions=('overdue_action', 'sum'),
+        Compliance_Breach=('within_24h', lambda x: (~x).sum())
+    ).reset_index()
+
+    stages = ['All_Incidents', 'Required_Investigation', 'Under_Investigation', 
+              'Action_Complete', 'Overdue_Actions', 'Compliance_Breach']
+    melted = agg.melt(id_vars=group_by, value_vars=stages, var_name="Stage", value_name="Count")
+
+    fig = px.bar(
+        melted, x=group_by, y="Count", color="Stage", barmode="group",
+        title=f"Enhanced Investigation Pipeline by {group_by.replace('_', ' ').title()}",
+        labels={group_by: group_by.replace('_', ' ').title(), "Count": "Number of Incidents"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Optional: show raw table
+    with st.expander("Show pipeline data table"):
+        st.dataframe(agg, use_container_width=True)
+
+    # Optional: stage filter for drill-down
+    stage_selected = st.selectbox("Filter by Stage", stages, index=0)
+    filtered = df[df[group_by].isin(agg[group_by])]
+    if stage_selected == "Under_Investigation":
+        filtered = filtered[filtered['under_investigation']]
+    elif stage_selected == "Action_Complete":
+        filtered = filtered[filtered['action_complete']]
+    elif stage_selected == "Overdue_Actions":
+        filtered = filtered[filtered['overdue_action']]
+    elif stage_selected == "Compliance_Breach":
+        filtered = filtered[~filtered['within_24h']]
+    elif stage_selected == "Required_Investigation":
+        filtered = filtered[filtered['investigation_required']]
+    else:
+        filtered = filtered
+    
+    with st.expander(f"Show incidents in stage: {stage_selected}"):
+        st.dataframe(filtered[[group_by, "incident_id", "incident_date", "notification_date", "report_delay_hours"]], use_container_width=True)
 
 # ----------------------------
 # Executive Summary
@@ -1473,7 +1541,8 @@ __all__ = [
     "display_operational_performance_section",
     "display_compliance_investigation_section",
     "display_ml_insights_section",
-    "apply_investigation_rules",         # ← add this line
+    "apply_investigation_rules",
+    "display_enhanced_investigation_pipeline(df, group_by="carer_id")",# ← add this line
     "PAGE_TO_RENDERER",
     "PAGE_ORDER",
     "render_page",
