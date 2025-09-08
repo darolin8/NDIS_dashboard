@@ -1041,44 +1041,6 @@ def plot_compliance_metrics_poly(df):
     with col6:
         plot_metric("Compliance Breach", breach_count, color_graph="#FF2B2B")
 
-def plot_reporting_delay_by_date(df):
-    need = {'incident_date', 'notification_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for reporting delay analysis")
-        return
-    df = df.copy()
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-    df['report_delay'] = (df['notification_date'] - df['incident_date']).dt.days
-    agg = df.groupby('incident_date').agg(avg_delay=('report_delay', 'mean')).reset_index()
-    fig = px.line(agg, x='incident_date', y='avg_delay',
-                  title="Average Reporting Delay by Incident Date",
-                  labels={'incident_date': 'Incident Date', 'avg_delay': 'Average Delay (Days)'})
-    fig.update_layout(height=400)
-    st.plotly_chart(fig, use_container_width=True, key="reporting_delay_by_date")
-
-def plot_24h_compliance_rate_by_location(df):
-    need = {'location', 'notification_date', 'incident_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for compliance rate by location")
-        return
-    df = df.copy()
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-    df['within_24h'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() <= 24*3600
-    compliance = df.groupby('location')['within_24h'].mean().reset_index()
-    compliance['within_24h'] = compliance['within_24h'] * 100
-    fig = px.bar(
-        compliance,
-        x='location',
-        y='within_24h',
-        labels={'within_24h': '% Within 24hr', 'location': 'Location'},
-        title="24 Hour Compliance Rate by Location",
-        color='within_24h',
-        color_continuous_scale='RdYlGn'
-    )
-    fig.update_layout(xaxis_tickangle=-45, height=400)
-    st.plotly_chart(fig, use_container_width=True, key="compliance_location")
 
 def plot_investigation_pipeline(df):
     need = {'investigation_required', 'action_complete'}
