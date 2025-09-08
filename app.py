@@ -39,8 +39,21 @@ try:
         display_operational_performance_section,
         display_compliance_investigation_section,
         display_ml_insights_section,
-        apply_investigation_rules,      
+        apply_investigation_rules,
+        PAGE_TO_RENDERER,
+        PAGE_ORDER,
+        render_page,
     )
+
+
+display_executive_summary_section",
+    "display_operational_performance_section",
+    "display_compliance_investigation_section",
+    "display_ml_insights_section",
+    "apply_investigation_rules",
+    "PAGE_TO_RENDERER",
+    "PAGE_ORDER",
+    "render_page
 except Exception as e:
     st.error("Failed to import dashboard_pages. Details:")
     st.exception(e)
