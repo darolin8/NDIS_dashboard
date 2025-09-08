@@ -16,6 +16,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.stattools import adfuller
+import warnings
+warnings.filterwarnings('ignore')
 
 # sklearn bits we use across functions
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -222,7 +229,7 @@ def incident_volume_forecasting(
     season_length: int = 12,
 ) -> Tuple[go.Figure, pd.DataFrame]:
     """
-    Forecast monthly incident volumes. Tries SARIMAX; falls back to seasonal naive.
+    Improved forecast with log transformation and stability fixes.
     Returns (plotly Figure, DataFrame with columns: actual, forecast, lower, upper).
     """
     # Resolve horizon robustly
@@ -238,41 +245,146 @@ def incident_volume_forecasting(
         fig.update_layout(title="Incident Forecast: no date data", xaxis_title="Month", yaxis_title="Incidents")
         return fig, pd.DataFrame(columns=["actual", "forecast", "lower", "upper"])
 
+    # Ensure minimum data length
+    if len(y) < 3:
+        # Not enough data for SARIMAX, use simple mean forecast
+        mean_val = y.mean()
+        idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
+        forecast = pd.Series([mean_val] * H, index=idx, name="forecast")
+        std_val = max(y.std(), np.sqrt(mean_val))  # Ensure positive std
+        conf_int = pd.DataFrame({
+            "lower": np.maximum(0, forecast.values - 1.96 * std_val),
+            "upper": forecast.values + 1.96 * std_val,
+        }, index=idx)
+        
+        out = pd.DataFrame({"actual": y})
+        fc_df = pd.concat([forecast, conf_int], axis=1)
+        merged = out.join(fc_df, how="outer")
+        merged.index.name = "date"
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
+        fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
+        fig.add_trace(
+            go.Scatter(
+                x=list(conf_int.index) + list(conf_int.index[::-1]),
+                y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
+                fill="toself", opacity=0.2, line=dict(width=0), name="95% interval",
+            )
+        )
+        fig.update_layout(title="Monthly Incident Forecast (Simple Mean)", xaxis_title="Month", yaxis_title="Incidents")
+        return fig, merged
+
     use_sarimax = False
 
-    # Try SARIMAX
     try:
-        from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
-        seasonal_order = (0, 1, 1, season_length) if len(y) >= 2 * season_length else (0, 0, 0, 0)
-        model = SARIMAX(
-            y, order=(1, 1, 1), seasonal_order=seasonal_order,
-            enforce_stationarity=False, enforce_invertibility=False
-        )
-        res = model.fit(disp=False)
-        fc = res.get_forecast(steps=H)
-        forecast = fc.predicted_mean.rename("forecast")
-        conf = fc.conf_int(alpha=0.2)  # 80% interval
-        conf_int = pd.DataFrame(
-            {"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values},
-            index=forecast.index
-        )
-        use_sarimax = True
-    except Exception:
-        # Seasonal naive fallback
-        idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
-        if len(y) >= season_length:
-            last_season = y[-season_length:].values
-            vals = np.tile(last_season, int(np.ceil(H / season_length)))[:H]
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+        
+        # Apply log transformation to prevent negative predictions
+        y_positive = np.maximum(y, 0.1)  # Ensure positive values
+        y_log = np.log1p(y_positive)  # log1p handles near-zero values better
+        
+        # More conservative seasonal parameters
+        if len(y) >= 2 * season_length:
+            # Full seasonal model only with sufficient data
+            seasonal_order = (1, 1, 1, season_length)
+            order = (1, 1, 1)
+        elif len(y) >= season_length:
+            # Simpler seasonal model
+            seasonal_order = (0, 1, 1, season_length)
+            order = (0, 1, 1)
         else:
-            vals = np.repeat(y.iloc[-1], H)
-        forecast = pd.Series(vals, index=idx, name="forecast")
-        conf_int = pd.DataFrame(
-            {
-                "lower": np.maximum(0, forecast.values - np.sqrt(np.maximum(1, forecast.values))),
-                "upper": forecast.values + np.sqrt(np.maximum(1, forecast.values)),
-            },
-            index=idx,
+            # No seasonality
+            seasonal_order = (0, 0, 0, 0)
+            order = (1, 1, 1)
+        
+        # Fit model with conservative settings
+        model = SARIMAX(
+            y_log, 
+            order=order, 
+            seasonal_order=seasonal_order,
+            enforce_stationarity=True,
+            enforce_invertibility=True,
+            concentrate_scale=True  # Better numerical stability
         )
+        
+        # Fit with better optimization settings
+        res = model.fit(
+            disp=False, 
+            maxiter=200,
+            method='lbfgs',  # More stable than default
+            optim_score='harvey'  # Alternative scoring
+        )
+        
+        # Get forecast in log space
+        fc = res.get_forecast(steps=H)
+        forecast_log = fc.predicted_mean
+        conf_log = fc.conf_int(alpha=0.05)  # 95% interval
+        
+        # Transform back to original space
+        forecast = np.expm1(forecast_log).rename("forecast")
+        conf_int = pd.DataFrame({
+            "lower": np.maximum(0, np.expm1(conf_log.iloc[:, 0]).values),  # Ensure non-negative
+            "upper": np.expm1(conf_log.iloc[:, 1]).values
+        }, index=forecast.index)
+        
+        # Additional sanity checks
+        max_historical = y.max()
+        forecast = np.minimum(forecast, max_historical * 3)  # Cap extreme forecasts
+        conf_int["upper"] = np.minimum(conf_int["upper"], max_historical * 4)
+        
+        use_sarimax = True
+        
+    except Exception as e:
+        print(f"SARIMAX failed: {e}")
+        # Enhanced seasonal naive fallback
+        try:
+            idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
+            
+            if len(y) >= season_length:
+                # Use seasonal pattern with trend adjustment
+                last_season = y[-season_length:].values
+                # Simple trend calculation
+                if len(y) >= 2 * season_length:
+                    recent_avg = y[-season_length:].mean()
+                    older_avg = y[-2*season_length:-season_length].mean()
+                    trend = max(-0.1, min(0.1, (recent_avg - older_avg) / older_avg))  # Cap trend
+                else:
+                    trend = 0
+                
+                # Apply trend to seasonal pattern
+                base_vals = last_season * (1 + trend)
+                vals = np.tile(base_vals, int(np.ceil(H / season_length)))[:H]
+            else:
+                # Simple trend from recent data
+                if len(y) >= 3:
+                    trend = (y.iloc[-1] - y.iloc[-3]) / 2
+                    trend = max(-y.iloc[-1] * 0.1, min(y.iloc[-1] * 0.1, trend))  # Cap trend
+                else:
+                    trend = 0
+                vals = [max(0.1, y.iloc[-1] + trend * i) for i in range(1, H + 1)]
+            
+            forecast = pd.Series(vals, index=idx, name="forecast")
+            
+            # Confidence intervals based on historical volatility
+            historical_std = y.std()
+            expanding_std = np.array([historical_std * np.sqrt(i) for i in range(1, H + 1)])
+            
+            conf_int = pd.DataFrame({
+                "lower": np.maximum(0, forecast.values - 1.96 * expanding_std),
+                "upper": forecast.values + 1.96 * expanding_std,
+            }, index=idx)
+            
+        except Exception:
+            # Ultimate fallback: flat forecast
+            idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
+            last_val = max(0.1, y.iloc[-1])
+            forecast = pd.Series([last_val] * H, index=idx, name="forecast")
+            std_val = max(y.std(), np.sqrt(last_val))
+            conf_int = pd.DataFrame({
+                "lower": np.maximum(0, forecast.values - 1.96 * std_val),
+                "upper": forecast.values + 1.96 * std_val,
+            }, index=idx)
 
     # Output frame
     out = pd.DataFrame({"actual": y})
@@ -280,27 +392,49 @@ def incident_volume_forecasting(
     merged = out.join(fc_df, how="outer")
     merged.index.name = "date"
 
-    # Figure
+    # Enhanced figure with better styling
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
-    fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
-    fig.add_trace(
-        go.Scatter(
-            x=list(conf_int.index) + list(conf_int.index[::-1]),
-            y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
-            fill="toself", opacity=0.2, line=dict(width=0), name="80% interval",
-        )
-    )
+    
+    # Historical data
+    fig.add_trace(go.Scatter(
+        x=y.index, y=y.values, 
+        mode="lines+markers", 
+        name="Actual",
+        line=dict(color='steelblue', width=2),
+        marker=dict(size=4)
+    ))
+    
+    # Forecast
+    fig.add_trace(go.Scatter(
+        x=forecast.index, y=forecast.values, 
+        mode="lines+markers", 
+        name="Forecast",
+        line=dict(color='orange', width=2, dash='dash'),
+        marker=dict(size=4)
+    ))
+    
+    # Confidence interval
+    fig.add_trace(go.Scatter(
+        x=list(conf_int.index) + list(conf_int.index[::-1]),
+        y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
+        fill="toself", 
+        opacity=0.2, 
+        line=dict(width=0), 
+        name="95% interval",
+        fillcolor='orange'
+    ))
+    
+    model_type = 'SARIMAX (Log-transformed)' if use_sarimax else 'Enhanced Seasonal Naive'
     fig.update_layout(
-        title=f"Monthly Incident Forecast ({'SARIMAX' if use_sarimax else 'Seasonal naive'})",
-        xaxis_title="Month", yaxis_title="Incidents", hovermode="x unified",
+        title=f"Monthly Incident Forecast ({model_type})",
+        xaxis_title="Month", 
+        yaxis_title="Incidents", 
+        hovermode="x unified",
+        showlegend=True,
+        yaxis=dict(rangemode='tozero')  # Ensure y-axis starts at 0
     )
+    
     return fig, merged
-
-
-def forecast_incident_volume(df: pd.DataFrame, periods: int = 6):
-    """Back-compat alias used elsewhere."""
-    return incident_volume_forecasting(df, months=periods)
 
 
 # ---------------------------------------
