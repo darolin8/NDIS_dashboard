@@ -24,6 +24,7 @@ except Exception as e:
     st.stop()
 
 REQUIRED = [
+    # Charts/utilities you already used
     "incident_volume_forecasting",
     "seasonal_temporal_patterns",
     "plot_time_with_causes",
@@ -33,8 +34,14 @@ REQUIRED = [
     "clustering_analysis",
     "predictive_models_comparison",
     "incident_type_risk_profiling",
-    "create_predictive_risk_scoring",# if you call it here
+    # ML Insights extras used below
+    "enhanced_confusion_matrix_analysis",
+    "create_predictive_risk_scoring",
+    "incident_similarity_analysis",
+    "ensure_incident_datetime",
+    "plot_3d_clusters",
 ]
+
 _missing = [name for name in REQUIRED if not hasattr(ML, name)]
 if _missing:
     st.error(f"ml_helpers is missing: {_missing}. Check function names in ml_helpers.py.")
@@ -50,14 +57,17 @@ correlation_analysis             = ML.correlation_analysis
 clustering_analysis              = ML.clustering_analysis
 predictive_models_comparison     = ML.predictive_models_comparison
 profile_incident_type_risk       = getattr(ML, "profile_incident_type_risk", ML.incident_type_risk_profiling)
-create_predictive_risk_scoring   = getattr(ML, "create_predictive_risk_scoring", None)
+create_predictive_risk_scoring   = ML.create_predictive_risk_scoring
+enhanced_confusion_matrix_analysis = ML.enhanced_confusion_matrix_analysis
+incident_similarity_analysis     = ML.incident_similarity_analysis
+ensure_incident_datetime         = ML.ensure_incident_datetime
+plot_3d_clusters                 = ML.plot_3d_clusters
 # ---- END: robust imports ----
 
 
 # ----------------------------
-# Imports
+# Standard imports
 # ----------------------------
-import os
 import re
 import random
 from datetime import datetime, timedelta
@@ -68,37 +78,19 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
 
 
-from ml_helpers import (
-    # Charts/utilities you already used
-    incident_volume_forecasting,
-    seasonal_temporal_patterns,
-    plot_time_with_causes,
-    create_comprehensive_features,
-    correlation_analysis,
-    clustering_analysis,
-    predictive_models_comparison,
-    incident_type_risk_profiling as profile_incident_type_risk,
-    # 🔽 New ML bits for the Insights page
-    enhanced_confusion_matrix_analysis,
-    create_predictive_risk_scoring,
-    incident_similarity_analysis,
-    ensure_incident_datetime,
-    plot_3d_clusters,
-)
-
-
-# Compatibility wrapper so we don't care which signature ml_helpers currently exposes
+# ----------------------------
+# Compatibility wrapper (kept)
+# ----------------------------
 def _call_incident_forecast(df, horizon):
     try:
-        # preferred alias that accepts `periods`
-        from ml_helpers import forecast_incident_volume
+        # preferred alias that accepts `periods` (if you add it later)
+        from ml_helpers import forecast_incident_volume  # optional alias
         return forecast_incident_volume(df, periods=int(horizon))
     except Exception:
         # fall back to the direct function, try several kwargs
-        from ml_helpers import incident_volume_forecasting as _ivf
+        _ivf = incident_volume_forecasting
         for kwargs in (
             {"horizon_months": int(horizon)},
             {"months": int(horizon)},
@@ -546,7 +538,7 @@ def plot_carer_performance_scatter_local(df):
         st.info("No carers meet the selected filters/minimum incident count.")
         return
 
-    # ---- Plot (linear axes, no scale toggles) ----
+    # ---- Plot (linear axes) ----
     fig = px.scatter(
         perf,
         x='avg_delay',
@@ -623,8 +615,6 @@ def apply_investigation_rules(df):
     df['investigation_required'] = df.apply(requires_investigation, axis=1)
     df['action_complete'] = df.apply(action_completed, axis=1)
     return df
-
-
 
 # ----------------------------
 # Executive Summary
@@ -825,287 +815,128 @@ def display_operational_performance_section(df):
     plot_serious_injury_age_severity(df)
 
 # ----------------------------
-# Compliance / Investigation
+# Compliance / Investigation helpers (NEW)
 # ----------------------------
-def display_compliance_investigation_cards(df):
-    need = {'incident_date', 'reportable'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for compliance cards")
+def plot_reporting_delay_by_date(
+    df: pd.DataFrame,
+    incident_candidates=("incident_datetime", "incident_date", "incident_time", "date"),
+    report_candidates=("notification_date", "report_datetime", "reported_datetime", "report_date", "reported_at"),
+    clip_hours=24*14  # cap extremes at 14 days
+):
+    """Line chart of reporting delay (report - incident) aggregated by incident date (median/mean/p90 hours)."""
+    st.subheader("⏱️ Reporting delay by incident date")
+    if df is None or df.empty:
+        st.info("No rows to display after filters.")
         return
-    df = apply_investigation_rules(df)
 
-    current_date = pd.to_datetime(df['incident_date'], errors='coerce').max()
-    current_month = current_date.to_period('M')
-    previous_month = current_month - 1
+    def _first_present(cands, cols):
+        for c in cands:
+            if c in cols:
+                return c
+        return None
 
-    df = df.copy()
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    current_df = df[df['incident_date'].dt.to_period('M') == current_month]
-    previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
+    incident_col = _first_present(incident_candidates, df.columns)
+    report_col   = _first_present(report_candidates, df.columns)
+    if incident_col is None or report_col is None:
+        st.warning(
+            "Missing timestamp columns. "
+            f"Need incident in {incident_candidates} and report in {report_candidates}."
+        )
+        return
 
-    current_df = current_df.copy()
-    previous_df = previous_df.copy()
-    current_df['report_delay_hours'] = (current_df['notification_date'] - current_df['incident_date']).dt.total_seconds() / 3600
-    previous_df['report_delay_hours'] = (previous_df['notification_date'] - previous_df['incident_date']).dt.total_seconds() / 3600
+    tmp = df[[incident_col, report_col]].dropna().copy()
+    if tmp.empty:
+        st.info("No rows with both incident and report timestamps.")
+        return
 
-    st.markdown("### 📋 Compliance & Investigation Metrics")
-    col1, col2, col3, col4 = st.columns(4)
+    tmp[incident_col] = pd.to_datetime(tmp[incident_col], errors="coerce")
+    tmp[report_col]   = pd.to_datetime(tmp[report_col], errors="coerce")
+    tmp = tmp.dropna()
+    if tmp.empty:
+        st.info("No parsable timestamps after cleaning.")
+        return
 
-    with col1:
-        current_reportable = int(current_df['reportable'].sum()) if len(current_df) > 0 else 0
-        previous_reportable = int(previous_df['reportable'].sum()) if len(previous_df) > 0 else 0
-        change = current_reportable - previous_reportable
-        trend_arrow = "↗️" if change > 0 else "↘️" if change < 0 else "→"
-        st.metric("📊 Reportable Incidents", current_reportable,
-                  delta=f"{trend_arrow} {abs(change)}",
-                  delta_color="inverse" if change > 0 else "normal")
+    tmp["delay_hours"] = (tmp[report_col] - tmp[incident_col]).dt.total_seconds() / 3600.0
+    tmp = tmp[tmp["delay_hours"] >= 0]
+    if clip_hours is not None:
+        tmp["delay_hours"] = tmp["delay_hours"].clip(upper=float(clip_hours))
+    if tmp.empty:
+        st.info("All rows had negative or invalid delays.")
+        return
 
-    with col2:
-        current_compliance = int((current_df['report_delay_hours'] <= 24).sum()) if len(current_df) > 0 else 0
-        previous_compliance = int((previous_df['report_delay_hours'] <= 24).sum()) if len(previous_df) > 0 else 0
-        change = current_compliance - previous_compliance
-        trend_arrow = "↗️" if change > 0 else "↘️" if change < 0 else "→"
-        st.metric("⏱️ 24hr Compliance", current_compliance,
-                  delta=f"{trend_arrow} {abs(change)}",
-                  delta_color="normal" if change > 0 else "inverse")
+    tmp["incident_date_only"] = tmp[incident_col].dt.date
+    agg = (
+        tmp.groupby("incident_date_only")["delay_hours"]
+           .agg(
+               median_delay_h="median",
+               mean_delay_h="mean",
+               p90_delay_h=lambda s: float(np.percentile(s, 90)) if len(s) else np.nan,
+           )
+           .reset_index()
+           .sort_values("incident_date_only")
+    )
+    if agg.empty:
+        st.info("No aggregated data to display.")
+        return
 
-    with col3:
-        current_overdue = int((current_df['report_delay_hours'] > 24).sum()) if len(current_df) > 0 else 0
-        previous_overdue = int((previous_df['report_delay_hours'] > 24).sum()) if len(previous_df) > 0 else 0
-        change = current_overdue - previous_overdue
-        trend_arrow = "↗️" if change > 0 else "↘️" if change < 0 else "→"
-        st.metric("⚠️ Overdue Reports", current_overdue,
-                  delta=f"{trend_arrow} {abs(change)}",
-                  delta_color="inverse" if change > 0 else "normal")
+    fig = px.line(
+        agg,
+        x="incident_date_only",
+        y=["median_delay_h", "mean_delay_h", "p90_delay_h"],
+        markers=True,
+        labels={"incident_date_only": "Incident date", "value": "Delay (hours)", "variable": "Statistic"},
+        title="Reporting delay (median / mean / p90) by incident date",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "Reporting delay = notification/report timestamp − incident timestamp (in hours). "
+        "Negative delays removed; extreme values clipped."
+    )
 
-    with col4:
-        current_total = len(current_df)
-        previous_total = len(previous_df)
-        current_investigation_rate = (current_df['investigation_required'].sum() / current_total * 100) if current_total > 0 else 0
-        previous_investigation_rate = (previous_df['investigation_required'].sum() / previous_total * 100) if previous_total > 0 else 0
-        trend_pct, trend_arrow = calculate_trend(current_investigation_rate, previous_investigation_rate)
-        st.metric("🔍 Investigation Rate",
-                  f"{current_investigation_rate:.1f}%",
-                  delta=f"{trend_arrow} {trend_pct:.1f}%",
-                  delta_color="inverse")
+def plot_24h_compliance_rate_by_location(df: pd.DataFrame):
+    """Bar chart of % incidents reported within 24h, by location."""
+    st.subheader("📍 24-hour compliance by location")
 
+    need = {"incident_date", "notification_date", "location"}
+    if df is None or df.empty or not need.issubset(df.columns):
+        st.warning(f"Missing columns for compliance by location: {need}")
+        return
 
+    d = df.copy()
+    d["incident_date"] = pd.to_datetime(d["incident_date"], errors="coerce")
+    d["notification_date"] = pd.to_datetime(d["notification_date"], errors="coerce")
+    d = d.dropna(subset=["incident_date", "notification_date", "location"])
+    if d.empty:
+        st.info("No rows with valid incident/notification timestamps.")
+        return
+
+    d["within_24h"] = (d["notification_date"] - d["incident_date"]).dt.total_seconds() <= 24*3600
+    compliance_loc = (d.groupby("location")["within_24h"].mean().sort_values() * 100).round(1)
+    if compliance_loc.empty:
+        st.info("No compliance values to display.")
+        return
+
+    fig = px.bar(
+        x=compliance_loc.index,
+        y=compliance_loc.values,
+        labels={'x': 'Location', 'y': '% within 24h'},
+        title="24-hour compliance rate by location",
+        color=compliance_loc.values,
+        color_continuous_scale='RdYlGn'
+    )
+    fig.update_layout(xaxis_tickangle=-30, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+# ----------------------------
+# Compliance / Investigation (final, single definition)
+# ----------------------------
 def display_compliance_investigation_section(df):
-    st.header("Compliance & Investigation")
-    st.write("Compliance rates and investigation pipeline overview.")
+    st.header("Compliance & Investigation Metrics")
+    st.markdown("---")
 
     if df.empty:
         st.info("No data available.")
         return
-
-    # --- Average reporting delay by incident date ---
-    if "incident_date" in df.columns and "notification_date" in df.columns:
-        df['report_delay_days'] = (df['notification_date'] - df['incident_date']).dt.days
-        grouped = df.groupby('incident_date')['report_delay_days'].mean().reset_index()
-        fig_delay = px.line(grouped, x='incident_date', y='report_delay_days',
-                            title="Average Reporting Delay by Incident Date")
-        st.plotly_chart(fig_delay, use_container_width=True)
-
-    # --- 24 Hour Compliance Rate by Location ---
-    if "location" in df.columns and "incident_date" in df.columns and "notification_date" in df.columns:
-        df['within_24h'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() <= 24*3600
-        compliance_loc = df.groupby('location')['within_24h'].mean().sort_values() * 100
-        fig_compliance_loc = px.bar(
-            x=compliance_loc.index, y=compliance_loc.values,
-            labels={'x': 'Location', 'y': '% Within 24hr'},
-            title="24 Hour Compliance Rate by Location",
-            color=compliance_loc.values, color_continuous_scale='RdYlGn'
-        )
-        st.plotly_chart(fig_compliance_loc, use_container_width=True)
-
-    # --- 24 Hour Compliance Rate by Carer ---
-    if "carer_id" in df.columns and "incident_date" in df.columns and "notification_date" in df.columns:
-        compliance_carer = df.groupby('carer_id')['within_24h'].mean().sort_values() * 100
-        fig_compliance_carer = px.bar(
-            x=compliance_carer.index, y=compliance_carer.values,
-            labels={'x': 'Carer ID', 'y': '% Within 24hr'},
-            title="24 Hour Compliance Rate by Carer",
-            color=compliance_carer.values, color_continuous_scale='RdYlGn'
-        )
-        st.plotly_chart(fig_compliance_carer, use_container_width=True)
-
-    # --- Enhanced pipeline as part of this section (rest unchanged) ---
-    st.markdown("---")
-    st.subheader("Enhanced Investigation Pipeline")
-
-    group_by = st.sidebar.selectbox(
-        "Group pipeline by:",
-        ["carer_id", "severity", "incident_type", "location"],
-        index=0
-    )
-
-    df2 = df.copy()
-    if "incident_date" in df2.columns and "notification_date" in df2.columns:
-        df2['incident_date'] = pd.to_datetime(df2['incident_date'], errors='coerce')
-        df2['notification_date'] = pd.to_datetime(df2['notification_date'], errors='coerce')
-        df2['report_delay_hours'] = (df2['notification_date'] - df2['incident_date']).dt.total_seconds() / 3600
-        df2['within_24h'] = df2['report_delay_hours'] <= 24
-        df2['overdue_action'] = (~df2.get('action_complete', pd.Series(False)).astype(bool)) & (df2['report_delay_hours'] > 24)
-        df2['under_investigation'] = df2.get('investigation_required', pd.Series(False)).astype(bool) & (~df2.get('action_complete', pd.Series(False)).astype(bool))
-    else:
-        df2['report_delay_hours'] = None
-        df2['within_24h'] = None
-        df2['overdue_action'] = None
-        df2['under_investigation'] = None
-
-    # Aggregate by group
-    agg = df2.groupby(group_by).agg(
-        All_Incidents=('incident_id', 'count') if 'incident_id' in df2.columns else ('report_delay_hours', 'count'),
-        Required_Investigation=('investigation_required', 'sum') if 'investigation_required' in df2.columns else (group_by, 'count'),
-        Under_Investigation=('under_investigation', 'sum') if 'under_investigation' in df2.columns else (group_by, 'count'),
-        Action_Complete=('action_complete', 'sum') if 'action_complete' in df2.columns else (group_by, 'count'),
-        Overdue_Actions=('overdue_action', 'sum') if 'overdue_action' in df2.columns else (group_by, 'count'),
-        Compliance_Breach=('within_24h', lambda x: (~x).sum()) if 'within_24h' in df2.columns else (group_by, 'count')
-    ).reset_index()
-
-    stages = ['All_Incidents', 'Required_Investigation', 'Under_Investigation',
-              'Action_Complete', 'Overdue_Actions', 'Compliance_Breach']
-    melted = agg.melt(id_vars=group_by, value_vars=stages, var_name="Stage", value_name="Count")
-
-    fig = px.bar(
-        melted, x=group_by, y="Count", color="Stage", barmode="group",
-        title=f"Enhanced Investigation Pipeline by {group_by.replace('_', ' ').title()}",
-        labels={group_by: group_by.replace('_', ' ').title(), "Count": "Number of Incidents"}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("Show pipeline data table"):
-        st.dataframe(agg, use_container_width=True)
-
-    stage_selected = st.selectbox("Filter by Stage", stages, index=0)
-    filtered = df2[df2[group_by].isin(agg[group_by])]
-    if stage_selected == "Under_Investigation":
-        filtered = filtered[filtered['under_investigation']]
-    elif stage_selected == "Action_Complete":
-        filtered = filtered[filtered['action_complete']]
-    elif stage_selected == "Overdue_Actions":
-        filtered = filtered[filtered['overdue_action']]
-    elif stage_selected == "Compliance_Breach":
-        filtered = filtered[~filtered['within_24h']]
-    elif stage_selected == "Required_Investigation":
-        filtered = filtered[filtered['investigation_required']]
-    else:
-        filtered = filtered
-
-    show_cols = [group_by, "incident_id", "incident_date", "notification_date", "report_delay_hours"]
-    show_cols = [col for col in show_cols if col in filtered.columns]
-    with st.expander(f"Show incidents in stage: {stage_selected}"):
-        st.dataframe(filtered[show_cols], use_container_width=True)
-
-
-
-def plot_compliance_metrics_poly(df):
-    need = {'reportable', 'incident_date', 'notification_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for compliance metrics")
-        return
-    total = len(df)
-    if total == 0:
-        st.warning("No data available for compliance metrics")
-        return
-
-    df = apply_investigation_rules(df)
-    df = df.copy()
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-
-    reportable_count = int(df['reportable'].sum())
-    df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
-    compliance_24h_count = int((df['report_delay_hours'] <= 24).sum())
-    overdue_count = int((df['report_delay_hours'] > 24).sum())
-    inv_required = int(df['investigation_required'].sum())
-    inv_rate = inv_required / total * 100 if total > 0 else 0
-    action_complete = int(df['action_complete'].sum())
-    breach_count = overdue_count
-    inv_status_pct = (action_complete / inv_required * 100) if inv_required > 0 else 0
-    inv_status_suffix = f" ({action_complete}/{inv_required})"
-
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    with col1:
-        plot_metric("Reportable Incidents", reportable_count, color_graph="#5B8FF9")
-    with col2:
-        plot_metric("24hr Compliance", compliance_24h_count,
-                    suffix=f" ({compliance_24h_count/total*100:.1f}%)" if total else "",
-                    color_graph="#5AD8A6")
-    with col3:
-        plot_metric("Overdue Reports", overdue_count, color_graph="#F6BD16")
-    with col4:
-        plot_metric("Investigation Rate", inv_rate, suffix="%", color_graph="#E86452")
-    with col5:
-        plot_metric("Investigation Status", inv_status_pct, suffix=inv_status_suffix, color_graph="#6DC8EC")
-    with col6:
-        plot_metric("Compliance Breach", breach_count, color_graph="#FF2B2B")
-
-
-def plot_investigation_pipeline(df):
-    need = {'investigation_required', 'action_complete'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for investigation pipeline")
-        return
-    all_incidents = len(df)
-    required = int(df['investigation_required'].sum())
-    complete = int(df['action_complete'].sum())
-    values = [all_incidents, required, complete]
-    names = ['All Incidents', 'Required Investigation', 'Action Complete']
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
-    fig = px.bar(x=names, y=values, title="Investigation Pipeline",
-                 labels={'x': 'Stage', 'y': 'Count'},
-                 color=names, color_discrete_sequence=colors)
-    fig.update_layout(showlegend=False, height=400)
-    st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
-
-def plot_contributing_factors_by_month(df, top_k=25):
-    need = {'contributing_factors', 'incident_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for Contributing Factors heatmap")
-        return
-
-    d = df.copy()
-    d['incident_date'] = pd.to_datetime(d['incident_date'], errors='coerce')
-    d = d.dropna(subset=['incident_date'])
-
-    # 1–2 word labels
-    d['factor_short'] = d['contributing_factors'].apply(shorten_factor)
-
-    # focus on the most common to keep the y-axis readable
-    top_factors = d['factor_short'].value_counts().head(top_k).index
-    d = d[d['factor_short'].isin(top_factors)]
-
-    # chronological months
-    d['month_period'] = d['incident_date'].dt.to_period('M')
-    d['Count'] = 1
-
-    heatmap = d.pivot_table(
-        index='factor_short',
-        columns='month_period',     # PeriodIndex keeps true order
-        values='Count',
-        aggfunc='sum',
-        fill_value=0
-    ).sort_index(axis=1)
-
-    # don’t annotate zeros
-    mask = (heatmap == 0)
-
-    fig, ax = plt.subplots(figsize=(14, 8))
-    sns.heatmap(
-        heatmap, annot=True, fmt="d", cmap="Blues",
-        mask=mask, cbar_kws={'label': 'Count'}, ax=ax
-    )
-    ax.set_xlabel("Month-Year")
-    ax.set_ylabel("Incident Type")
-    ax.set_xticklabels([p.strftime('%b %Y') for p in heatmap.columns], rotation=45, ha='right')
-    ax.set_title("Contributing Factors by Month-Year")
-    plt.tight_layout()
-    st.pyplot(fig, use_container_width=True)
-
-def display_compliance_investigation_section(df):
-    st.header("Compliance & Investigation Metrics")
-    st.markdown("---")
 
     # Ensure investigation columns for downstream visuals
     df = apply_investigation_rules(df)
@@ -1174,9 +1005,116 @@ def display_compliance_investigation_section(df):
         plot_reporting_delay_by_date(df)
     with col2:
         plot_24h_compliance_rate_by_location(df)
+
+    # Simple pipeline bar and CF heatmap
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
 
+# ----------------------------
+# Compliance metrics/pipeline charts
+# ----------------------------
+def plot_compliance_metrics_poly(df):
+    need = {'reportable', 'incident_date', 'notification_date'}
+    if df.empty or not need.issubset(df.columns):
+        st.warning("No data available for compliance metrics")
+        return
+    total = len(df)
+    if total == 0:
+        st.warning("No data available for compliance metrics")
+        return
+
+    df = apply_investigation_rules(df)
+    df = df.copy()
+    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
+
+    reportable_count = int(df['reportable'].sum())
+    df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+    compliance_24h_count = int((df['report_delay_hours'] <= 24).sum())
+    overdue_count = int((df['report_delay_hours'] > 24).sum())
+    inv_required = int(df['investigation_required'].sum())
+    inv_rate = inv_required / total * 100 if total > 0 else 0
+    action_complete = int(df['action_complete'].sum())
+    breach_count = overdue_count
+    inv_status_pct = (action_complete / inv_required * 100) if inv_required > 0 else 0
+    inv_status_suffix = f" ({action_complete}/{inv_required})"
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    with col1:
+        plot_metric("Reportable Incidents", reportable_count, color_graph="#5B8FF9")
+    with col2:
+        plot_metric("24hr Compliance", compliance_24h_count,
+                    suffix=f" ({compliance_24h_count/total*100:.1f}%)" if total else "",
+                    color_graph="#5AD8A6")
+    with col3:
+        plot_metric("Overdue Reports", overdue_count, color_graph="#F6BD16")
+    with col4:
+        plot_metric("Investigation Rate", inv_rate, suffix="%", color_graph="#E86452")
+    with col5:
+        plot_metric("Investigation Status", inv_status_pct, suffix=inv_status_suffix, color_graph="#6DC8EC")
+    with col6:
+        plot_metric("Compliance Breach", breach_count, color_graph="#FF2B2B")
+
+def plot_investigation_pipeline(df):
+    need = {'investigation_required', 'action_complete'}
+    if df.empty or not need.issubset(df.columns):
+        st.warning("No data available for investigation pipeline")
+        return
+    all_incidents = len(df)
+    required = int(df['investigation_required'].sum())
+    complete = int(df['action_complete'].sum())
+    values = [all_incidents, required, complete]
+    names = ['All Incidents', 'Required Investigation', 'Action Complete']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    fig = px.bar(x=names, y=values, title="Investigation Pipeline",
+                 labels={'x': 'Stage', 'y': 'Count'},
+                 color=names, color_discrete_sequence=colors)
+    fig.update_layout(showlegend=False, height=400)
+    st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
+
+def plot_contributing_factors_by_month(df, top_k=25):
+    need = {'contributing_factors', 'incident_date'}
+    if df.empty or not need.issubset(df.columns):
+        st.warning("No data available for Contributing Factors heatmap")
+        return
+
+    d = df.copy()
+    d['incident_date'] = pd.to_datetime(d['incident_date'], errors='coerce')
+    d = d.dropna(subset=['incident_date'])
+
+    # 1–2 word labels
+    d['factor_short'] = d['contributing_factors'].apply(shorten_factor)
+
+    # focus on the most common to keep the y-axis readable
+    top_factors = d['factor_short'].value_counts().head(top_k).index
+    d = d[d['factor_short'].isin(top_factors)]
+
+    # chronological months
+    d['month_period'] = d['incident_date'].dt.to_period('M')
+    d['Count'] = 1
+
+    heatmap = d.pivot_table(
+        index='factor_short',
+        columns='month_period',     # PeriodIndex keeps true order
+        values='Count',
+        aggfunc='sum',
+        fill_value=0
+    ).sort_index(axis=1)
+
+    # don’t annotate zeros
+    mask = (heatmap == 0)
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+    sns.heatmap(
+        heatmap, annot=True, fmt="d", cmap="Blues",
+        mask=mask, cbar_kws={'label': 'Count'}, ax=ax
+    )
+    ax.set_xlabel("Month-Year")
+    ax.set_ylabel("Incident Type")
+    ax.set_xticklabels([p.strftime('%b %Y') for p in heatmap.columns], rotation=45, ha='right')
+    ax.set_title("Contributing Factors by Month-Year")
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
 
 # ----------------------------
 # ML Insights (robust, minimal dependencies)
@@ -1191,25 +1129,6 @@ def display_ml_insights_section(filtered_df):
       5) Clustering & risk profiles
       6) Correlations
     """
-    import numpy as np
-    import pandas as pd
-    import plotly.express as px
-    import streamlit as st
-
-    from ml_helpers import (
-        ensure_incident_datetime,
-        create_comprehensive_features,
-        predictive_models_comparison,
-        enhanced_confusion_matrix_analysis,
-        create_predictive_risk_scoring,
-        incident_similarity_analysis,
-        incident_volume_forecasting as _ivf,
-        seasonal_temporal_patterns,
-        clustering_analysis,
-        plot_3d_clusters,
-        correlation_analysis,
-    )
-
     st.header("🤖 ML Insights")
 
     # --------- Scope selection ---------
@@ -1238,7 +1157,6 @@ def display_ml_insights_section(filtered_df):
         feature_names = list(safe_num.columns)
         features_df = safe_num.copy()
 
-
     # ---------------------------------
     # Optional: quick trainer
     # ---------------------------------
@@ -1254,7 +1172,7 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Training failed: {e}")
 
-        # --- Diagnose data leakage (optional) ---
+    # --- Diagnose data leakage (optional) ---
     if st.button("Diagnose Data Leakage", key="btn_leakage"):
         st.subheader("Data Leakage Analysis")
         if 'reportable_bin' in df_used.columns:
@@ -1272,8 +1190,6 @@ def display_ml_insights_section(filtered_df):
                     st.caption(f"Correlation check failed: {e}")
         else:
             st.info("reportable_bin not found in current slice")
-
-
 
     # ---------------------------------
     # 1) Model evaluation
@@ -1336,6 +1252,8 @@ def display_ml_insights_section(filtered_df):
             trained_feature_names = models[best_key].get('feature_names', [])
         except Exception:
             best_key = None
+            trained_feature_names = []
+
         if not trained_feature_names:
             st.warning("No training feature list stored with the model; risk scorer may mismatch.")
 
@@ -1407,7 +1325,6 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-
     # ---------------------------------
     # 3) Similar Incident Finder
     # ---------------------------------
@@ -1440,7 +1357,8 @@ def display_ml_insights_section(filtered_df):
     df_used = ensure_incident_datetime(df_used)
     horizon = int(st.session_state.get("ml_forecast_months", 6))
     try:
-        fig, forecast_df = _ivf(df_used, months=horizon)
+        # Use the bound function directly
+        fig, forecast_df = incident_volume_forecasting(df_used, months=horizon)
         st.caption(f"Forecast horizon: {horizon} months")
         st.plotly_chart(fig, use_container_width=True)
         with st.expander("Show forecast table"):
@@ -1519,7 +1437,6 @@ def display_ml_insights_section(filtered_df):
     except Exception as e:
         st.warning(f"Correlation analysis failed: {e}")
 
-
 # ---- Page registry expected by app.py ----
 PAGE_TO_RENDERER = {
     "Executive Summary":           display_executive_summary_section,
@@ -1552,5 +1469,3 @@ __all__ = [
     "PAGE_ORDER",
     "render_page",
 ]
-
-
