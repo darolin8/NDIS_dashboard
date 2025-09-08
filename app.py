@@ -40,6 +40,7 @@ try:
         display_compliance_investigation_section,
         display_ml_insights_section,
         apply_investigation_rules,
+        display_enhanced_investigation_pipeline(df, group_by="carer_id"),
     )
 except Exception as e:
     st.error("Failed to import dashboard_pages. Details:")
