@@ -626,72 +626,6 @@ def apply_investigation_rules(df):
 
 
 
-
-def display_enhanced_investigation_pipeline(df, group_by="carer_id"):
-    """
-    Enhanced Investigation Pipeline visualization with more stages and grouping options.
-    group_by: "carer_id", "severity", "incident_type", or "location"
-    """
-    st.header(f"Investigation Pipeline by {group_by.replace('_', ' ').title()}")
-    st.markdown("---")
-
-    # Required columns
-    required = {"incident_id", "investigation_required", "action_complete", "incident_date", "notification_date"}
-    if group_by not in df.columns or not required.issubset(df.columns):
-        st.warning(f"Missing columns for enhanced investigation pipeline: {required | {group_by}}")
-        return
-
-    df = df.copy()
-    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-    df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
-    df['within_24h'] = df['report_delay_hours'] <= 24
-    df['overdue_action'] = (~df['action_complete'].astype(bool)) & (df['report_delay_hours'] > 24)
-    df['under_investigation'] = df['investigation_required'].astype(bool) & (~df['action_complete'].astype(bool))
-
-    agg = df.groupby(group_by).agg(
-        All_Incidents=('incident_id', 'count'),
-        Required_Investigation=('investigation_required', 'sum'),
-        Under_Investigation=('under_investigation', 'sum'),
-        Action_Complete=('action_complete', 'sum'),
-        Overdue_Actions=('overdue_action', 'sum'),
-        Compliance_Breach=('within_24h', lambda x: (~x).sum())
-    ).reset_index()
-
-    stages = ['All_Incidents', 'Required_Investigation', 'Under_Investigation', 
-              'Action_Complete', 'Overdue_Actions', 'Compliance_Breach']
-    melted = agg.melt(id_vars=group_by, value_vars=stages, var_name="Stage", value_name="Count")
-
-    fig = px.bar(
-        melted, x=group_by, y="Count", color="Stage", barmode="group",
-        title=f"Enhanced Investigation Pipeline by {group_by.replace('_', ' ').title()}",
-        labels={group_by: group_by.replace('_', ' ').title(), "Count": "Number of Incidents"}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Optional: show raw table
-    with st.expander("Show pipeline data table"):
-        st.dataframe(agg, use_container_width=True)
-
-    # Optional: stage filter for drill-down
-    stage_selected = st.selectbox("Filter by Stage", stages, index=0)
-    filtered = df[df[group_by].isin(agg[group_by])]
-    if stage_selected == "Under_Investigation":
-        filtered = filtered[filtered['under_investigation']]
-    elif stage_selected == "Action_Complete":
-        filtered = filtered[filtered['action_complete']]
-    elif stage_selected == "Overdue_Actions":
-        filtered = filtered[filtered['overdue_action']]
-    elif stage_selected == "Compliance_Breach":
-        filtered = filtered[~filtered['within_24h']]
-    elif stage_selected == "Required_Investigation":
-        filtered = filtered[filtered['investigation_required']]
-    else:
-        filtered = filtered
-    
-    with st.expander(f"Show incidents in stage: {stage_selected}"):
-        st.dataframe(filtered[[group_by, "incident_id", "incident_date", "notification_date", "report_delay_hours"]], use_container_width=True)
-
 # ----------------------------
 # Executive Summary
 # ----------------------------
@@ -954,6 +888,116 @@ def display_compliance_investigation_cards(df):
                   f"{current_investigation_rate:.1f}%",
                   delta=f"{trend_arrow} {trend_pct:.1f}%",
                   delta_color="inverse")
+
+
+def display_compliance_investigation_section(df):
+    st.header("Compliance & Investigation")
+    st.write("Compliance rates and investigation pipeline overview.")
+
+    if df.empty:
+        st.info("No data available.")
+        return
+
+    # --- Average reporting delay by incident date ---
+    if "incident_date" in df.columns and "notification_date" in df.columns:
+        df['report_delay_days'] = (df['notification_date'] - df['incident_date']).dt.days
+        grouped = df.groupby('incident_date')['report_delay_days'].mean().reset_index()
+        fig_delay = px.line(grouped, x='incident_date', y='report_delay_days',
+                            title="Average Reporting Delay by Incident Date")
+        st.plotly_chart(fig_delay, use_container_width=True)
+
+    # --- 24 Hour Compliance Rate by Location ---
+    if "location" in df.columns and "incident_date" in df.columns and "notification_date" in df.columns:
+        df['within_24h'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() <= 24*3600
+        compliance_loc = df.groupby('location')['within_24h'].mean().sort_values() * 100
+        fig_compliance_loc = px.bar(
+            x=compliance_loc.index, y=compliance_loc.values,
+            labels={'x': 'Location', 'y': '% Within 24hr'},
+            title="24 Hour Compliance Rate by Location",
+            color=compliance_loc.values, color_continuous_scale='RdYlGn'
+        )
+        st.plotly_chart(fig_compliance_loc, use_container_width=True)
+
+    # --- 24 Hour Compliance Rate by Carer ---
+    if "carer_id" in df.columns and "incident_date" in df.columns and "notification_date" in df.columns:
+        compliance_carer = df.groupby('carer_id')['within_24h'].mean().sort_values() * 100
+        fig_compliance_carer = px.bar(
+            x=compliance_carer.index, y=compliance_carer.values,
+            labels={'x': 'Carer ID', 'y': '% Within 24hr'},
+            title="24 Hour Compliance Rate by Carer",
+            color=compliance_carer.values, color_continuous_scale='RdYlGn'
+        )
+        st.plotly_chart(fig_compliance_carer, use_container_width=True)
+
+    # --- Enhanced pipeline as part of this section (rest unchanged) ---
+    st.markdown("---")
+    st.subheader("Enhanced Investigation Pipeline")
+
+    group_by = st.sidebar.selectbox(
+        "Group pipeline by:",
+        ["carer_id", "severity", "incident_type", "location"],
+        index=0
+    )
+
+    df2 = df.copy()
+    if "incident_date" in df2.columns and "notification_date" in df2.columns:
+        df2['incident_date'] = pd.to_datetime(df2['incident_date'], errors='coerce')
+        df2['notification_date'] = pd.to_datetime(df2['notification_date'], errors='coerce')
+        df2['report_delay_hours'] = (df2['notification_date'] - df2['incident_date']).dt.total_seconds() / 3600
+        df2['within_24h'] = df2['report_delay_hours'] <= 24
+        df2['overdue_action'] = (~df2.get('action_complete', pd.Series(False)).astype(bool)) & (df2['report_delay_hours'] > 24)
+        df2['under_investigation'] = df2.get('investigation_required', pd.Series(False)).astype(bool) & (~df2.get('action_complete', pd.Series(False)).astype(bool))
+    else:
+        df2['report_delay_hours'] = None
+        df2['within_24h'] = None
+        df2['overdue_action'] = None
+        df2['under_investigation'] = None
+
+    # Aggregate by group
+    agg = df2.groupby(group_by).agg(
+        All_Incidents=('incident_id', 'count') if 'incident_id' in df2.columns else ('report_delay_hours', 'count'),
+        Required_Investigation=('investigation_required', 'sum') if 'investigation_required' in df2.columns else (group_by, 'count'),
+        Under_Investigation=('under_investigation', 'sum') if 'under_investigation' in df2.columns else (group_by, 'count'),
+        Action_Complete=('action_complete', 'sum') if 'action_complete' in df2.columns else (group_by, 'count'),
+        Overdue_Actions=('overdue_action', 'sum') if 'overdue_action' in df2.columns else (group_by, 'count'),
+        Compliance_Breach=('within_24h', lambda x: (~x).sum()) if 'within_24h' in df2.columns else (group_by, 'count')
+    ).reset_index()
+
+    stages = ['All_Incidents', 'Required_Investigation', 'Under_Investigation',
+              'Action_Complete', 'Overdue_Actions', 'Compliance_Breach']
+    melted = agg.melt(id_vars=group_by, value_vars=stages, var_name="Stage", value_name="Count")
+
+    fig = px.bar(
+        melted, x=group_by, y="Count", color="Stage", barmode="group",
+        title=f"Enhanced Investigation Pipeline by {group_by.replace('_', ' ').title()}",
+        labels={group_by: group_by.replace('_', ' ').title(), "Count": "Number of Incidents"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Show pipeline data table"):
+        st.dataframe(agg, use_container_width=True)
+
+    stage_selected = st.selectbox("Filter by Stage", stages, index=0)
+    filtered = df2[df2[group_by].isin(agg[group_by])]
+    if stage_selected == "Under_Investigation":
+        filtered = filtered[filtered['under_investigation']]
+    elif stage_selected == "Action_Complete":
+        filtered = filtered[filtered['action_complete']]
+    elif stage_selected == "Overdue_Actions":
+        filtered = filtered[filtered['overdue_action']]
+    elif stage_selected == "Compliance_Breach":
+        filtered = filtered[~filtered['within_24h']]
+    elif stage_selected == "Required_Investigation":
+        filtered = filtered[filtered['investigation_required']]
+    else:
+        filtered = filtered
+
+    show_cols = [group_by, "incident_id", "incident_date", "notification_date", "report_delay_hours"]
+    show_cols = [col for col in show_cols if col in filtered.columns]
+    with st.expander(f"Show incidents in stage: {stage_selected}"):
+        st.dataframe(filtered[show_cols], use_container_width=True)
+
+
 
 def plot_compliance_metrics_poly(df):
     need = {'reportable', 'incident_date', 'notification_date'}
