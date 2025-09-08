@@ -1,10 +1,10 @@
 # ml_helpers.py
 # Utilities and analytics helpers for the NDIS dashboard.
-# - Re-exports feature builders from utils.ndis_enhanced_prep
+# - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
 # - Baseline visuals + models
 # - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
-
 from __future__ import annotations
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -17,10 +17,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
-
+# sklearn bits we use across functions
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
 
 # ---------------------------------------
 # Optional enhanced prep from utils/ (no __init__.py required)
@@ -40,79 +39,6 @@ def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
     if _prepare_ndis_data is not None:
         return _prepare_ndis_data(df)
     return df.copy()
-
-
-def _fallback_features(df: pd.DataFrame):
-    """
-    Minimal feature builder used if utils.create_comprehensive_features is unavailable.
-    Matches the names your live risk-scorer expects so the UI keeps working.
-    Returns (X, feature_names, features_df).
-    """
-    d = ensure_incident_datetime(df)
-
-    base = pd.DataFrame(index=d.index)
-    base["hour"] = d["incident_datetime"].dt.hour.fillna(0).astype(int)
-
-    dow = d["incident_datetime"].dt.dayofweek
-    base["is_weekend"] = (dow >= 5).astype(int)
-
-    loc = d.get("location", pd.Series([""], index=d.index)).astype(str).str.lower()
-    base["is_kitchen"] = loc.str.contains("kitchen", na=False).astype(int)
-    base["is_bathroom"] = loc.str.contains("bath|toilet|washroom|restroom", regex=True, na=False).astype(int)
-
-    # history counts (0 if ids missing)
-    if "participant_id" in d.columns and "incident_id" in d.columns:
-        base["participant_incident_count"] = d.groupby("participant_id")["incident_id"].transform("count")
-    else:
-        base["participant_incident_count"] = 0
-    if "carer_id" in d.columns and "incident_id" in d.columns:
-        base["carer_incident_count"] = d.groupby("carer_id")["incident_id"].transform("count")
-    else:
-        base["carer_incident_count"] = 0
-
-    # coarse location risk proxy
-    base["location_risk_score"] = (
-        3*base["is_kitchen"] + 3*base["is_bathroom"] + 1
-    ).clip(lower=1)
-
-    base = base.fillna(0).astype(float)
-    return base.values, list(base.columns), base
-
-
-def create_comprehensive_features(df: pd.DataFrame):
-    """
-    Wrapper: use utils version if present, otherwise fall back to a minimal, safe feature set.
-    """
-    if _create_comprehensive_features is not None:
-        return _create_comprehensive_features(df)
-    return _fallback_features(df)
-
-
-# ---------------------------------------
-# Re-export feature preparation
-# ---------------------------------------
-#try:
-    #from utils.ndis_enhanced_prep import (
-        #prepare_ndis_data as _prepare_ndis_data,
-        #create_comprehensive_features as _create_comprehensive_features,
-    #)
-#except Exception:
-    #_prepare_ndis_data = None
-    #_create_comprehensive_features = None
-
-
-#def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
-    #"""Thin wrapper so legacy imports keep working."""
-    #if _prepare_ndis_data is None:
-        #raise ImportError("utils.ndis_enhanced_prep.prepare_ndis_data not found. Ensure utils/ exists with __init__.py.")
-    #return _prepare_ndis_data(df)
-
-
-#def create_comprehensive_features(df: pd.DataFrame):
-    #"""Thin wrapper so legacy imports keep working."""
-  #  if _create_comprehensive_features is None:
-    #    raise ImportError("utils.ndis_enhanced_prep.create_comprehensive_features not found. Ensure utils/ exists with __init__.py.")
-    #return _create_comprehensive_features(df)
 
 
 # ---------------------------------------
@@ -141,9 +67,7 @@ def ensure_incident_datetime(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> pd.DataFrame:
-    """
-    Back-compat wrapper used by a few functions. Uses ensure_incident_datetime().
-    """
+    """Back-compat wrapper used by a few functions. Uses ensure_incident_datetime()."""
     if date_col == "incident_datetime":
         return ensure_incident_datetime(df)
     out = df.copy()
@@ -154,9 +78,7 @@ def _ensure_datetime(df: pd.DataFrame, date_col: str = "incident_datetime") -> p
 
 
 def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str = "MS") -> pd.Series:
-    """
-    Aggregate 1-per-row incidents to monthly counts.
-    """
+    """Aggregate 1-per-row incidents to monthly counts."""
     if date_col not in df.columns:
         if "incident_datetime" in df.columns:
             date_col = "incident_datetime"
@@ -170,9 +92,7 @@ def _monthly_counts(df: pd.DataFrame, date_col: str = "incident_date", freq: str
 
 
 def _numeric_features(features_df: pd.DataFrame, sample: Optional[int] = None, random_state: int = 42):
-    """
-    Select, clean, and (optionally) downsample numeric features. Returns (X, index).
-    """
+    """Select, clean, and (optionally) downsample numeric features. Returns (X, index)."""
     X = (
         features_df.select_dtypes(include=[np.number])
         .replace([np.inf, -np.inf], np.nan)
@@ -184,13 +104,73 @@ def _numeric_features(features_df: pd.DataFrame, sample: Optional[int] = None, r
 
 
 def _make_color_map(labels: np.ndarray) -> Dict[str, str]:
-    """
-    Stable discrete color map for cluster labels 0..k-1.
-    Ensures consistent mapping across 2D/3D when labels are the same.
-    """
+    """Stable discrete color map for cluster labels 0..k-1."""
     palette = px.colors.qualitative.Plotly + px.colors.qualitative.Safe
     labs = [str(x) for x in sorted(pd.Series(labels).unique(), key=lambda v: int(v))]
     return {lab: palette[i % len(palette)] for i, lab in enumerate(labs)}
+
+
+# ---------------------------------------
+# Fallback feature builder (leak-safe)
+# ---------------------------------------
+def _fallback_features(df: pd.DataFrame):
+    """
+    Minimal, leak-safe features if utils.create_comprehensive_features is unavailable.
+    Uses cumcount() within participant/carer ordered by incident_datetime (past-only).
+    Returns (X, feature_names, features_df).
+    """
+    d = ensure_incident_datetime(df)
+
+    # Work on a copy with stable ordering
+    work = d.reset_index().rename(columns={"index": "__orig_idx"}).copy()
+    # order each group by time for proper cumcount
+    work["__order"] = pd.to_datetime(work["incident_datetime"], errors="coerce")
+    work["__order"] = work["__order"].fillna(pd.Timestamp(0))
+
+    # participant cumulative history (past incidents before this row)
+    if "participant_id" in work.columns:
+        work = work.sort_values(["participant_id", "__order", "__orig_idx"])
+        work["participant_incident_count"] = work.groupby("participant_id").cumcount()
+    else:
+        work["participant_incident_count"] = 0
+
+    # carer cumulative history
+    if "carer_id" in work.columns:
+        work = work.sort_values(["carer_id", "__order", "__orig_idx"])
+        work["carer_incident_count"] = work.groupby("carer_id").cumcount()
+    else:
+        work["carer_incident_count"] = 0
+
+    # restore original order
+    work = work.sort_values("__orig_idx")
+
+    base = pd.DataFrame(index=work.index)
+    base["hour"] = pd.to_datetime(work["incident_datetime"], errors="coerce").dt.hour.fillna(0).astype(int)
+
+    dow = pd.to_datetime(work["incident_datetime"], errors="coerce").dt.dayofweek
+    base["is_weekend"] = (dow >= 5).astype(int)
+
+    loc = work.get("location", pd.Series([""], index=work.index)).astype(str).str.lower()
+    base["is_kitchen"] = loc.str.contains("kitchen", na=False).astype(int)
+    base["is_bathroom"] = loc.str.contains("bath|toilet|washroom|restroom", regex=True, na=False).astype(int)
+
+    base["participant_incident_count"] = work["participant_incident_count"].astype(int)
+    base["carer_incident_count"] = work["carer_incident_count"].astype(int)
+
+    # coarse location risk proxy
+    base["location_risk_score"] = (
+        3 * base["is_kitchen"] + 3 * base["is_bathroom"] + 1
+    ).clip(lower=1)
+
+    base = base.fillna(0).astype(float)
+    return base.values, list(base.columns), base
+
+
+def create_comprehensive_features(df: pd.DataFrame):
+    """Use utils version if present, otherwise fall back."""
+    if _create_comprehensive_features is not None:
+        return _create_comprehensive_features(df)
+    return _fallback_features(df)
 
 
 # ---------------------------------------
@@ -208,7 +188,6 @@ def incident_volume_forecasting(
     """
     Forecast monthly incident volumes. Tries SARIMAX; falls back to seasonal naive.
     Returns (plotly Figure, DataFrame with columns: actual, forecast, lower, upper).
-    Accepts horizon via any of: horizon, horizon_months, months, n_periods.
     """
     # Resolve horizon robustly
     resolved = next((v for v in [horizon, horizon_months, months, n_periods] if v is not None), 6)
@@ -224,25 +203,23 @@ def incident_volume_forecasting(
         return fig, pd.DataFrame(columns=["actual", "forecast", "lower", "upper"])
 
     use_sarimax = False
-    forecast = None
-    conf_int = None
 
     # Try SARIMAX
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX  # type: ignore
         seasonal_order = (0, 1, 1, season_length) if len(y) >= 2 * season_length else (0, 0, 0, 0)
         model = SARIMAX(
-            y,
-            order=(1, 1, 1),
-            seasonal_order=seasonal_order,
-            enforce_stationarity=False,
-            enforce_invertibility=False,
+            y, order=(1, 1, 1), seasonal_order=seasonal_order,
+            enforce_stationarity=False, enforce_invertibility=False
         )
         res = model.fit(disp=False)
         fc = res.get_forecast(steps=H)
         forecast = fc.predicted_mean.rename("forecast")
         conf = fc.conf_int(alpha=0.2)  # 80% interval
-        conf_int = pd.DataFrame({"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values}, index=forecast.index)
+        conf_int = pd.DataFrame(
+            {"lower": conf.iloc[:, 0].values, "upper": conf.iloc[:, 1].values},
+            index=forecast.index
+        )
         use_sarimax = True
     except Exception:
         # Seasonal naive fallback
@@ -275,17 +252,12 @@ def incident_volume_forecasting(
         go.Scatter(
             x=list(conf_int.index) + list(conf_int.index[::-1]),
             y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
-            fill="toself",
-            opacity=0.2,
-            line=dict(width=0),
-            name="80% interval",
+            fill="toself", opacity=0.2, line=dict(width=0), name="80% interval",
         )
     )
     fig.update_layout(
         title=f"Monthly Incident Forecast ({'SARIMAX' if use_sarimax else 'Seasonal naive'})",
-        xaxis_title="Month",
-        yaxis_title="Incidents",
-        hovermode="x unified",
+        xaxis_title="Month", yaxis_title="Incidents", hovermode="x unified",
     )
     return fig, merged
 
@@ -314,8 +286,7 @@ def seasonal_temporal_patterns(df: pd.DataFrame, date_col: str = "incident_datet
     ))
     fig.update_layout(
         title="Temporal Pattern Heatmap (Day-of-Week × Hour)",
-        xaxis_title="Hour",
-        yaxis_title="Day of Week",
+        xaxis_title="Hour", yaxis_title="Day of Week",
         coloraxis=dict(colorscale="Blues")
     )
     return fig
@@ -336,7 +307,6 @@ def plot_time_with_causes(
         if by is None:
             raise ValueError("Neither 'incident_type' nor the provided 'by' column is present.")
 
-    # Ensure datetime for grouping
     df = _ensure_datetime(df, date_col=date_col)
     work = df.copy()
 
@@ -352,10 +322,7 @@ def plot_time_with_causes(
     )
 
     fig = px.area(
-        ts,
-        x="incident_datetime",
-        y="count",
-        color="_cat",
+        ts, x="incident_datetime", y="count", color="_cat",
         title=f"Incidents Over Time by {by.title()} (Top {top_k})",
         labels={"incident_datetime": "Month", "count": "Incidents", "_cat": by.title()}
     )
@@ -421,7 +388,6 @@ def correlation_analysis(df: pd.DataFrame, include: Optional[list] = None, heigh
     return fig
 
 
-
 # ---------------------------------------
 # 6) Clustering analysis (KMeans + PCA) — 2D
 # ---------------------------------------
@@ -452,7 +418,6 @@ def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
     df_plot = pd.DataFrame({"pc1": XY[:, 0], "pc2": XY[:, 1], "cluster": labels})
     df_plot["cluster_str"] = df_plot["cluster"].astype(str)
 
-    # fixed palette so 3D can reuse
     base_palette = px.colors.qualitative.Safe + px.colors.qualitative.Set3 + px.colors.qualitative.Pastel
     uniq = sorted(df_plot["cluster_str"].unique(), key=lambda s: int(s))
     discrete_map = {cid: base_palette[i % len(base_palette)] for i, cid in enumerate(uniq)}
@@ -463,11 +428,9 @@ def clustering_analysis(df_or_features: pd.DataFrame, k: int = 4):
         color_discrete_map=discrete_map,
         title=f"KMeans Clusters (k={k})"
     )
-    # stash the palette for 3D
     fig.update_layout(meta={"cluster_color_map": discrete_map})
 
     return fig, pd.Series(labels, index=use_df.index, name="cluster")
-
 
 
 # ---------------------------------------
@@ -479,10 +442,7 @@ def plot_3d_clusters(
     sample: int = 2000,
     color_map: Optional[Dict[str, str]] = None
 ):
-    """
-    PCA->3D + KMeans clustering. Returns (fig, labels, df3d).
-    If 'color_map' is provided, reuse the 2D palette (keys should be str cluster labels).
-    """
+    """PCA->3D + KMeans clustering. Returns (fig, labels, df3d)."""
     from sklearn.preprocessing import StandardScaler
     from sklearn.decomposition import PCA
     from sklearn.cluster import KMeans
@@ -498,17 +458,14 @@ def plot_3d_clusters(
 
     Xs = StandardScaler().fit_transform(X.values)
     Z = PCA(n_components=3, random_state=42).fit_transform(Xs)
-    # fit in feature space (Xs), not on Z
     labels = KMeans(n_clusters=int(k), n_init=10, random_state=42).fit_predict(Xs)
 
     df3d = pd.DataFrame({"PC1": Z[:, 0], "PC2": Z[:, 1], "PC3": Z[:, 2], "cluster": labels})
     df3d["cluster_str"] = df3d["cluster"].astype(str)
 
     fig = px.scatter_3d(
-        df3d,
-        x="PC1", y="PC2", z="PC3",
-        color="cluster_str",
-        opacity=0.8,
+        df3d, x="PC1", y="PC2", z="PC3",
+        color="cluster_str", opacity=0.8,
         color_discrete_map=(color_map or {})
     )
     fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Cluster")
@@ -516,12 +473,60 @@ def plot_3d_clusters(
 
 
 # ---------------------------------------
-# 7) Predictive models comparison (baselines)
+# 7) Leak guard + predictive models comparison (baselines, leak-safe)
 # ---------------------------------------
+class LeakageGuard(BaseEstimator, TransformerMixin):
+    """
+    Drops columns by explicit names, substring patterns, and optionally by high
+    correlation with y (computed on TRAIN ONLY). Outputs ndarray.
+    """
+    def __init__(self, drop_names=None, drop_patterns=None, corr_threshold=None):
+        self.drop_names = set(drop_names or [])
+        self.drop_patterns = [p.lower() for p in (drop_patterns or [])]
+        self.corr_threshold = corr_threshold
 
-from typing import Dict, List, Any, Optional
-import numpy as np
-import pandas as pd
+        self.columns_in_ = None
+        self.columns_to_drop_ = []
+        self.columns_out_ = []
+
+    def fit(self, X, y=None):
+        X = pd.DataFrame(X).copy()
+        X.columns = [str(c) for c in X.columns]
+        self.columns_in_ = list(X.columns)
+
+        drops = set(c for c in X.columns if c in self.drop_names)
+        if self.drop_patterns:
+            for c in X.columns:
+                low = c.lower()
+                if any(p in low for p in self.drop_patterns):
+                    drops.add(c)
+
+        if y is not None and self.corr_threshold is not None:
+            y_series = pd.Series(y).astype(float)
+            for c in X.columns:
+                try:
+                    s = pd.to_numeric(X[c], errors="coerce")
+                    if s.std(ddof=0) == 0 or s.isna().all():
+                        drops.add(c)
+                        continue
+                    corr = abs(s.corr(y_series))
+                    if np.isfinite(corr) and corr >= self.corr_threshold:
+                        drops.add(c)
+                except Exception:
+                    pass
+
+        self.columns_to_drop_ = sorted(drops)
+        self.columns_out_ = [c for c in X.columns if c not in self.columns_to_drop_]
+        return self
+
+    def transform(self, X):
+        X = pd.DataFrame(X).copy()
+        keep = [c for c in self.columns_out_ if c in X.columns]
+        return X[keep].to_numpy(dtype=float)
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array(self.columns_out_, dtype=object)
+
 
 def predictive_models_comparison(
     df: pd.DataFrame,
@@ -529,13 +534,17 @@ def predictive_models_comparison(
     test_size: float = 0.25,
     random_state: int = 42,
     extra_leaky_features: Optional[List[str]] = None,
-    split_strategy: str = "random",       # "random" | "time" | "group"
-    time_col: Optional[str] = "incident_date",
+    split_strategy: str = "time",        # "time" | "group" | "random"
+    time_col: Optional[str] = "incident_datetime",
     group_col: Optional[str] = None,
-    leak_corr_threshold: float = 0.98,
+    leak_corr_threshold: float = 0.90,
     leak_name_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Train RF & LogReg; return dict with models, metrics, and training feature_names."""
+    """
+    Train RF & LogReg in leak-safe Pipelines.
+    Returns dict with model pipelines, metrics, and post-guard training feature_names.
+    """
+    # 1) features
     out = create_comprehensive_features(df)
     if isinstance(out, tuple) and len(out) == 3:
         _, _, features_df = out
@@ -545,104 +554,108 @@ def predictive_models_comparison(
         features_df = pd.DataFrame(out)
     features_df = features_df.copy()
 
-    # Target aligned to features_df.index
+    # 2) target aligned
     if target in df.columns:
         y = df.loc[features_df.index, target].copy()
     else:
         y = (df.get("severity_numeric", pd.Series([2]*len(df))).loc[features_df.index] >= 3).astype(int)
 
-    # Drop obvious post-outcome/leaky columns
-    drop_cols = set([
-        target, "reportable", "reportable_bin",
-        "severity", "severity_numeric",
-        "medical_attention_required",
-        "notified_to_commission", "reporting_timeframe",
-        "investigation_required", "incident_resolved",
-    ])
-    if extra_leaky_features:
-        drop_cols.update(extra_leaky_features)
-
-    leak_name_patterns = leak_name_patterns or [
-        "report", "reportable", "notify", "notified",
-        "investigat", "severity", "medical", "outcome",
-        "resolution", "timeframe"
-    ]
-    by_name = [c for c in features_df.columns if any(p in c.lower() for p in leak_name_patterns)]
-    drop_cols.update([c for c in by_name if c in features_df.columns])
-    if drop_cols:
-        features_df = features_df.drop(columns=[c for c in drop_cols if c in features_df.columns])
-
-    # Auto-drop near-perfectly correlated columns
-    to_drop_corr = []
-    for c in features_df.columns:
-        s = pd.to_numeric(features_df[c], errors="coerce")
-        if s.std(ddof=0) == 0 or s.isna().all():
-            to_drop_corr.append(c); continue
-        try:
-            corr = abs(s.corr(pd.to_numeric(y, errors="coerce")))
-            if corr >= leak_corr_threshold:
-                to_drop_corr.append(c)
-        except Exception:
-            pass
-    if to_drop_corr:
-        features_df = features_df.drop(columns=to_drop_corr)
-
-    feature_names = features_df.columns.tolist()
-    X = features_df.values
-
-    # Split strategy
+    # 3) split (time default)
     from sklearn.model_selection import train_test_split, GroupShuffleSplit
-    if split_strategy == "time" and time_col and time_col in df.columns:
-        dt = pd.to_datetime(df.loc[features_df.index, time_col], errors="coerce")
+
+    # ensure datetime column
+    df_dt = ensure_incident_datetime(df)
+    if time_col not in df_dt.columns:
+        time_col = "incident_date" if "incident_date" in df_dt.columns else None
+
+    if split_strategy == "time" and time_col:
+        dt = pd.to_datetime(df_dt.loc[features_df.index, time_col], errors="coerce")
         cutoff = dt.quantile(0.8)
         mask_train = dt <= cutoff
         mask_test  = dt > cutoff
-        X_train, X_test = X[mask_train], X[mask_test]
+        X_train_df, X_test_df = features_df[mask_train], features_df[mask_test]
         y_train, y_test = y[mask_train], y[mask_test]
     elif split_strategy == "group" and group_col and group_col in df.columns:
         groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
         gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
-        train_idx, test_idx = next(gss.split(X, y, groups))
-        X_train, X_test = X[train_idx], X[test_idx]
+        train_idx, test_idx = next(gss.split(features_df, y, groups))
+        X_train_df, X_test_df = features_df.iloc[train_idx], features_df.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     else:
         strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=strat
+        X_train_df, X_test_df, y_train, y_test = train_test_split(
+            features_df, y, test_size=test_size, random_state=random_state, stratify=strat
         )
 
-    # Models
+    # 4) guard config
+    drop_by_name = set([
+        target, "reportable", "reportable_bin",
+        "severity", "severity_numeric",
+        "medical_attention_required", "treatment_required",
+        "notified_to_commission", "reporting_timeframe",
+        "investigation_required", "incident_resolved",
+        "actions_documented", "medical_outcome",
+        "report_delay_hours", "within_24h",
+    ])
+    if extra_leaky_features:
+        drop_by_name.update(extra_leaky_features)
+
+    leak_patterns = leak_name_patterns or [
+        "report", "reportable", "notify", "notified",
+        "investigat", "severity", "medical", "outcome",
+        "resolution", "timeframe", "delay", "compliance"
+    ]
+
+    guard = LeakageGuard(
+        drop_names=drop_by_name,
+        drop_patterns=leak_patterns,
+        corr_threshold=leak_corr_threshold,
+    )
+
+    # 5) model pipelines
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    rf_pipe = Pipeline([
+        ("guard", guard),
+        ("model", RandomForestClassifier(n_estimators=200, random_state=random_state)),
+    ])
+
+    lr_pipe = Pipeline([
+        ("guard", guard),
+        ("scaler", StandardScaler(with_mean=True)),
+        ("model", LogisticRegression(max_iter=2000, solver="saga")),
+    ])
 
     results: Dict[str, Any] = {}
 
-    rf = RandomForestClassifier(n_estimators=200, random_state=random_state)
-    rf.fit(X_train, y_train)
-    rf_pred = rf.predict(X_test)
-    rf_proba = rf.predict_proba(X_test) if hasattr(rf, "predict_proba") else None
+    # RF
+    rf_pipe.fit(X_train_df, y_train)
+    rf_pred = rf_pipe.predict(X_test_df)
+    rf_proba = rf_pipe.predict_proba(X_test_df) if hasattr(rf_pipe, "predict_proba") else None
+    rf_feats = list(rf_pipe.named_steps["guard"].get_feature_names_out())
     results["RandomForest"] = {
-        "model": rf,
+        "model": rf_pipe,
         "accuracy": float((rf_pred == y_test).mean()),
         "y_test": y_test,
         "predictions": rf_pred,
         "probabilities": rf_proba,
-        "feature_names": feature_names,
+        "feature_names": rf_feats,
     }
 
-    try:
-        logreg = LogisticRegression(max_iter=2000, solver="saga", n_jobs=-1)
-    except TypeError:
-        logreg = LogisticRegression(max_iter=2000, solver="saga")
-    lg_pred = logreg.fit(X_train, y_train).predict(X_test)
-    lg_proba = logreg.predict_proba(X_test) if hasattr(logreg, "predict_proba") else None
+    # LogReg
+    lr_pipe.fit(X_train_df, y_train)
+    lr_pred = lr_pipe.predict(X_test_df)
+    lr_proba = lr_pipe.predict_proba(X_test_df) if hasattr(lr_pipe, "predict_proba") else None
+    lr_feats = list(lr_pipe.named_steps["guard"].get_feature_names_out())
     results["LogisticRegression"] = {
-        "model": logreg,
-        "accuracy": float((lg_pred == y_test).mean()),
+        "model": lr_pipe,
+        "accuracy": float((lr_pred == y_test).mean()),
         "y_test": y_test,
-        "predictions": lg_pred,
-        "probabilities": lg_proba,
-        "feature_names": feature_names,
+        "predictions": lr_pred,
+        "probabilities": lr_proba,
+        "feature_names": lr_feats,
     }
 
     return results
@@ -872,7 +885,6 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
 
 
 # 12) Predictive Risk Scoring System
-
 def create_predictive_risk_scoring(
     df: pd.DataFrame,
     trained_models: Dict[str, Dict[str, Any]],
@@ -880,22 +892,16 @@ def create_predictive_risk_scoring(
 ):
     """
     Return calculate_risk_score(scenario) using the best model.
-    Uses the model's TRAINING feature list to avoid n_features_in_ mismatches.
+    Aligns to TRAINING feature order saved in trained_models[best]['feature_names'].
     """
     if not trained_models:
         return None
 
-    best_model_name = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
-    best_model = trained_models[best_model_name]['model']
-
-    # Use training feature order saved with the model (fallback to arg)
-    train_feats = list(trained_models[best_model_name].get('feature_names', feature_names))
-    n_expected = getattr(best_model, "n_features_in_", len(train_feats))
-    if len(train_feats) != n_expected:
-        if len(train_feats) > n_expected:
-            train_feats = train_feats[:n_expected]
-        else:
-            train_feats = train_feats + [f"__pad_{i}__" for i in range(n_expected - len(train_feats))]
+    best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
+    best_model = trained_models[best_key]['model']  # Pipeline
+    train_feats = list(trained_models[best_key].get('feature_names', feature_names))
+    if not train_feats:
+        return None
 
     def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
         mapping = {
@@ -908,7 +914,6 @@ def create_predictive_risk_scoring(
             'carer_incident_count': scenario_data.get('carer_history', 1),
             'location_risk_score': scenario_data.get('location_risk', 2),
         }
-
         vec = np.zeros(len(train_feats), dtype=float)
         for i, fn in enumerate(train_feats):
             vec[i] = float(mapping.get(fn, 0.0))
@@ -922,45 +927,9 @@ def create_predictive_risk_scoring(
             score = float(pred) / 3.0
 
         level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
-        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_model_name}
+        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_key}
 
     return calculate_risk_score
-
-
-    def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
-        # simple name→value mapping for your demo features
-        mapping = {
-            'hour': scenario_data.get('hour', 12),
-            'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
-            'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
-            'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
-                                    for k in ['bathroom','toilet','washroom','restroom']) else 0,
-            'participant_incident_count': scenario_data.get('participant_history', 1),
-            'carer_incident_count': scenario_data.get('carer_history', 1),
-            'location_risk_score': scenario_data.get('location_risk', 2),
-        }
-
-        # build vector aligned to TRAINING feature order
-        vec = np.zeros(len(train_feats), dtype=float)
-        for i, fn in enumerate(train_feats):
-            vec[i] = float(mapping.get(fn, 0.0))  # 0.0 for any features not in the mapping
-
-        X_one = vec.reshape(1, -1)
-
-        if hasattr(best_model, 'predict_proba'):
-            proba = best_model.predict_proba(X_one)[0]
-            # for binary classifiers this is usually prob of positive class; max() keeps it robust
-            score = float(np.max(proba))
-        else:
-            pred = best_model.predict(X_one)[0]
-            score = float(pred) / 3.0  # crude normalisation fallback
-
-        level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
-        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_model_name}
-
-    return calculate_risk_score
-
-
 
 
 # 13) Incident Similarity Analysis
@@ -1017,7 +986,6 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
         {'name': 'Weekend Transport Risk', 'conditions': {'day_type': 'weekend', 'location_contains': 'transport'}, 'severity': 'MEDIUM'}
     ]
     for sc in scenarios:
-        # simple representative scenario input
         scenario_input = {'hour': 6, 'location': 'kitchen', 'day_type': 'weekday', 'participant_history': 5, 'carer_history': 8, 'location_risk': 3}
         risk = risk_scoring_function(scenario_input)
         if risk['risk_score'] > alert_thresholds.get(sc['severity'].lower(), 0.5):
@@ -1032,12 +1000,7 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
 
 
 # 15) Streamlit integration helpers (optional)
-def add_enhanced_features_to_dashboard(
-    df: pd.DataFrame,
-    X: np.ndarray,
-    feature_names: List[str],
-    trained_models: Dict[str, Dict[str, Any]],
-):
+def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_names: List[str], trained_models: Dict[str, Dict[str, Any]]):
     """Render enhanced features inside a Streamlit app."""
     try:
         import streamlit as st
@@ -1046,7 +1009,7 @@ def add_enhanced_features_to_dashboard(
 
     st.markdown("### 🔬 Enhanced Analytics Features")
 
-    # 📊 Enhanced model analysis
+    # Enhanced model analysis
     if trained_models:
         st.markdown("#### 📊 Enhanced Model Performance Analysis")
         for model_name, model_data in trained_models.items():
@@ -1061,7 +1024,7 @@ def add_enhanced_features_to_dashboard(
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
 
-    # 🕸️ Carer risk network
+    # Carer risk network
     st.markdown("#### 🕸️ Carer-Participant Risk Network")
     network_fig, risk_matrix = carer_risk_network_analysis(df)
     if network_fig is not None:
@@ -1071,7 +1034,7 @@ def add_enhanced_features_to_dashboard(
             st.markdown("##### 🚨 High-Risk Carer-Participant Pairs")
             st.dataframe(high_risk_pairs.sort_values('risk_score', ascending=False))
 
-    # 👤 Participant journey
+    # Participant journey
     if 'participant_id' in df.columns:
         st.markdown("#### 👤 Individual Participant Journey")
         participant_ids = df['participant_id'].dropna().unique()
@@ -1081,23 +1044,11 @@ def add_enhanced_features_to_dashboard(
             if journey_fig:
                 st.plotly_chart(journey_fig, use_container_width=True)
 
-    # 🎯 Predictive risk scoring UI
+    # Predictive risk scoring UI
     if trained_models:
         st.markdown("#### 🎯 Predictive Risk Scoring")
-
-        # ✅ Use training feature order saved with the (best) model
-        best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
-        trained_feature_names = trained_models[best_key].get('feature_names', [])
-        risk_scorer = create_predictive_risk_scoring(df, trained_models, trained_feature_names)
-
+        risk_scorer = create_predictive_risk_scoring(df, trained_models, feature_names)
         if risk_scorer:
-            # (optional) quick shape sanity caption
-            try:
-                n_expected = getattr(trained_models[best_key]['model'], 'n_features_in_', '?')
-                st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
-            except Exception:
-                pass
-
             col1, col2, col3 = st.columns(3)
             with col1:
                 test_hour = st.slider("Hour", 0, 23, 8)
@@ -1112,7 +1063,7 @@ def add_enhanced_features_to_dashboard(
                 'participant_history': test_history,
                 'carer_history': 5,
                 'location_risk': 3 if test_location in ['kitchen', 'bathroom'] else 1,
-                'day_type': 'weekend' if st.checkbox("Weekend?", value=False, key="risk_ui_weekend") else 'weekday'
+                'day_type': 'weekend' if st.checkbox("Weekend?", value=False) else 'weekday'
             }
             risk_result = risk_scorer(scenario)
             if risk_result['risk_level'] == 'HIGH':
@@ -1122,15 +1073,11 @@ def add_enhanced_features_to_dashboard(
             else:
                 st.success(f"✅ {risk_result['risk_level']} RISK - {risk_result['confidence']:.1%} confidence")
 
-    # 🚨 Real-time alerts simulation
+    # Real-time alerts simulation
     st.markdown("#### 🚨 Real-Time Alert System (Simulation)")
     alert_thresholds = {'high': 0.7, 'medium': 0.5, 'low': 0.3}
     if trained_models:
-        # ✅ Use training feature order saved with the (best) model
-        best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
-        trained_feature_names = trained_models[best_key].get('feature_names', [])
-        risk_scorer = create_predictive_risk_scoring(df, trained_models, trained_feature_names)
-
+        risk_scorer = create_predictive_risk_scoring(df, trained_models, feature_names)
         if risk_scorer:
             alerts = simulate_real_time_alerts(df, risk_scorer, alert_thresholds)
             if alerts:
