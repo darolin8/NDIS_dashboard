@@ -1624,4 +1624,40 @@ def diagnose_data_leakage(df: pd.DataFrame, target: str = "reportable_bin"):
         'date_columns': date_cols
     }
 
+# Add this as a separate section, not mixed with your existing graphs
+st.markdown("---")  # Add a separator line
 
+if st.button("Quick Data Leakage Check"):
+    st.write("### Data Leakage Diagnostic")
+    
+    try:
+        # Simple correlation check
+        if 'reportable_bin' in df.columns:
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            correlations = []
+            
+            for col in numeric_cols:
+                if col != 'reportable_bin':
+                    try:
+                        corr = abs(df[col].corr(df['reportable_bin']))
+                        if np.isfinite(corr):
+                            correlations.append((col, corr))
+                    except:
+                        pass
+            
+            # Sort and show top correlations
+            correlations.sort(key=lambda x: x[1], reverse=True)
+            
+            st.write("**Top 10 correlations with target:**")
+            for col, corr in correlations[:10]:
+                if corr > 0.9:
+                    st.error(f"{col}: {corr:.3f} - VERY HIGH (likely leakage)")
+                elif corr > 0.7:
+                    st.warning(f"{col}: {corr:.3f} - HIGH")
+                else:
+                    st.info(f"{col}: {corr:.3f} - OK")
+        else:
+            st.error("Target column 'reportable_bin' not found")
+            
+    except Exception as e:
+        st.error(f"Diagnostic failed: {str(e)}")
