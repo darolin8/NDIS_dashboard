@@ -1,24 +1,27 @@
-# dashboard_pages.py (top of file)
+# ---- BEGIN: robust imports (top of dashboard_pages.py) ----
+import os, sys, importlib
+import streamlit as st
 
-# 1) Safe fallback for shorten_factor (keeps app running even if utils/ isn’t a package)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+# Optional utils helper; fall back if not present
 try:
-    from utils.factor_labels import shorten_factor  # optional
+    from utils.factor_labels import shorten_factor
 except Exception:
     def shorten_factor(x):
         if x is None: return ""
         s = str(x)
         return (s.split(";")[0] or s)[:30]
 
-# 2) Ensure repo dir is on path (no __init__.py needed)
-import os, sys
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if APP_DIR not in sys.path:
-    sys.path.insert(0, APP_DIR)
-
-# 3) Import ml_helpers as a module and validate required symbols
-import streamlit as st
-import importlib
-ML = importlib.import_module("ml_helpers")
+# Import ml_helpers as a module and verify required symbols
+try:
+    ML = importlib.import_module("ml_helpers")
+except Exception as e:
+    st.error("Could not import ml_helpers from dashboard_pages:")
+    st.exception(e)
+    st.stop()
 
 REQUIRED = [
     "incident_volume_forecasting",
@@ -30,27 +33,26 @@ REQUIRED = [
     "clustering_analysis",
     "predictive_models_comparison",
     "incident_type_risk_profiling",
-    "create_predictive_risk_scoring",   # if you call it from this file
+    "create_predictive_risk_scoring",  # if you call it here
 ]
 _missing = [name for name in REQUIRED if not hasattr(ML, name)]
 if _missing:
     st.error(f"ml_helpers is missing: {_missing}. Check function names in ml_helpers.py.")
-    # You can st.stop() here if you prefer hard fail:
-    # st.stop()
+    st.stop()
 
-# 4) Bind the names you use later in this file
-incident_volume_forecasting      = getattr(ML, "incident_volume_forecasting")
-seasonal_temporal_patterns       = getattr(ML, "seasonal_temporal_patterns")
-plot_time_with_causes            = getattr(ML, "plot_time_with_causes")
-plot_carer_performance_scatter   = getattr(ML, "plot_carer_performance_scatter")
-create_comprehensive_features    = getattr(ML, "create_comprehensive_features")
-correlation_analysis             = getattr(ML, "correlation_analysis")
-clustering_analysis              = getattr(ML, "clustering_analysis")
-predictive_models_comparison     = getattr(ML, "predictive_models_comparison")
-# prefer the alias if present, otherwise the canonical name
-profile_incident_type_risk       = getattr(ML, "profile_incident_type_risk",
-                                           getattr(ML, "incident_type_risk_profiling"))
+# Bind names used below
+incident_volume_forecasting      = ML.incident_volume_forecasting
+seasonal_temporal_patterns       = ML.seasonal_temporal_patterns
+plot_time_with_causes            = ML.plot_time_with_causes
+plot_carer_performance_scatter   = ML.plot_carer_performance_scatter
+create_comprehensive_features    = ML.create_comprehensive_features
+correlation_analysis             = ML.correlation_analysis
+clustering_analysis              = ML.clustering_analysis
+predictive_models_comparison     = ML.predictive_models_comparison
+profile_incident_type_risk       = getattr(ML, "profile_incident_type_risk", ML.incident_type_risk_profiling)
 create_predictive_risk_scoring   = getattr(ML, "create_predictive_risk_scoring", None)
+# ---- END: robust imports ----
+
 
 # ----------------------------
 # Imports
