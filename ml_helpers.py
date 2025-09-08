@@ -21,6 +21,42 @@ from plotly.subplots import make_subplots
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 
+
+# add near the top of ml_helpers.py (after imports)
+from sklearn.base import BaseEstimator, TransformerMixin
+
+class LeakageGuard(BaseEstimator, TransformerMixin):
+    """
+    Keeps only the columns chosen during fit (self.columns_out_).
+    During inference it can accept either a named DataFrame or a raw ndarray.
+    """
+    def __init__(self, columns_out=None):
+        self.columns_out_ = list(columns_out) if columns_out is not None else []
+
+    def fit(self, X, y=None):
+        # If X is a DataFrame, remember the columns; otherwise assume current list is correct
+        if isinstance(X, pd.DataFrame):
+            if not self.columns_out_:
+                # default: keep numeric columns if nothing was provided
+                self.columns_out_ = X.select_dtypes(include=[np.number]).columns.tolist()
+        return self
+
+    def transform(self, X):
+        # If a DataFrame with names is provided, use name-based selection
+        if isinstance(X, pd.DataFrame):
+            keep = [c for c in self.columns_out_ if c in X.columns]
+            return X[keep].to_numpy(dtype=float)
+
+        # Otherwise, try to align by position if the widths match
+        arr = np.asarray(X)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[1] == len(self.columns_out_):
+            return arr.astype(float)
+
+        # Fallback: nothing reliable to keep → empty (rare)
+        return np.empty((arr.shape[0], 0), dtype=float)
+
 # ---------------------------------------
 # Optional enhanced prep from utils/ (no __init__.py required)
 # ---------------------------------------
@@ -904,32 +940,32 @@ def create_predictive_risk_scoring(
         return None
 
     def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
-        mapping = {
-            'hour': scenario_data.get('hour', 12),
-            'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
-            'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
-            'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
-                                    for k in ['bathroom','toilet','washroom','restroom']) else 0,
-            'participant_incident_count': scenario_data.get('participant_history', 1),
-            'carer_incident_count': scenario_data.get('carer_history', 1),
-            'location_risk_score': scenario_data.get('location_risk', 2),
-        }
-        vec = np.zeros(len(train_feats), dtype=float)
-        for i, fn in enumerate(train_feats):
-            vec[i] = float(mapping.get(fn, 0.0))
-        X_one = vec.reshape(1, -1)
+    # map scenario -> feature values
+    mapping = {
+        'hour': scenario_data.get('hour', 12),
+        'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
+        'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
+        'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
+                                for k in ['bathroom','toilet','washroom','restroom']) else 0,
+        'participant_incident_count': scenario_data.get('participant_history', 1),
+        'carer_incident_count': scenario_data.get('carer_history', 1),
+        'location_risk_score': scenario_data.get('location_risk', 2),
+    }
 
-        if hasattr(best_model, 'predict_proba'):
-            proba = best_model.predict_proba(X_one)[0]
-            score = float(np.max(proba))
-        else:
-            pred = best_model.predict(X_one)[0]
-            score = float(pred) / 3.0
+    # Build a SINGLE-ROW DATAFRAME with the **training feature names**
+    row = {fn: float(mapping.get(fn, 0.0)) for fn in train_feats}
+    X_one = pd.DataFrame([row], columns=train_feats)
 
-        level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
-        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_key}
+    # Predict
+    if hasattr(best_model, 'predict_proba'):
+        proba = best_model.predict_proba(X_one)[0]
+        score = float(np.max(proba))
+    else:
+        pred = best_model.predict(X_one)[0]
+        score = float(pred) / 3.0  # fallback normalization
 
-    return calculate_risk_score
+    level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
+    return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_key}
 
 
 # 13) Incident Similarity Analysis
