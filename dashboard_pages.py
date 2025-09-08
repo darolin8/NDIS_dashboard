@@ -1103,9 +1103,7 @@ def display_compliance_investigation_section(df):
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
 
-# ----------------------------
-# ML Insights (robust, minimal dependencies)
-# ----------------------------
+
 # ----------------------------
 # ML Insights (robust, minimal dependencies)
 # ----------------------------
@@ -1147,13 +1145,30 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     # Quick trainer (optional)
     # ---------------------------------
-    with st.expander("🔧 Train baseline models (optional)"):
-        if st.button("Train / Refresh"):
+ with st.expander("🔧 Train baseline models (optional)"):
+    c1, c2 = st.columns([1,1])
+    with c1:
+        if st.button("Train / Refresh", key="train_models"):
             try:
-                st.session_state["trained_models"] = predictive_models_comparison(df_used)
+                st.session_state['trained_models'] = predictive_models_comparison(
+                    df_used,
+                    split_strategy="time",          # avoid temporal leakage
+                    time_col="incident_date",
+                    leak_corr_threshold=0.90,       # stricter auto-drop
+                    extra_leaky_features=[
+                        # anything that happens after the outcome or encodes it
+                        "notification_date", "report_delay_hours", "within_24h",
+                        "reportable_reason", "investigation_required",
+                        "incident_resolved", "actions_documented", "medical_outcome",
+                    ],
+                )
                 st.success("Models trained and stored in session.")
             except Exception as e:
                 st.warning(f"Training failed: {e}")
+    with c2:
+        if st.button("Clear cached models", key="clear_models"):
+            st.session_state.pop("trained_models", None)
+            st.info("Cleared cached models. Retrain to refresh.")
 
     # ---------------------------------
     # 1) Model evaluation
