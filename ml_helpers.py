@@ -518,6 +518,7 @@ def plot_3d_clusters(
 # ---------------------------------------
 # 7) Predictive models comparison (baselines)
 # ---------------------------------------
+
 from typing import Dict, List, Any, Optional
 import numpy as np
 import pandas as pd
@@ -535,7 +536,6 @@ def predictive_models_comparison(
     leak_name_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Train RF & LogReg; return dict with models, metrics, and training feature_names."""
-    # Build features via your wrapper (works with or without utils/)
     out = create_comprehensive_features(df)
     if isinstance(out, tuple) and len(out) == 3:
         _, _, features_df = out
@@ -569,7 +569,6 @@ def predictive_models_comparison(
     ]
     by_name = [c for c in features_df.columns if any(p in c.lower() for p in leak_name_patterns)]
     drop_cols.update([c for c in by_name if c in features_df.columns])
-
     if drop_cols:
         features_df = features_df.drop(columns=[c for c in drop_cols if c in features_df.columns])
 
@@ -578,8 +577,7 @@ def predictive_models_comparison(
     for c in features_df.columns:
         s = pd.to_numeric(features_df[c], errors="coerce")
         if s.std(ddof=0) == 0 or s.isna().all():
-            to_drop_corr.append(c)
-            continue
+            to_drop_corr.append(c); continue
         try:
             corr = abs(s.corr(pd.to_numeric(y, errors="coerce")))
             if corr >= leak_corr_threshold:
@@ -608,7 +606,6 @@ def predictive_models_comparison(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     else:
-        # avoid stratify error if y has one class
         strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state, stratify=strat
@@ -650,38 +647,6 @@ def predictive_models_comparison(
 
     return results
 
-
-    def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
-        vec = np.zeros(len(feature_names), dtype=float)
-        mapping = {
-            'hour': scenario_data.get('hour', 12),
-            'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
-            'is_kitchen': 1 if 'kitchen' in scenario_data.get('location', '').lower() else 0,
-            'is_bathroom': 1 if any(k in scenario_data.get('location', '').lower()
-                                    for k in ['bathroom','toilet','washroom','restroom']) else 0,
-            'participant_incident_count': scenario_data.get('participant_history', 1),
-            'carer_incident_count': scenario_data.get('carer_history', 1),
-            'location_risk_score': scenario_data.get('location_risk', 2),
-        }
-        # fill vector by name
-        for i, fn in enumerate(feature_names):
-            if fn in mapping:
-                vec[i] = mapping[fn]
-
-        # ensure right shape
-        X_one = np.asarray(vec, dtype=float).reshape(1, -1)
-
-        if hasattr(best_model, 'predict_proba'):
-            proba = best_model.predict_proba(X_one)[0]
-            score = float(np.max(proba))
-        else:
-            pred = best_model.predict(X_one)[0]
-            score = float(pred) / 3.0
-
-        level = 'HIGH' if score > 0.7 else 'MEDIUM' if score > 0.4 else 'LOW'
-        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_model_name}
-
-    return calculate_risk_score
 
 # ---------------------------------------
 # 8) Incident type risk profiling
@@ -907,6 +872,7 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
 
 
 # 12) Predictive Risk Scoring System
+
 def create_predictive_risk_scoring(
     df: pd.DataFrame,
     trained_models: Dict[str, Dict[str, Any]],
@@ -922,7 +888,7 @@ def create_predictive_risk_scoring(
     best_model_name = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
     best_model = trained_models[best_model_name]['model']
 
-    # use the saved training feature list in the model record when available
+    # Use training feature order saved with the model (fallback to arg)
     train_feats = list(trained_models[best_model_name].get('feature_names', feature_names))
     n_expected = getattr(best_model, "n_features_in_", len(train_feats))
     if len(train_feats) != n_expected:
@@ -931,7 +897,7 @@ def create_predictive_risk_scoring(
         else:
             train_feats = train_feats + [f"__pad_{i}__" for i in range(n_expected - len(train_feats))]
 
-def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
+    def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
         mapping = {
             'hour': scenario_data.get('hour', 12),
             'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
