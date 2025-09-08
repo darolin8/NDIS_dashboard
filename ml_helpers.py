@@ -921,6 +921,7 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
 
 
 # 12) Predictive Risk Scoring System
+# 12) Predictive Risk Scoring System (robust to pipelines/name-based selectors)
 def create_predictive_risk_scoring(
     df: pd.DataFrame,
     trained_models: Dict[str, Dict[str, Any]],
@@ -928,44 +929,114 @@ def create_predictive_risk_scoring(
 ):
     """
     Return calculate_risk_score(scenario) using the best model.
-    Aligns to TRAINING feature order saved in trained_models[best]['feature_names'].
+    Builds input in the schema the model expects (named DataFrame for pipelines,
+    or width-matched ndarray otherwise) to avoid (1, 0) errors.
     """
     if not trained_models:
         return None
 
-    best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
-    best_model = trained_models[best_key]['model']  # Pipeline
-    train_feats = list(trained_models[best_key].get('feature_names', feature_names))
-    if not train_feats:
-        return None
+    # pick best by accuracy
+    best_key = max(trained_models, key=lambda k: trained_models[k].get("accuracy", 0))
+    best_blob = trained_models[best_key]
+    model = best_blob["model"]
 
-    def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
-    # map scenario -> feature values
-    mapping = {
-        'hour': scenario_data.get('hour', 12),
-        'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
-        'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
-        'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
-                                for k in ['bathroom','toilet','washroom','restroom']) else 0,
-        'participant_incident_count': scenario_data.get('participant_history', 1),
-        'carer_incident_count': scenario_data.get('carer_history', 1),
-        'location_risk_score': scenario_data.get('location_risk', 2),
-    }
+    # --- Figure out expected schema (names or just a count) ---
+    expected_cols: List[str] = []
+    expected_n = None
 
-    # Build a SINGLE-ROW DATAFRAME with the **training feature names**
-    row = {fn: float(mapping.get(fn, 0.0)) for fn in train_feats}
-    X_one = pd.DataFrame([row], columns=train_feats)
+    # If it's a Pipeline, try to get names from a step
+    try:
+        from sklearn.pipeline import Pipeline
+        if isinstance(model, Pipeline):
+            for name, step in model.steps:
+                # custom selector / guard
+                if hasattr(step, "columns_out_") and isinstance(step.columns_out_, (list, tuple)):
+                    expected_cols = list(step.columns_out_)
+                    break
+                # many sklearn transformers expose feature names
+                if hasattr(step, "get_feature_names_out"):
+                    try:
+                        expected_cols = list(step.get_feature_names_out())
+                        break
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
-    # Predict
-    if hasattr(best_model, 'predict_proba'):
-        proba = best_model.predict_proba(X_one)[0]
-        score = float(np.max(proba))
-    else:
-        pred = best_model.predict(X_one)[0]
-        score = float(pred) / 3.0  # fallback normalization
+    # Fall back to names recorded during training, then to provided feature_names
+    if not expected_cols:
+        expected_cols = list(best_blob.get("feature_names", []) or feature_names)
 
-    level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
-    return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_key}
+    # Fall back to a feature count if no names
+    try:
+        expected_n = getattr(model, "n_features_in_", None)
+    except Exception:
+        expected_n = None
+    if expected_n is None and hasattr(model, "steps"):
+        # last step might have it
+        try:
+            expected_n = getattr(model.steps[-1][1], "n_features_in_", None)
+        except Exception:
+            expected_n = None
+
+    # If we only know the count, synthesize placeholder names so we can build a DF
+    if expected_n is not None and not expected_cols:
+        expected_cols = [f"f_{i}" for i in range(int(expected_n))]
+
+    # If we still have nothing, return a safe no-op scorer
+    if not expected_cols and (expected_n is None or expected_n == 0):
+        def _noop(_scenario):
+            return {"risk_score": 0.0, "risk_level": "LOW", "confidence": 0.0, "model_used": best_key}
+        return _noop
+
+    # --- Build the callable scorer ---
+    def calculate_risk_score(scenario: Dict[str, Any]) -> Dict[str, Any]:
+        # Scenario → demo features
+        mapping = {
+            "hour": scenario.get("hour", 12),
+            "is_weekend": 1 if scenario.get("day_type") == "weekend" else 0,
+            "is_kitchen": 1 if "kitchen" in str(scenario.get("location", "")).lower() else 0,
+            "is_bathroom": 1 if any(k in str(scenario.get("location", "")).lower()
+                                     for k in ["bathroom", "toilet", "washroom", "restroom"]) else 0,
+            "participant_incident_count": scenario.get("participant_history", 1),
+            "carer_incident_count": scenario.get("carer_history", 1),
+            "location_risk_score": scenario.get("location_risk", 2),
+        }
+
+        # Prefer a named row (DataFrame) so pipeline steps can select by column name
+        if expected_cols:
+            row = {col: float(mapping.get(col, 0.0)) for col in expected_cols}
+            X_one = pd.DataFrame([row], columns=expected_cols)
+        else:
+            # Width-only fallback
+            n = int(expected_n) if expected_n is not None else len(feature_names)
+            vec = np.zeros(n, dtype=float)
+            train_names = list(best_blob.get("feature_names", []) or feature_names)
+            for i, fn in enumerate(train_names[:n]):
+                vec[i] = float(mapping.get(fn, 0.0))
+            X_one = vec.reshape(1, -1)
+
+        # Predict (try DF first; if a step rejects DF, retry with ndarray)
+        try:
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(X_one)[0]
+                score = float(np.max(proba))
+            else:
+                pred = model.predict(X_one)[0]
+                score = float(pred) / 3.0
+        except Exception:
+            X_np = X_one.to_numpy(dtype=float) if isinstance(X_one, pd.DataFrame) else np.asarray(X_one, dtype=float)
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(X_np)[0]
+                score = float(np.max(proba))
+            else:
+                pred = model.predict(X_np)[0]
+                score = float(pred) / 3.0
+
+        level = "HIGH" if score > 0.7 else ("MEDIUM" if score > 0.4 else "LOW")
+        return {"risk_score": score, "risk_level": level, "confidence": score, "model_used": best_key}
+
+    return calculate_risk_score
 
 
 # 13) Incident Similarity Analysis
