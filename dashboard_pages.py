@@ -1169,6 +1169,48 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Training failed: {e}")
 
+
+    # Add this in your ML Insights section - either before or after your existing model comparison
+
+# Data Leakage Diagnostic
+if st.button("Diagnose Data Leakage"):
+    st.subheader("Data Leakage Analysis")
+    
+    # Check if reportable_bin exists and how it's related to other columns
+    if 'reportable_bin' in df.columns:
+        st.write("**Target Distribution:**")
+        st.write(df['reportable_bin'].value_counts())
+        
+        # Check correlation with reportable column
+        if 'reportable' in df.columns:
+            corr = df['reportable_bin'].corr(df['reportable'].astype(int))
+            st.write(f"**Correlation with 'reportable' column: {corr:.3f}**")
+            if corr > 0.95:
+                st.error("MAJOR LEAKAGE: reportable_bin is derived from reportable column!")
+        
+        # Check other suspicious correlations
+        suspicious_cols = []
+        for col in ['severity', 'medical_attention_required', 'treatment_required', 
+                   'medical_outcome', 'notification_time_frame']:
+            if col in df.columns:
+                try:
+                    if df[col].dtype == 'bool':
+                        corr = abs(df['reportable_bin'].corr(df[col].astype(int)))
+                    else:
+                        corr = abs(df['reportable_bin'].corr(pd.get_dummies(df[col]).iloc[:,0]))
+                    if corr > 0.7:
+                        suspicious_cols.append((col, corr))
+                except:
+                    pass
+        
+        if suspicious_cols:
+            st.warning("Other high correlations:")
+            for col, corr in suspicious_cols:
+                st.write(f"- {col}: {corr:.3f}")
+    else:
+        st.info("reportable_bin not found - need to check how target is created")
+
+
     # ---------------------------------
     # 1) Model evaluation
     # ---------------------------------
