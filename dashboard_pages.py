@@ -1122,14 +1122,25 @@ def display_ml_insights_section(filtered_df):
     import plotly.express as px
     import streamlit as st
 
-    
+    from ml_helpers import (
+        ensure_incident_datetime,
+        create_comprehensive_features,
+        predictive_models_comparison,
+        enhanced_confusion_matrix_analysis,
+        create_predictive_risk_scoring,
+        incident_similarity_analysis,
+        incident_volume_forecasting as _ivf,
+        seasonal_temporal_patterns,
+        clustering_analysis,
+        plot_3d_clusters,
+        correlation_analysis,
+    )
+
     st.header("🤖 ML Insights")
 
     # --------- Scope selection ---------
-    use_filtered = st.toggle(
-        "Use filtered data for ML widgets", value=True,
-        help="Turn off to use the full dataset."
-    )
+    use_filtered = st.toggle("Use filtered data for ML widgets", value=True,
+                             help="Turn off to use the full dataset.")
     df_full = getattr(st.session_state, "df", None)
     if df_full is None:
         st.error("No dataframe in session. Make sure data was loaded successfully.")
@@ -1144,36 +1155,20 @@ def display_ml_insights_section(filtered_df):
         return
 
     # ---------------------------------
-    #  Train baseline models (no leakage)
+    # Optional: quick trainer
     # ---------------------------------
     with st.expander("🔧 Train baseline models (optional)"):
-        left, right = st.columns([1, 1])
+        if st.button("Train / Refresh", use_container_width=True):
+            try:
+                st.session_state['trained_models'] = predictive_models_comparison(
+                    df_used,
+                    split_strategy="time",
+                    time_col="incident_datetime",
+                )
+                st.success("✅ Models trained and stored in session.")
+            except Exception as e:
+                st.warning(f"Training failed: {e}")
 
-        with left:
-            if st.button("Train / Refresh", key="train_models"):
-                try:
-                    st.session_state["trained_models"] = predictive_models_comparison(
-                        df_used,
-                        split_strategy="time",          # avoid temporal leakage
-                        time_col="incident_date",
-                        leak_corr_threshold=0.90,       # stricter auto-drop of target-like cols
-                        extra_leaky_features=[
-                            # anything that happens after the outcome or encodes it
-                            "notification_date", "report_delay_hours", "within_24h",
-                            "reportable_reason", "investigation_required",
-                            "incident_resolved", "actions_documented", "medical_outcome",
-                        ],
-                    )
-                    st.success("Models trained and stored in session.")
-                except Exception as e:
-                    st.warning(f"Training failed: {e}")
-
-        with right:
-            if st.button("Clear cached models", key="clear_models"):
-                st.session_state.pop("trained_models", None)
-                st.info("Cleared cached models. Retrain to refresh.")
-
-   
     # ---------------------------------
     # 1) Model evaluation
     # ---------------------------------
@@ -1193,16 +1188,21 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Could not render metrics for {model_name}: {e}")
 
-        # Feature importance preview
+        # Feature importance preview (RF only)
         st.markdown("#### 🔍 Feature Importance (if available)")
         try:
             best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
             best_model = best_blob["model"]
-            if hasattr(best_model, "feature_importances_"):
-                importances = np.array(best_model.feature_importances_)
+            if hasattr(best_model, "named_steps") and "model" in best_model.named_steps:
+                mdl = best_model.named_steps["model"]
+            else:
+                mdl = best_model
+            if hasattr(mdl, "feature_importances_"):
+                importances = np.array(mdl.feature_importances_)
+                trained_feats = best_blob.get("feature_names", feature_names)
                 order = np.argsort(importances)[::-1][:20]
                 fi_df = pd.DataFrame({
-                    "feature": [feature_names[i] for i in order if i < len(feature_names)],
+                    "feature": [trained_feats[i] for i in order if i < len(trained_feats)],
                     "importance": [float(importances[i]) for i in order if i < len(importances)],
                 })
                 if len(fi_df):
@@ -1222,33 +1222,26 @@ def display_ml_insights_section(filtered_df):
     # 2) Predictive Risk Scoring (Sandbox)
     # ---------------------------------
     st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
-
     if not models:
         st.info("Train a model to enable risk scoring.")
     else:
-        # ✅ Use the model's TRAINING feature order to avoid n_features_in_ mismatches
-        best_key = None
-        trained_feature_names = []
         try:
-            best_key = max(models, key=lambda k: models[k].get("accuracy", 0))
-            trained_feature_names = models.get(best_key, {}).get("feature_names", []) or []
+            best_key = max(models, key=lambda k: models[k].get('accuracy', 0))
+            trained_feature_names = models[best_key].get('feature_names', [])
         except Exception:
-            pass
+            best_key = None
+        if not trained_feature_names:
+            st.warning("No training feature list stored with the model; risk scorer may mismatch.")
 
-        if not best_key or "model" not in models.get(best_key, {}):
-            st.warning("Models exist, but the best model entry is missing or malformed.")
-            risk_scorer = None
-        else:
-            if not trained_feature_names:
-                st.warning("No training feature list stored with the model; risk scorer may mismatch.")
+        risk_scorer = None
+        if best_key and "model" in models.get(best_key, {}):
             risk_scorer = create_predictive_risk_scoring(df_used, models, trained_feature_names)
 
         if risk_scorer is None:
             st.warning("Risk scorer could not be created from the current models.")
         else:
-            # Optional: sanity caption about expected feature count
             try:
-                n_expected = getattr(models[best_key]["model"], "n_features_in_", "?")
+                n_expected = getattr(models[best_key]['model'], 'n_features_in_', '?')
                 st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
             except Exception:
                 pass
@@ -1275,7 +1268,7 @@ def display_ml_insights_section(filtered_df):
                 )
                 c_hist = st.slider("Carer prior incidents", 0, max_c_hist, min(5, max_c_hist))
 
-            # Coarse location risk proxy
+            # Estimate a coarse location risk proxy from your data (fallback to 2.0)
             try:
                 if "severity_numeric" in df_used.columns and "location" in df_used.columns:
                     loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
@@ -1337,12 +1330,10 @@ def display_ml_insights_section(filtered_df):
     # 4) Forecasting & Seasonality
     # ---------------------------------
     st.subheader("📈 Forecasting & Seasonality")
-
     df_used = ensure_incident_datetime(df_used)
-
     horizon = int(st.session_state.get("ml_forecast_months", 6))
     try:
-        fig, forecast_df = _call_incident_forecast(df_used, horizon)
+        fig, forecast_df = _ivf(df_used, months=horizon)
         st.caption(f"Forecast horizon: {horizon} months")
         st.plotly_chart(fig, use_container_width=True)
         with st.expander("Show forecast table"):
@@ -1369,15 +1360,33 @@ def display_ml_insights_section(filtered_df):
     # 5) Clustering & Risk Profiles
     # ---------------------------------
     st.subheader("🧩 Clustering & Risk Profiles")
-
     with st.expander("Clustering controls", expanded=True):
         k = st.slider("k (number of clusters)", 2, 12, 4, step=1, key="ml_k_clusters_insights")
         sample3d = st.slider("Max points in 3D plot", 500, 10000, 2000, step=500, key="ml_k_clusters_3d_sample")
 
+    # Build a safe feature frame for clustering (drop outcomes/proxies)
+    def _safe_feats_for_clustering(df_feats: pd.DataFrame) -> pd.DataFrame:
+        drop_like = {
+            "severity", "severity_numeric", "reportable", "reportable_bin",
+            "medical_attention_required", "treatment_required",
+            "investigation_required", "incident_resolved",
+            "notified_to_commission", "reporting_timeframe",
+            "actions_documented", "medical_outcome", "report_delay_hours", "within_24h",
+        }
+        keep = [c for c in df_feats.columns
+                if c not in drop_like and not any(p in c.lower() for p in
+                    ["report", "severity", "medical", "investigat", "outcome", "timeframe", "delay", "compliance"])]
+        return (df_feats[keep]
+                .select_dtypes(include=[np.number])
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0))
+
+    safe_feats = _safe_feats_for_clustering(features_df)
+
     # 2D Clustering
     color_map = {}
     try:
-        fig2d, labels2d = clustering_analysis(features_df, k=k)
+        fig2d, labels2d = clustering_analysis(safe_feats, k=k)
         st.plotly_chart(fig2d, use_container_width=True)
         if getattr(fig2d.layout, "meta", None) and "cluster_color_map" in fig2d.layout.meta:
             color_map = fig2d.layout.meta["cluster_color_map"]
@@ -1386,7 +1395,7 @@ def display_ml_insights_section(filtered_df):
 
     # 3D Clustering
     try:
-        fig3d, labels3d, df3d = plot_3d_clusters(features_df, k=k, sample=sample3d, color_map=color_map)
+        fig3d, labels3d, df3d = plot_3d_clusters(safe_feats, k=k, sample=sample3d, color_map=color_map)
         st.plotly_chart(fig3d, use_container_width=True)
     except Exception as e:
         st.warning(f"3D clustering failed: {e}")
@@ -1398,10 +1407,11 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     st.subheader("🔗 Correlations")
     try:
-        corr_fig = correlation_analysis(features_df, height=900)
+        corr_fig = correlation_analysis(safe_feats, height=900)
         st.plotly_chart(corr_fig, use_container_width=True)
     except Exception as e:
         st.warning(f"Correlation analysis failed: {e}")
+
 
 # ---- Page registry expected by app.py ----
 PAGE_TO_RENDERER = {
