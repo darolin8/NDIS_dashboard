@@ -1147,12 +1147,23 @@ def display_ml_insights_section(filtered_df):
         return
     df_used = filtered_df if use_filtered else df_full
 
-    # Build features for the current scope
+    # Build features for the current scope (with safe fallback)
     try:
         X, feature_names, features_df = create_comprehensive_features(df_used)
     except Exception as e:
-        st.error(f"Feature engineering failed: {e}")
-        return
+        st.error(f"Feature engineering failed: {e}. Falling back to numeric-only features.")
+        safe_num = (
+            df_used.select_dtypes(include=[np.number])
+                   .replace([np.inf, -np.inf], np.nan)
+                   .fillna(0.0)
+        )
+        if safe_num.empty:
+            st.info("No numeric columns available for fallback. Try widening filters.")
+            return
+        X = safe_num.to_numpy(dtype=float)
+        feature_names = list(safe_num.columns)
+        features_df = safe_num.copy()
+
 
     # ---------------------------------
     # Optional: quick trainer
@@ -1169,23 +1180,24 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Training failed: {e}")
 
-
-    # Add this in your ML Insights section - either before or after your existing model comparison
-
-if st.button("Diagnose Data Leakage"):
-    st.subheader("Data Leakage Analysis")
-    
-    if 'reportable_bin' in df.columns:
-        st.write("**Target Distribution:**")
-        st.write(df['reportable_bin'].value_counts())
-        
-        if 'reportable' in df.columns:
-            corr = df['reportable_bin'].corr(df['reportable'].astype(int))
-            st.write(f"**Correlation with 'reportable' column: {corr:.3f}**")
-            if corr > 0.95:
-                st.error("MAJOR LEAKAGE: reportable_bin is derived from reportable column!")
-    else:
-        st.info("reportable_bin not found")
+        # --- Diagnose data leakage (optional) ---
+    if st.button("Diagnose Data Leakage", key="btn_leakage"):
+        st.subheader("Data Leakage Analysis")
+        if 'reportable_bin' in df_used.columns:
+            st.write("**Target Distribution (reportable_bin):**")
+            st.write(df_used['reportable_bin'].value_counts())
+            if 'reportable' in df_used.columns:
+                try:
+                    corr = df_used['reportable_bin'].astype(float).corr(
+                        df_used['reportable'].astype(int)
+                    )
+                    st.write(f"**Correlation with 'reportable': {corr:.3f}**")
+                    if corr > 0.95:
+                        st.error("MAJOR LEAKAGE: reportable_bin is derived from reportable column!")
+                except Exception as e:
+                    st.caption(f"Correlation check failed: {e}")
+        else:
+            st.info("reportable_bin not found in current slice")
 
 
 
