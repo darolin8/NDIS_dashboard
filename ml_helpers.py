@@ -9,6 +9,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from typing import Tuple, Dict, Any, Optional, List, Callable
+import re
 
 import numpy as np
 import pandas as pd
@@ -27,39 +28,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-
-
-class LeakageGuard(BaseEstimator, TransformerMixin):
-    """
-    Keeps only the columns chosen during fit (self.columns_out_).
-    During inference it can accept either a named DataFrame or a raw ndarray.
-    """
-    def __init__(self, columns_out=None):
-        self.columns_out_ = list(columns_out) if columns_out is not None else []
-
-    def fit(self, X, y=None):
-        # If X is a DataFrame, remember the columns; otherwise assume current list is correct
-        if isinstance(X, pd.DataFrame):
-            if not self.columns_out_:
-                # default: keep numeric columns if nothing was provided
-                self.columns_out_ = X.select_dtypes(include=[np.number]).columns.tolist()
-        return self
-
-    def transform(self, X):
-        # If a DataFrame with names is provided, use name-based selection
-        if isinstance(X, pd.DataFrame):
-            keep = [c for c in self.columns_out_ if c in X.columns]
-            return X[keep].to_numpy(dtype=float)
-
-        # Otherwise, try to align by position if the widths match
-        arr = np.asarray(X)
-        if arr.ndim == 1:
-            arr = arr.reshape(1, -1)
-        if arr.shape[1] == len(self.columns_out_):
-            return arr.astype(float)
-
-        # Fallback: nothing reliable to keep → empty (rare)
-        return np.empty((arr.shape[0], 0), dtype=float)
 
 # ---------------------------------------
 # Optional enhanced prep from utils/ (no __init__.py required)
@@ -828,7 +796,7 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
 
 def predictive_models_comparison(
     df: pd.DataFrame,
-    target: str = "reportable_bin",
+    target: str = "high_severity",  # default now predicts High/Critical severity
     test_size: float = 0.25,
     random_state: int = 42,
     extra_leaky_features: Optional[List[str]] = None,
@@ -899,16 +867,13 @@ def predictive_models_comparison(
         "follow", "action", "result", "status", "closed"
     ]
 
-    # 5) Create enhanced guard
-    guard = LeakageGuard(
-        columns_out=None,  # Auto-select with leakage detection
-        drop_patterns=enhanced_patterns,
-        corr_threshold=leak_corr_threshold
-    )
-
     # 6) Models with more conservative settings
     rf_pipe = Pipeline([
-        ("guard", guard),
+        ("guard", LeakageGuard(
+            columns_out=None,
+            drop_patterns=enhanced_patterns,
+            corr_threshold=leak_corr_threshold
+        )),
         ("model", RandomForestClassifier(
             n_estimators=50,      # Reduced to prevent overfitting
             max_depth=4,          # Limit depth
@@ -920,7 +885,11 @@ def predictive_models_comparison(
     ])
 
     lr_pipe = Pipeline([
-        ("guard", guard),
+        ("guard", LeakageGuard(
+            columns_out=None,
+            drop_patterns=enhanced_patterns,
+            corr_threshold=leak_corr_threshold
+        )),
         ("scaler", StandardScaler(with_mean=True)),
         ("model", LogisticRegression(
             max_iter=1000, 
@@ -1205,7 +1174,6 @@ def participant_journey_analysis(df: pd.DataFrame, participant_id: Any):
     return fig
 
 
-# 12) Predictive Risk Scoring System
 # 12) Predictive Risk Scoring System (robust to pipelines/name-based selectors)
 def create_predictive_risk_scoring(
     df: pd.DataFrame,
@@ -1274,6 +1242,27 @@ def create_predictive_risk_scoring(
             return {"risk_score": 0.0, "risk_level": "LOW", "confidence": 0.0, "model_used": best_key}
         return _noop
 
+    def _positive_class_index(trained_model):
+        """Find index of the positive class (1) if binary; sensible fallbacks."""
+        # Try pipeline final estimator first
+        classes = getattr(trained_model, "classes_", None)
+        if classes is None and hasattr(trained_model, "steps"):
+            try:
+                classes = trained_model.steps[-1][1].classes_
+            except Exception:
+                classes = None
+        if classes is not None and len(classes) == 2:
+            try:
+                return list(classes).index(1)  # prefer label 1 if present
+            except ValueError:
+                # try numeric cast, else default to second column
+                try:
+                    arr = np.array(classes).astype(float)
+                    return int(np.argmax(arr))
+                except Exception:
+                    return 1
+        return None
+
     # --- Build the callable scorer ---
     def calculate_risk_score(scenario: Dict[str, Any]) -> Dict[str, Any]:
         # Scenario → demo features
@@ -1305,7 +1294,10 @@ def create_predictive_risk_scoring(
         try:
             if hasattr(model, "predict_proba"):
                 proba = model.predict_proba(X_one)[0]
-                score = float(np.max(proba))
+                pos_idx = _positive_class_index(model)
+                if pos_idx is None and proba.ndim == 1 and proba.shape[0] == 2:
+                    pos_idx = 1
+                score = float(proba[pos_idx]) if pos_idx is not None else float(np.max(proba))
             else:
                 pred = model.predict(X_one)[0]
                 score = float(pred) / 3.0
@@ -1313,7 +1305,10 @@ def create_predictive_risk_scoring(
             X_np = X_one.to_numpy(dtype=float) if isinstance(X_one, pd.DataFrame) else np.asarray(X_one, dtype=float)
             if hasattr(model, "predict_proba"):
                 proba = model.predict_proba(X_np)[0]
-                score = float(np.max(proba))
+                pos_idx = _positive_class_index(model)
+                if pos_idx is None and proba.ndim == 1 and proba.shape[0] == 2:
+                    pos_idx = 1
+                score = float(proba[pos_idx]) if pos_idx is not None else float(np.max(proba))
             else:
                 pred = model.predict(X_np)[0]
                 score = float(pred) / 3.0
@@ -1369,6 +1364,16 @@ def generate_recommendation(scenario: Dict[str, Any], risk_assessment: Dict[str,
     return recs.get(scenario['name'], ['Review safety protocols', 'Increase supervision'])
 
 
+def _parse_threshold(expr, default_val: int) -> int:
+    if isinstance(expr, (int, float)):
+        return int(expr)
+    if isinstance(expr, str):
+        m = re.search(r'(\d+)', expr)
+        if m:
+            return int(m.group(1))
+    return int(default_val)
+
+
 def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[[Dict[str, Any]], Dict[str, Any]], alert_thresholds: Dict[str, float]):
     """Simulate real-time alerts for a few predefined scenarios."""
     alerts = []
@@ -1378,9 +1383,31 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
         {'name': 'Weekend Transport Risk', 'conditions': {'day_type': 'weekend', 'location_contains': 'transport'}, 'severity': 'MEDIUM'}
     ]
     for sc in scenarios:
-        scenario_input = {'hour': 6, 'location': 'kitchen', 'day_type': 'weekday', 'participant_history': 5, 'carer_history': 8, 'location_risk': 3}
+        cond = sc.get('conditions', {})
+        # Build scenario input from conditions
+        hours = cond.get('hour', 8)
+        hour = int(np.median(hours)) if isinstance(hours, (list, tuple, np.ndarray)) and len(hours) > 0 else int(hours)
+        location = cond.get('location', '')
+        if not location and 'location_contains' in cond:
+            location = str(cond['location_contains'])
+        day_type = cond.get('day_type', 'weekday')
+        participant_history = _parse_threshold(cond.get('participant_history', 3), 3)
+        carer_history = _parse_threshold(cond.get('carer_history', 5), 5)
+        location_risk = 3 if any(k in str(location).lower() for k in ['kitchen','bath','toilet','washroom','restroom']) else (2 if 'transport' in str(location).lower() else 1)
+
+        scenario_input = {
+            'hour': hour,
+            'location': location,
+            'day_type': day_type,
+            'participant_history': participant_history,
+            'carer_history': carer_history,
+            'location_risk': location_risk
+        }
+
         risk = risk_scoring_function(scenario_input)
-        if risk['risk_score'] > alert_thresholds.get(sc['severity'].lower(), 0.5):
+        sev_key = str(sc.get('severity', 'MEDIUM')).lower()
+        threshold = alert_thresholds.get(sev_key, 0.5)
+        if risk['risk_score'] > threshold:
             alerts.append({
                 'scenario': sc['name'],
                 'risk_score': risk['risk_score'],
@@ -1445,7 +1472,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
             with col1:
                 test_hour = st.slider("Hour", 0, 23, 8)
             with col2:
-                test_location = st.selectbox("Location", ['kitchen', 'bathroom', 'living room', 'activity room'])
+                test_location = st.selectbox("Location", ['kitchen', 'bathroom', 'living room', 'activity room', 'transport'])
             with col3:
                 test_history = st.slider("Participant History", 1, 20, 3)
 
@@ -1454,7 +1481,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
                 'location': test_location,
                 'participant_history': test_history,
                 'carer_history': 5,
-                'location_risk': 3 if test_location in ['kitchen', 'bathroom'] else 1,
+                'location_risk': 3 if test_location in ['kitchen', 'bathroom'] else (2 if test_location == 'transport' else 1),
                 'day_type': 'weekend' if st.checkbox("Weekend?", value=False) else 'weekday'
             }
             risk_result = risk_scorer(scenario)
@@ -1501,5 +1528,3 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
-
-
