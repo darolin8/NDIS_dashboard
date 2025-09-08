@@ -642,138 +642,188 @@ def plot_3d_clusters(
 # ---------------------------------------
 # 7) Leak guard + predictive models comparison (baselines, leak-safe)
 # ---------------------------------------
-
-class EnhancedLeakageGuard(BaseEstimator, TransformerMixin):
+class LeakageGuard(BaseEstimator, TransformerMixin):
     """
-    Enhanced leakage detection with stricter rules and validation.
+    Enhanced leakage detection that matches your existing interface.
+    Keeps only the columns chosen during fit, with better leakage detection.
     """
-    def __init__(self, 
-                 drop_names=None, 
-                 drop_patterns=None, 
-                 corr_threshold=0.85,  # Lower threshold
-                 variance_threshold=0.01,  # Remove near-constant features
-                 max_unique_ratio=0.95):  # Remove features with too many unique values
-        self.drop_names = set(drop_names or [])
-        self.drop_patterns = [p.lower() for p in (drop_patterns or [])]
-        self.corr_threshold = corr_threshold
-        self.variance_threshold = variance_threshold
-        self.max_unique_ratio = max_unique_ratio
+    def __init__(self, columns_out=None, drop_patterns=None, corr_threshold=None):
+        # Match your existing interface
+        self.columns_out_ = list(columns_out) if columns_out is not None else []
         
-        self.columns_in_ = None
-        self.columns_to_drop_ = []
-        self.columns_out_ = []
+        # Enhanced leakage detection parameters
+        self.drop_patterns = [p.lower() for p in (drop_patterns or [])]
+        self.corr_threshold = corr_threshold or 0.85
+        
+        # Additional leakage detection
+        self.variance_threshold = 0.01
+        self.max_unique_ratio = 0.95
+        
+        # For reporting
         self.leakage_report_ = {}
 
     def fit(self, X, y=None):
-        X = pd.DataFrame(X).copy()
-        X.columns = [str(c) for c in X.columns]
-        self.columns_in_ = list(X.columns)
+        # Convert to DataFrame for easier handling
+        if isinstance(X, pd.DataFrame):
+            df = X.copy()
+        else:
+            df = pd.DataFrame(X)
+            df.columns = [f"feature_{i}" for i in range(df.shape[1])]
         
+        df.columns = [str(c) for c in df.columns]
+        
+        # Initialize leakage tracking
         drops = set()
         self.leakage_report_ = {
-            'explicit_drops': [],
             'pattern_drops': [],
             'correlation_drops': [],
             'variance_drops': [],
-            'unique_ratio_drops': []
+            'unique_ratio_drops': [],
+            'explicit_leaky_features': []
         }
         
-        # 1. Explicit name drops
-        for c in X.columns:
-            if c in self.drop_names:
-                drops.add(c)
-                self.leakage_report_['explicit_drops'].append(c)
+        # 1. If columns_out_ was provided, use those (existing behavior)
+        if self.columns_out_:
+            # Keep existing behavior but add leakage checks
+            available = [c for c in self.columns_out_ if c in df.columns]
+            
+            # Check these columns for leakage patterns
+            for c in available:
+                c_lower = c.lower()
+                
+                # Check for leaky patterns
+                leaky_patterns = [
+                    'report', 'reportable', 'notify', 'notified',
+                    'investigat', 'severity', 'medical', 'outcome',
+                    'resolution', 'timeframe', 'delay', 'compliance',
+                    'follow', 'action', 'result', 'status', 'closed'
+                ]
+                
+                for pattern in leaky_patterns:
+                    if pattern in c_lower:
+                        drops.add(c)
+                        self.leakage_report_['explicit_leaky_features'].append((c, pattern))
+                        break
+            
+            # Remove detected leaky features
+            self.columns_out_ = [c for c in available if c not in drops]
         
-        # 2. Pattern-based drops (more aggressive)
-        for c in X.columns:
-            c_lower = c.lower()
-            for pattern in self.drop_patterns:
-                if pattern in c_lower:
-                    drops.add(c)
-                    self.leakage_report_['pattern_drops'].append((c, pattern))
-                    break
-        
-        # 3. High correlation with target (if provided)
-        if y is not None:
-            y_series = pd.Series(y).astype(float)
-            for c in X.columns:
+        else:
+            # Auto-select numeric columns with leakage detection (existing fallback behavior)
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            
+            # Apply enhanced leakage detection
+            for c in numeric_cols:
+                c_lower = c.lower()
+                
+                # 1. Pattern-based detection
+                for pattern in self.drop_patterns:
+                    if pattern in c_lower:
+                        drops.add(c)
+                        self.leakage_report_['pattern_drops'].append((c, pattern))
+                        break
+                
                 if c in drops:
                     continue
-                try:
-                    s = pd.to_numeric(X[c], errors='coerce')
-                    if s.isna().all():
-                        drops.add(c)
-                        continue
-                    
-                    # Remove constant features
-                    if s.std(ddof=0) <= self.variance_threshold:
-                        drops.add(c)
-                        self.leakage_report_['variance_drops'].append(c)
-                        continue
-                    
-                    # Check correlation with target
-                    corr = abs(s.corr(y_series))
-                    if np.isfinite(corr) and corr >= self.corr_threshold:
-                        drops.add(c)
-                        self.leakage_report_['correlation_drops'].append((c, corr))
+                
+                # 2. High correlation with target
+                if y is not None:
+                    try:
+                        s = pd.to_numeric(df[c], errors='coerce')
+                        if s.isna().all():
+                            drops.add(c)
+                            continue
                         
+                        # Remove near-constant features
+                        if s.std(ddof=0) <= self.variance_threshold:
+                            drops.add(c)
+                            self.leakage_report_['variance_drops'].append(c)
+                            continue
+                        
+                        # Check correlation with target
+                        y_series = pd.Series(y).astype(float)
+                        corr = abs(s.corr(y_series))
+                        if np.isfinite(corr) and corr >= self.corr_threshold:
+                            drops.add(c)
+                            self.leakage_report_['correlation_drops'].append((c, corr))
+                            
+                    except Exception:
+                        drops.add(c)
+                
+                # 3. Features with too many unique values (potential IDs)
+                try:
+                    unique_ratio = df[c].nunique() / len(df)
+                    if unique_ratio >= self.max_unique_ratio:
+                        drops.add(c)
+                        self.leakage_report_['unique_ratio_drops'].append((c, unique_ratio))
                 except Exception:
-                    drops.add(c)
+                    pass
+            
+            # Set final columns
+            self.columns_out_ = [c for c in numeric_cols if c not in drops]
         
-        # 4. Features with too many unique values (potential IDs)
-        for c in X.columns:
-            if c in drops:
-                continue
-            try:
-                unique_ratio = X[c].nunique() / len(X)
-                if unique_ratio >= self.max_unique_ratio:
-                    drops.add(c)
-                    self.leakage_report_['unique_ratio_drops'].append((c, unique_ratio))
-            except Exception:
-                pass
-        
-        self.columns_to_drop_ = sorted(drops)
-        self.columns_out_ = [c for c in X.columns if c not in drops]
-        
-        # Warning if too many features dropped
-        if len(self.columns_out_) < 3:
-            warnings.warn(f"Only {len(self.columns_out_)} features remaining after leakage guard. "
-                         "Model may be undertrained.")
+        # Ensure we have at least some features
+        if len(self.columns_out_) == 0:
+            print("WARNING: All features were dropped by leakage guard. Keeping one safe feature.")
+            # Find the safest numeric column
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            if numeric_cols:
+                # Pick the one with lowest correlation to target (if available)
+                if y is not None:
+                    correlations = {}
+                    y_series = pd.Series(y).astype(float)
+                    for c in numeric_cols:
+                        try:
+                            s = pd.to_numeric(df[c], errors='coerce')
+                            correlations[c] = abs(s.corr(y_series))
+                        except:
+                            correlations[c] = 0
+                    safest = min(correlations.items(), key=lambda x: x[1] if np.isfinite(x[1]) else 0)[0]
+                    self.columns_out_ = [safest]
+                else:
+                    self.columns_out_ = [numeric_cols[0]]
         
         return self
 
     def transform(self, X):
-        X = pd.DataFrame(X).copy()
-        X.columns = [str(c) for c in X.columns]
-        keep = [c for c in self.columns_out_ if c in X.columns]
+        # Match existing behavior
+        if isinstance(X, pd.DataFrame):
+            keep = [c for c in self.columns_out_ if c in X.columns]
+            return X[keep].to_numpy(dtype=float)
+
+        # Handle array input - try to align by position if the widths match
+        arr = np.asarray(X)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[1] == len(self.columns_out_):
+            return arr.astype(float)
+
+        # Fallback: return empty array (existing behavior)
+        if len(self.columns_out_) == 0:
+            return np.ones((arr.shape[0], 1), dtype=float)  # Emergency fallback
         
-        if len(keep) == 0:
-            # Emergency fallback - create dummy features
-            warnings.warn("No features passed leakage guard. Creating dummy features.")
-            return np.ones((len(X), 1), dtype=float)
-        
-        return X[keep].to_numpy(dtype=float)
+        return np.empty((arr.shape[0], 0), dtype=float)
 
     def get_feature_names_out(self, input_features=None):
         return np.array(self.columns_out_, dtype=object)
     
     def print_leakage_report(self):
-        """Print detailed report of what was dropped and why."""
-        print("=== LEAKAGE GUARD REPORT ===")
-        print(f"Input features: {len(self.columns_in_)}")
-        print(f"Output features: {len(self.columns_out_)}")
-        print(f"Dropped features: {len(self.columns_to_drop_)}")
-        print()
+        """Print what was detected and dropped."""
+        print("=== LEAKAGE DETECTION REPORT ===")
+        total_drops = sum(len(items) for items in self.leakage_report_.values())
+        print(f"Features kept: {len(self.columns_out_)}")
+        print(f"Potential leakage features detected: {total_drops}")
         
         for category, items in self.leakage_report_.items():
             if items:
-                print(f"{category.replace('_', ' ').title()}:")
-                for item in items:
+                print(f"\n{category.replace('_', ' ').title()}:")
+                for item in items[:5]:  # Show first 5
                     if isinstance(item, tuple):
-                        print(f"  - {item[0]} (value: {item[1]:.3f})")
+                        print(f"  - {item[0]} (reason: {item[1]})")
                     else:
                         print(f"  - {item}")
-                print()
+                if len(items) > 5:
+                    print(f"  ... and {len(items) - 5} more")
 
 
 def predictive_models_comparison(
@@ -785,17 +835,18 @@ def predictive_models_comparison(
     split_strategy: str = "time",
     time_col: Optional[str] = "incident_datetime",
     group_col: Optional[str] = None,
-    leak_corr_threshold: float = 0.80,  # Lowered threshold
+    leak_corr_threshold: float = 0.80,  # Lowered from 0.90
     leak_name_patterns: Optional[List[str]] = None,
-    validate_with_cv: bool = True
 ) -> Dict[str, Any]:
     """
-    Enhanced model comparison with stricter leakage detection and cross-validation.
+    Enhanced version with better leakage detection and validation.
     """
-    from sklearn.model_selection import train_test_split, GroupShuffleSplit, StratifiedKFold
+    from sklearn.model_selection import train_test_split, GroupShuffleSplit, cross_val_score, StratifiedKFold
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
     
-    # Import your feature creation function
-    # Assuming this is available from your ml_helpers
+    # 1) Create features (using your existing function)
     out = create_comprehensive_features(df)
     if isinstance(out, tuple) and len(out) == 3:
         _, _, features_df = out
@@ -805,47 +856,23 @@ def predictive_models_comparison(
         features_df = pd.DataFrame(out)
     features_df = features_df.copy()
 
-    # Target preparation
+    # 2) Target preparation
     if target in df.columns:
         y = df.loc[features_df.index, target].copy()
     else:
         y = (df.get("severity_numeric", pd.Series([2]*len(df))).loc[features_df.index] >= 3).astype(int)
 
+    print(f"Dataset size: {len(features_df)} samples, {len(features_df.columns)} features")
     print(f"Target distribution: {y.value_counts().to_dict()}")
-    print(f"Class balance: {y.mean():.1%} positive class")
 
-    # Enhanced leaky feature detection
-    comprehensive_leaky_features = set([
-        target, "reportable", "reportable_bin",
-        "severity", "severity_numeric", "severity_level",
-        "medical_attention_required", "treatment_required",
-        "notified_to_commission", "reporting_timeframe",
-        "investigation_required", "incident_resolved",
-        "actions_documented", "medical_outcome",
-        "report_delay_hours", "within_24h",
-        "outcome", "result", "resolution", "status",
-        "follow_up", "action_taken", "investigation_outcome"
-    ])
-    
-    if extra_leaky_features:
-        comprehensive_leaky_features.update(extra_leaky_features)
-
-    enhanced_leak_patterns = leak_name_patterns or [
-        "report", "reportable", "notify", "notified",
-        "investigat", "severity", "medical", "outcome",
-        "resolution", "timeframe", "delay", "compliance",
-        "follow", "action", "result", "status", "closed",
-        "_id", "id_", "index", "row"  # Potential ID columns
-    ]
-
-    # Data splitting (same as before)
+    # 3) Data splitting (keeping your existing logic)
     df_dt = ensure_incident_datetime(df)
     if time_col not in df_dt.columns:
         time_col = "incident_date" if "incident_date" in df_dt.columns else None
 
     if split_strategy == "time" and time_col:
         dt = pd.to_datetime(df_dt.loc[features_df.index, time_col], errors="coerce")
-        cutoff = dt.quantile(0.75)  # Use 75% for more training data
+        cutoff = dt.quantile(0.75)  # Use more data for training
         mask_train = dt <= cutoff
         mask_test = dt > cutoff
         X_train_df, X_test_df = features_df[mask_train], features_df[mask_test]
@@ -857,157 +884,102 @@ def predictive_models_comparison(
         X_train_df, X_test_df = features_df.iloc[train_idx], features_df.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     else:
-        strat = y if y.nunique() > 1 else None
+        strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
         X_train_df, X_test_df, y_train, y_test = train_test_split(
             features_df, y, test_size=test_size, random_state=random_state, stratify=strat
         )
 
-    print(f"Training set size: {len(X_train_df)}")
-    print(f"Test set size: {len(X_test_df)}")
+    print(f"Training set: {len(X_train_df)}, Test set: {len(X_test_df)}")
 
-    # Enhanced leakage guard
+    # 4) Enhanced leakage detection patterns
+    enhanced_patterns = leak_name_patterns or [
+        "report", "reportable", "notify", "notified",
+        "investigat", "severity", "medical", "outcome",
+        "resolution", "timeframe", "delay", "compliance",
+        "follow", "action", "result", "status", "closed"
+    ]
+
+    # 5) Create enhanced guard
     guard = LeakageGuard(
-        drop_names=comprehensive_leaky_features,
-        drop_patterns=enhanced_leak_patterns,
-        corr_threshold=leak_corr_threshold,
-        variance_threshold=0.01,
-        max_unique_ratio=0.90
+        columns_out=None,  # Auto-select with leakage detection
+        drop_patterns=enhanced_patterns,
+        corr_threshold=leak_corr_threshold
     )
 
-    # Model pipelines with more conservative settings
+    # 6) Models with more conservative settings
     rf_pipe = Pipeline([
         ("guard", guard),
         ("model", RandomForestClassifier(
-            n_estimators=100,  # Reduced to prevent overfitting
-            max_depth=5,       # Limit depth
-            min_samples_split=10,  # Require more samples to split
-            min_samples_leaf=5,    # Require more samples in leaf
-            random_state=random_state,
-            class_weight='balanced'  # Handle imbalanced data
-        )),
-    ])
-
-    lr_pipe = Pipeline([
-        ("guard", guard),
-        ("scaler", StandardScaler()),
-        ("model", LogisticRegression(
-            max_iter=1000,
-            solver="liblinear",  # Better for small datasets
-            C=1.0,              # Regularization
+            n_estimators=50,      # Reduced to prevent overfitting
+            max_depth=4,          # Limit depth
+            min_samples_split=10, # Require more samples to split
+            min_samples_leaf=5,   # Require more samples in leaf
             random_state=random_state,
             class_weight='balanced'
         )),
     ])
 
-    results = {}
+    lr_pipe = Pipeline([
+        ("guard", guard),
+        ("scaler", StandardScaler(with_mean=True)),
+        ("model", LogisticRegression(
+            max_iter=1000, 
+            solver="liblinear",  # Better for small datasets
+            C=0.1,              # More regularization
+            random_state=random_state,
+            class_weight='balanced'
+        )),
+    ])
 
-    # Fit models and get results
+    results: Dict[str, Any] = {}
+
+    # 7) Train and evaluate models
     for name, pipe in [("RandomForest", rf_pipe), ("LogisticRegression", lr_pipe)]:
         print(f"\n=== Training {name} ===")
         
         # Fit model
         pipe.fit(X_train_df, y_train)
         
-        # Print leakage report
+        # Show leakage detection results
         pipe.named_steps["guard"].print_leakage_report()
         
         # Predictions
         pred = pipe.predict(X_test_df)
         proba = pipe.predict_proba(X_test_df) if hasattr(pipe, "predict_proba") else None
-        
-        # Test set performance
         test_accuracy = (pred == y_test).mean()
         
         # Cross-validation on training set
         cv_scores = None
-        if validate_with_cv and len(X_train_df) > 20:
+        if len(X_train_df) > 10:
             try:
-                cv = StratifiedKFold(n_splits=min(5, len(X_train_df)//10), shuffle=True, random_state=random_state)
+                cv = StratifiedKFold(n_splits=min(3, len(X_train_df)//10), shuffle=True, random_state=random_state)
                 cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring='accuracy')
-                print(f"CV Accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+                print(f"Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
             except Exception as e:
-                print(f"CV failed: {e}")
+                print(f"Cross-validation failed: {e}")
         
-        # Feature importance (for Random Forest)
-        feature_importance = None
-        if name == "RandomForest":
-            try:
-                feature_names = pipe.named_steps["guard"].get_feature_names_out()
-                importances = pipe.named_steps["model"].feature_importances_
-                feature_importance = dict(zip(feature_names, importances))
-                
-                # Show top features
-                sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
-                print("Top 5 Important Features:")
-                for feat, imp in sorted_features[:5]:
-                    print(f"  {feat}: {imp:.3f}")
-            except Exception as e:
-                print(f"Feature importance extraction failed: {e}")
+        feature_names = list(pipe.named_steps["guard"].get_feature_names_out())
         
-        # Store results
         results[name] = {
             "model": pipe,
             "accuracy": float(test_accuracy),
             "cv_scores": cv_scores.tolist() if cv_scores is not None else None,
-            "cv_mean": float(cv_scores.mean()) if cv_scores is not None else None,
-            "cv_std": float(cv_scores.std()) if cv_scores is not None else None,
             "y_test": y_test,
             "predictions": pred,
             "probabilities": proba,
-            "feature_names": list(pipe.named_steps["guard"].get_feature_names_out()),
-            "feature_importance": feature_importance,
-            "leakage_report": pipe.named_steps["guard"].leakage_report_,
-            "n_features_used": len(pipe.named_steps["guard"].columns_out_)
+            "feature_names": feature_names,
         }
         
-        print(f"Test Accuracy: {test_accuracy:.3f}")
-        print(f"Features used: {len(pipe.named_steps['guard'].columns_out_)}")
+        print(f"Test accuracy: {test_accuracy:.3f}")
+        print(f"Features used: {len(feature_names)}")
         
-        # Warning for perfect performance
-        if test_accuracy >= 0.99:
-            print("⚠️  WARNING: Perfect/near-perfect performance detected!")
-            print("   This likely indicates data leakage or overfitting.")
-            print("   Consider:")
-            print("   - Reviewing feature engineering")
-            print("   - Using time-based splits")
-            print("   - Adding more regularization")
+        # Warn about perfect performance
+        if test_accuracy >= 0.98:
+            print("⚠️  WARNING: Very high accuracy detected!")
+            print("   This may indicate data leakage or overfitting.")
+            if cv_scores is not None and cv_scores.mean() < 0.9:
+                print("   Cross-validation shows much lower performance - likely overfitting.")
 
-    return results
-
-
-# Example usage with your data
-def validate_models_thoroughly(df, target="reportable_bin"):
-    """
-    Run comprehensive model validation to detect leakage issues.
-    """
-    print("=== COMPREHENSIVE MODEL VALIDATION ===")
-    
-    results = improved_predictive_models_comparison(
-        df, 
-        target=target,
-        leak_corr_threshold=0.75,  # Stricter threshold
-        validate_with_cv=True,
-        split_strategy="time"  # Use time-based split
-    )
-    
-    print("\n=== VALIDATION SUMMARY ===")
-    for model_name, result in results.items():
-        print(f"\n{model_name}:")
-        print(f"  Test Accuracy: {result['accuracy']:.3f}")
-        if result['cv_mean'] is not None:
-            print(f"  CV Accuracy: {result['cv_mean']:.3f} (+/- {result['cv_std']*2:.3f})")
-        print(f"  Features Used: {result['n_features_used']}")
-        
-        # Check for leakage indicators
-        if result['accuracy'] >= 0.99:
-            print("  🚨 POTENTIAL LEAKAGE: Perfect performance")
-        elif result['cv_mean'] and abs(result['accuracy'] - result['cv_mean']) > 0.1:
-            print("  ⚠️  Large test/CV gap - possible overfitting")
-        elif result['n_features_used'] < 5:
-            print("  ⚠️  Very few features - model may be undertrained")
-        else:
-            print("  ✅ Performance looks reasonable")
-    
     return results
 
 # ---------------------------------------
