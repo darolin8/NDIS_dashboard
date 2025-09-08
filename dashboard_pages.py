@@ -1392,7 +1392,6 @@ PAGE_TO_RENDERER = {
     "ML Insights":                 display_ml_insights_section,
 }
 
-# (Optional) Keep a stable order for a sidebar menu, if app.py uses it.
 PAGE_ORDER = [
     "Executive Summary",
     "Operational Performance",
@@ -1400,7 +1399,6 @@ PAGE_ORDER = [
     "ML Insights",
 ]
 
-# (Optional) helper if you ever need to call by name
 def render_page(page_name: str, df):
     fn = PAGE_TO_RENDERER.get(page_name)
     if fn is None:
@@ -1408,14 +1406,15 @@ def render_page(page_name: str, df):
         return
     return fn(df)
 
-# Make explicit what this module exports (helps with "from dashboard_pages import ...")
 __all__ = [
     "display_executive_summary_section",
     "display_operational_performance_section",
     "display_compliance_investigation_section",
     "display_ml_insights_section",
+    "apply_investigation_rules",         # ← add this line
     "PAGE_TO_RENDERER",
     "PAGE_ORDER",
     "render_page",
 ]
+
 
