@@ -1301,6 +1301,24 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
+
+    # Add this in your ML Insights section, perhaps after the existing model comparison
+if st.button("Debug Data Leakage"):
+    st.subheader("Data Leakage Diagnosis")
+    
+    with st.expander("Quick Leakage Test"):
+        perfect_predictors = quick_leakage_test(df, target="reportable_bin")
+    
+    with st.expander("Full Diagnostic Report"):
+        diagnosis = diagnose_data_leakage(df, target="reportable_bin")
+    
+    with st.expander("Ultra-Safe Model Test"):
+        safe_results = safe_predictive_models_comparison(
+            df, 
+            target="reportable_bin",
+            force_simple_features=True,
+            min_correlation_threshold=0.3
+        )
     # ---------------------------------
     # 3) Similar Incident Finder
     # ---------------------------------
