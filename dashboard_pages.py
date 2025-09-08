@@ -1196,51 +1196,77 @@ def display_ml_insights_section(filtered_df):
     # ---------------------------------
     # 2) Predictive Risk Scoring
     # ---------------------------------
-    st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
-    if not models:
-        st.info("Train a model to enable risk scoring.")
-    else:
-        risk_scorer = create_predictive_risk_scoring(df_used, models, feature_names)
-        if risk_scorer is None:
-            st.warning("Risk scorer could not be created from the current models.")
-        else:
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                hour = st.slider("Hour of day", 0, 23, 8)
-            with c2:
-                loc_options = df_used["location"].dropna().astype(str).value_counts().index.tolist() or \
-                              ["kitchen", "bathroom", "living room", "activity room"]
-                location = st.selectbox("Location", options=loc_options[:25])
-            with c3:
-                p_hist = st.slider(
-                    "Participant prior incidents", 0,
-                    int(df_used.groupby("participant_id")["incident_id"].count().max()
-                        if "participant_id" in df_used.columns else 20),
-                    3
-                )
-            with c4:
-                c_hist = st.slider(
-                    "Carer prior incidents", 0,
-                    int(df_used.groupby("carer_id")["incident_id"].count().max()
-                        if "carer_id" in df_used.columns else 20),
-                    5
-                )
+   st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
 
-            try:
+if not models:
+    st.info("Train a model to enable risk scoring.")
+else:
+    # ✅ Use the model's TRAINING feature order to avoid n_features_in_ mismatches
+    try:
+        best_key = max(models, key=lambda k: models[k].get('accuracy', 0))
+        trained_feature_names = models[best_key].get('feature_names', [])
+    except Exception:
+        best_key = None
+        trained_feature_names = []
+
+    if not trained_feature_names:
+        st.warning("No training feature list stored with the model; risk scorer may mismatch.")
+
+    risk_scorer = create_predictive_risk_scoring(df_used, models, trained_feature_names)
+
+    if risk_scorer is None:
+        st.warning("Risk scorer could not be created from the current models.")
+    else:
+        # Optional: one-line sanity check on shape expectations
+        try:
+            n_expected = getattr(models[best_key]['model'], 'n_features_in_', '?')
+            st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
+        except Exception:
+            pass
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            hour = st.slider("Hour of day", 0, 23, 8)
+        with c2:
+            loc_options = (
+                df_used["location"].dropna().astype(str).value_counts().index.tolist()
+                if "location" in df_used.columns else []
+            ) or ["kitchen", "bathroom", "living room", "activity room"]
+            location = st.selectbox("Location", options=loc_options[:25])
+        with c3:
+            max_p_hist = (
+                int(df_used.groupby("participant_id")["incident_id"].count().max())
+                if {"participant_id", "incident_id"}.issubset(df_used.columns) else 20
+            )
+            p_hist = st.slider("Participant prior incidents", 0, max_p_hist, min(3, max_p_hist))
+        with c4:
+            max_c_hist = (
+                int(df_used.groupby("carer_id")["incident_id"].count().max())
+                if {"carer_id", "incident_id"}.issubset(df_used.columns) else 20
+            )
+            c_hist = st.slider("Carer prior incidents", 0, max_c_hist, min(5, max_c_hist))
+
+        # Estimate a coarse location risk proxy from your data (fallback to 2.0)
+        try:
+            if "severity_numeric" in df_used.columns and "location" in df_used.columns:
                 loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
                 if not np.isfinite(loc_risk):
                     loc_risk = 2.0
-            except Exception:
+            else:
                 loc_risk = 2.0
+        except Exception:
+            loc_risk = 2.0
 
-            scenario = {
-                "hour": int(hour),
-                "location": location,
-                "participant_history": int(p_hist),
-                "carer_history": int(c_hist),
-                "day_type": "weekend" if st.checkbox("Weekend?", value=False) else "weekday",
-                "location_risk": float(loc_risk),
-            }
+        scenario = {
+            "hour": int(hour),
+            "location": str(location),
+            "participant_history": int(p_hist),
+            "carer_history": int(c_hist),
+            "day_type": "weekend" if st.checkbox("Weekend?", value=False) else "weekday",
+            "location_risk": float(loc_risk),
+        }
+
+        try:
             res = risk_scorer(scenario)
             if res["risk_level"] == "HIGH":
                 st.error(f"🚨 HIGH RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
@@ -1248,8 +1274,11 @@ def display_ml_insights_section(filtered_df):
                 st.warning(f"⚠️  MEDIUM RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
             else:
                 st.success(f"✅ LOW RISK — confidence {res['confidence']:.1%} (model: {res['model_used']})")
+        except Exception as e:
+            st.exception(e)
 
-    st.divider()
+st.divider()
+
 
     # ---------------------------------
     # 3) Similar Incident Finder
@@ -1307,7 +1336,7 @@ def display_ml_insights_section(filtered_df):
         st.warning(f"Seasonality plot failed: {e}")
 
     st.divider()
-   # ... [previous ML Insights code] ...
+ 
 
     # ---------------------------------
     # 5) Clustering & Risk Profiles
