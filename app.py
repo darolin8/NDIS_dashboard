@@ -329,6 +329,14 @@ def main():
         display_operational_performance_section(filtered_df)
     elif page == "📋 Compliance & Investigation":
         display_compliance_investigation_section(filtered_df)
+        st.markdown("---")
+        st.subheader("Enhanced Investigation Pipeline")
+        group_by = st.sidebar.selectbox(
+        "Group pipeline by:",
+        ["carer_id", "severity", "incident_type", "location"],
+        index=0
+        )
+        display_enhanced_investigation_pipeline(filtered_df, group_by=group_by)
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
     elif page == "🗺️ Incident Map":
