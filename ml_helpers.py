@@ -1501,3 +1501,361 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
+
+
+#diagnostic 
+
+def diagnose_data_leakage(df: pd.DataFrame, target: str = "reportable_bin"):
+    """
+    Comprehensive diagnosis of potential data leakage issues.
+    """
+    print("=== DATA LEAKAGE DIAGNOSTIC ===")
+    
+    # 1. Basic dataset info
+    print(f"Dataset shape: {df.shape}")
+    print(f"Target column: {target}")
+    
+    if target not in df.columns:
+        print(f"WARNING: Target '{target}' not found in columns!")
+        print("Available columns:", list(df.columns))
+        return
+    
+    # 2. Target distribution
+    target_counts = df[target].value_counts()
+    print(f"\nTarget distribution:\n{target_counts}")
+    print(f"Class balance: {df[target].mean():.1%} positive")
+    
+    # 3. Check for suspicious correlations
+    print("\n=== CORRELATION ANALYSIS ===")
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if target in numeric_cols:
+        correlations = []
+        for col in numeric_cols:
+            if col != target:
+                try:
+                    corr = abs(df[col].corr(df[target]))
+                    if np.isfinite(corr):
+                        correlations.append((col, corr))
+                except:
+                    pass
+        
+        # Sort by correlation
+        correlations.sort(key=lambda x: x[1], reverse=True)
+        
+        print("Top 10 correlations with target:")
+        for col, corr in correlations[:10]:
+            status = "🚨 VERY HIGH" if corr > 0.9 else ("⚠️ HIGH" if corr > 0.7 else "✅ OK")
+            print(f"  {col}: {corr:.3f} {status}")
+    
+    # 4. Check feature names for leakage patterns
+    print("\n=== FEATURE NAME ANALYSIS ===")
+    leaky_patterns = [
+        'report', 'reportable', 'notify', 'notified',
+        'investigat', 'severity', 'medical', 'outcome',
+        'resolution', 'timeframe', 'delay', 'compliance'
+    ]
+    
+    suspicious_features = []
+    for col in df.columns:
+        col_lower = col.lower()
+        for pattern in leaky_patterns:
+            if pattern in col_lower:
+                suspicious_features.append((col, pattern))
+                break
+    
+    if suspicious_features:
+        print("Potentially leaky feature names:")
+        for feat, pattern in suspicious_features:
+            print(f"  {feat} (contains '{pattern}')")
+    else:
+        print("No obviously leaky feature names detected")
+    
+    # 5. Check for perfect predictors
+    print("\n=== PERFECT PREDICTOR CHECK ===")
+    if target in df.columns:
+        for col in df.columns:
+            if col != target:
+                try:
+                    # Check if any single feature perfectly predicts target
+                    if df[col].dtype in ['object', 'category']:
+                        # For categorical
+                        crosstab = pd.crosstab(df[col], df[target])
+                        # Check if any category has only one target value
+                        perfect_rows = (crosstab > 0).sum(axis=1)
+                        if (perfect_rows == 1).any():
+                            print(f"  🚨 {col}: Perfect categorical predictor detected!")
+                    elif np.issubdtype(df[col].dtype, np.number):
+                        # For numeric - check if any threshold gives perfect separation
+                        unique_vals = sorted(df[col].dropna().unique())
+                        if len(unique_vals) < 20:  # Only check if reasonable number of values
+                            for val in unique_vals:
+                                above = df[df[col] > val][target]
+                                below = df[df[col] <= val][target]
+                                if len(above) > 0 and len(below) > 0:
+                                    if above.nunique() == 1 or below.nunique() == 1:
+                                        print(f"  🚨 {col}: Perfect numeric predictor at threshold {val}!")
+                                        break
+                except:
+                    pass
+    
+    # 6. Date-based leakage check
+    print("\n=== TEMPORAL LEAKAGE CHECK ===")
+    date_cols = []
+    for col in df.columns:
+        if 'date' in col.lower() or 'time' in col.lower():
+            date_cols.append(col)
+    
+    if date_cols:
+        print("Date/time columns found:")
+        for col in date_cols:
+            print(f"  {col}")
+            try:
+                dt_col = pd.to_datetime(df[col], errors='coerce')
+                if not dt_col.isna().all():
+                    print(f"    Range: {dt_col.min()} to {dt_col.max()}")
+                    print(f"    Missing: {dt_col.isna().sum()}/{len(dt_col)}")
+            except:
+                print(f"    Could not parse as datetime")
+    
+    return {
+        'correlations': correlations if 'correlations' in locals() else [],
+        'suspicious_features': suspicious_features,
+        'date_columns': date_cols
+    }
+
+
+def safe_predictive_models_comparison(
+    df: pd.DataFrame,
+    target: str = "reportable_bin",
+    force_simple_features: bool = False,
+    min_correlation_threshold: float = 0.50,  # Much lower threshold
+    random_state: int = 42
+) -> Dict[str, Any]:
+    """
+    Ultra-conservative model comparison that aggressively removes potential leakage.
+    """
+    print("=== SAFE MODEL COMPARISON ===")
+    
+    # First, run diagnosis
+    diagnosis = diagnose_data_leakage(df, target)
+    
+    # Create very simple, safe features if requested
+    if force_simple_features:
+        print("\nUsing ultra-simple features to avoid leakage...")
+        
+        # Create minimal feature set
+        safe_df = pd.DataFrame(index=df.index)
+        
+        # Time-based features (if available)
+        if 'incident_datetime' in df.columns or 'incident_date' in df.columns:
+            date_col = 'incident_datetime' if 'incident_datetime' in df.columns else 'incident_date'
+            dt = pd.to_datetime(df[date_col], errors='coerce')
+            safe_df['hour'] = dt.dt.hour.fillna(12)
+            safe_df['day_of_week'] = dt.dt.dayofweek.fillna(3)
+            safe_df['is_weekend'] = (dt.dt.dayofweek >= 5).astype(int)
+        else:
+            safe_df['hour'] = 12  # Default hour
+            safe_df['day_of_week'] = 3  # Default day
+            safe_df['is_weekend'] = 0  # Default weekday
+        
+        # Location-based features (very basic)
+        if 'location' in df.columns:
+            loc = df['location'].astype(str).str.lower()
+            safe_df['is_kitchen'] = loc.str.contains('kitchen', na=False).astype(int)
+            safe_df['is_bathroom'] = loc.str.contains('bath|toilet', na=False).astype(int)
+        else:
+            safe_df['is_kitchen'] = 0
+            safe_df['is_bathroom'] = 0
+        
+        # Basic counting (using only past information)
+        if 'participant_id' in df.columns:
+            # Count previous incidents for each participant (cumulative)
+            work = df.copy()
+            if 'incident_datetime' in work.columns:
+                work = work.sort_values(['participant_id', 'incident_datetime'])
+                safe_df['participant_incident_count'] = work.groupby('participant_id').cumcount()
+            else:
+                safe_df['participant_incident_count'] = 0
+        else:
+            safe_df['participant_incident_count'] = 0
+        
+        features_df = safe_df
+        
+    else:
+        # Use existing feature creation but with aggressive filtering
+        out = create_comprehensive_features(df)
+        if isinstance(out, tuple) and len(out) == 3:
+            _, _, features_df = out
+        elif isinstance(out, pd.DataFrame):
+            features_df = out
+        else:
+            features_df = pd.DataFrame(out)
+    
+    print(f"Features before filtering: {features_df.shape[1]}")
+    
+    # Target preparation
+    if target in df.columns:
+        y = df.loc[features_df.index, target].copy()
+    else:
+        print(f"Target '{target}' not found, creating proxy from severity...")
+        severity_col = df.get("severity_numeric", df.get("severity", pd.Series([2]*len(df))))
+        if hasattr(severity_col, 'map'):
+            sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+            severity_col = severity_col.map(sev_map).fillna(2)
+        y = (severity_col.loc[features_df.index] >= 3).astype(int)
+    
+    print(f"Target distribution: {y.value_counts().to_dict()}")
+    
+    # Aggressive feature filtering
+    numeric_features = features_df.select_dtypes(include=[np.number])
+    
+    # Remove features with high correlation to target
+    safe_features = []
+    for col in numeric_features.columns:
+        try:
+            corr = abs(numeric_features[col].corr(y))
+            if np.isfinite(corr) and corr < min_correlation_threshold:
+                # Additional checks
+                if numeric_features[col].std() > 0.01:  # Not constant
+                    if numeric_features[col].nunique() / len(numeric_features) < 0.9:  # Not ID-like
+                        safe_features.append(col)
+                    else:
+                        print(f"Removing {col}: too many unique values (likely ID)")
+                else:
+                    print(f"Removing {col}: near-constant")
+            else:
+                print(f"Removing {col}: correlation {corr:.3f} too high")
+        except:
+            print(f"Removing {col}: correlation calculation failed")
+    
+    if len(safe_features) == 0:
+        print("WARNING: No safe features found! Using minimal feature set...")
+        safe_features = ['hour', 'is_weekend'] if 'hour' in features_df.columns else list(features_df.columns[:2])
+    
+    print(f"Safe features selected: {safe_features}")
+    
+    X = numeric_features[safe_features].fillna(0)
+    
+    # Simple train/test split (avoid time-based with small data)
+    from sklearn.model_selection import train_test_split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=random_state, stratify=y if y.nunique() > 1 else None
+    )
+    
+    print(f"Training set: {len(X_train)}, Test set: {len(X_test)}")
+    
+    # Very simple models
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import cross_val_score
+    
+    results = {}
+    
+    # Random Forest with heavy regularization
+    rf = RandomForestClassifier(
+        n_estimators=20,
+        max_depth=2,
+        min_samples_split=20,
+        min_samples_leaf=10,
+        random_state=random_state,
+        class_weight='balanced'
+    )
+    
+    rf.fit(X_train, y_train)
+    rf_pred = rf.predict(X_test)
+    rf_acc = (rf_pred == y_test).mean()
+    
+    # Cross-validation
+    rf_cv = cross_val_score(rf, X_train, y_train, cv=3, scoring='accuracy')
+    
+    results['RandomForest'] = {
+        'accuracy': float(rf_acc),
+        'cv_mean': float(rf_cv.mean()),
+        'cv_std': float(rf_cv.std()),
+        'predictions': rf_pred,
+        'y_test': y_test,
+        'feature_names': safe_features
+    }
+    
+    # Logistic Regression with high regularization
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    lr = LogisticRegression(
+        C=0.01,  # High regularization
+        max_iter=1000,
+        random_state=random_state,
+        class_weight='balanced'
+    )
+    
+    lr.fit(X_train_scaled, y_train)
+    lr_pred = lr.predict(X_test_scaled)
+    lr_acc = (lr_pred == y_test).mean()
+    
+    # Cross-validation
+    from sklearn.pipeline import Pipeline
+    lr_pipe = Pipeline([('scaler', StandardScaler()), ('lr', lr)])
+    lr_cv = cross_val_score(lr_pipe, X_train, y_train, cv=3, scoring='accuracy')
+    
+    results['LogisticRegression'] = {
+        'accuracy': float(lr_acc),
+        'cv_mean': float(lr_cv.mean()),
+        'cv_std': float(lr_cv.std()),
+        'predictions': lr_pred,
+        'y_test': y_test,
+        'feature_names': safe_features
+    }
+    
+    # Print results
+    print("\n=== RESULTS ===")
+    for name, result in results.items():
+        print(f"{name}:")
+        print(f"  Test Accuracy: {result['accuracy']:.3f}")
+        print(f"  CV Accuracy: {result['cv_mean']:.3f} (+/- {result['cv_std']*2:.3f})")
+        
+        if result['accuracy'] > 0.95:
+            print("  🚨 Still suspiciously high - possible remaining leakage")
+        elif result['accuracy'] > 0.85:
+            print("  ⚠️ High performance - check for overfitting")
+        else:
+            print("  ✅ Reasonable performance range")
+    
+    return results
+
+
+# Quick test function
+def quick_leakage_test(df, target="reportable_bin"):
+    """Quick test to identify obvious leakage."""
+    print("=== QUICK LEAKAGE TEST ===")
+    
+    # Check if target is too easy to predict
+    if target not in df.columns:
+        print(f"Target '{target}' not found!")
+        return
+    
+    # Look for perfect correlations
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    perfect_predictors = []
+    
+    for col in numeric_cols:
+        if col != target:
+            try:
+                corr = abs(df[col].corr(df[target]))
+                if corr > 0.95:
+                    perfect_predictors.append((col, corr))
+            except:
+                pass
+    
+    if perfect_predictors:
+        print("🚨 PERFECT PREDICTORS FOUND:")
+        for col, corr in perfect_predictors:
+            print(f"  {col}: {corr:.3f}")
+        print("These are likely causing the 100% accuracy!")
+    else:
+        print("✅ No obvious perfect predictors found")
+    
+    return perfect_predictors
+
