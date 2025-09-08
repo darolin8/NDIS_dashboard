@@ -1032,7 +1032,12 @@ def simulate_real_time_alerts(df: pd.DataFrame, risk_scoring_function: Callable[
 
 
 # 15) Streamlit integration helpers (optional)
-def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_names: List[str], trained_models: Dict[str, Dict[str, Any]]):
+def add_enhanced_features_to_dashboard(
+    df: pd.DataFrame,
+    X: np.ndarray,
+    feature_names: List[str],
+    trained_models: Dict[str, Dict[str, Any]],
+):
     """Render enhanced features inside a Streamlit app."""
     try:
         import streamlit as st
@@ -1041,7 +1046,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
 
     st.markdown("### 🔬 Enhanced Analytics Features")
 
-    # Enhanced model analysis
+    # 📊 Enhanced model analysis
     if trained_models:
         st.markdown("#### 📊 Enhanced Model Performance Analysis")
         for model_name, model_data in trained_models.items():
@@ -1056,7 +1061,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
 
-    # Carer risk network
+    # 🕸️ Carer risk network
     st.markdown("#### 🕸️ Carer-Participant Risk Network")
     network_fig, risk_matrix = carer_risk_network_analysis(df)
     if network_fig is not None:
@@ -1066,7 +1071,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
             st.markdown("##### 🚨 High-Risk Carer-Participant Pairs")
             st.dataframe(high_risk_pairs.sort_values('risk_score', ascending=False))
 
-    # Participant journey
+    # 👤 Participant journey
     if 'participant_id' in df.columns:
         st.markdown("#### 👤 Individual Participant Journey")
         participant_ids = df['participant_id'].dropna().unique()
@@ -1076,11 +1081,23 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
             if journey_fig:
                 st.plotly_chart(journey_fig, use_container_width=True)
 
-    # Predictive risk scoring UI
+    # 🎯 Predictive risk scoring UI
     if trained_models:
         st.markdown("#### 🎯 Predictive Risk Scoring")
-        risk_scorer = create_predictive_risk_scoring(df, trained_models, feature_names)
+
+        # ✅ Use training feature order saved with the (best) model
+        best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
+        trained_feature_names = trained_models[best_key].get('feature_names', [])
+        risk_scorer = create_predictive_risk_scoring(df, trained_models, trained_feature_names)
+
         if risk_scorer:
+            # (optional) quick shape sanity caption
+            try:
+                n_expected = getattr(trained_models[best_key]['model'], 'n_features_in_', '?')
+                st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
+            except Exception:
+                pass
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 test_hour = st.slider("Hour", 0, 23, 8)
@@ -1095,7 +1112,7 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
                 'participant_history': test_history,
                 'carer_history': 5,
                 'location_risk': 3 if test_location in ['kitchen', 'bathroom'] else 1,
-                'day_type': 'weekend' if st.checkbox("Weekend?", value=False) else 'weekday'
+                'day_type': 'weekend' if st.checkbox("Weekend?", value=False, key="risk_ui_weekend") else 'weekday'
             }
             risk_result = risk_scorer(scenario)
             if risk_result['risk_level'] == 'HIGH':
@@ -1105,11 +1122,15 @@ def add_enhanced_features_to_dashboard(df: pd.DataFrame, X: np.ndarray, feature_
             else:
                 st.success(f"✅ {risk_result['risk_level']} RISK - {risk_result['confidence']:.1%} confidence")
 
-    # Real-time alerts simulation
+    # 🚨 Real-time alerts simulation
     st.markdown("#### 🚨 Real-Time Alert System (Simulation)")
     alert_thresholds = {'high': 0.7, 'medium': 0.5, 'low': 0.3}
     if trained_models:
-        risk_scorer = create_predictive_risk_scoring(df, trained_models, feature_names)
+        # ✅ Use training feature order saved with the (best) model
+        best_key = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
+        trained_feature_names = trained_models[best_key].get('feature_names', [])
+        risk_scorer = create_predictive_risk_scoring(df, trained_models, trained_feature_names)
+
         if risk_scorer:
             alerts = simulate_real_time_alerts(df, risk_scorer, alert_thresholds)
             if alerts:
