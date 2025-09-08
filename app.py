@@ -21,6 +21,8 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+
+
 # Next: import dashboard_pages and expose any real error
 try:
     from dashboard_pages import (
@@ -28,6 +30,7 @@ try:
         display_operational_performance_section,
         display_compliance_investigation_section,
         display_ml_insights_section,
+        apply_investigation_rules,
         PAGE_TO_RENDERER,
     )
 except Exception as e:
