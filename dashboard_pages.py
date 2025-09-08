@@ -1383,3 +1383,39 @@ def display_ml_insights_section(filtered_df):
         st.plotly_chart(corr_fig, use_container_width=True)
     except Exception as e:
         st.warning(f"Correlation analysis failed: {e}")
+
+# ---- Page registry expected by app.py ----
+PAGE_TO_RENDERER = {
+    "Executive Summary":           display_executive_summary_section,
+    "Operational Performance":     display_operational_performance_section,
+    "Compliance & Investigation":  display_compliance_investigation_section,
+    "ML Insights":                 display_ml_insights_section,
+}
+
+# (Optional) Keep a stable order for a sidebar menu, if app.py uses it.
+PAGE_ORDER = [
+    "Executive Summary",
+    "Operational Performance",
+    "Compliance & Investigation",
+    "ML Insights",
+]
+
+# (Optional) helper if you ever need to call by name
+def render_page(page_name: str, df):
+    fn = PAGE_TO_RENDERER.get(page_name)
+    if fn is None:
+        st.error(f"Unknown page: {page_name}")
+        return
+    return fn(df)
+
+# Make explicit what this module exports (helps with "from dashboard_pages import ...")
+__all__ = [
+    "display_executive_summary_section",
+    "display_operational_performance_section",
+    "display_compliance_investigation_section",
+    "display_ml_insights_section",
+    "PAGE_TO_RENDERER",
+    "PAGE_ORDER",
+    "render_page",
+]
+
