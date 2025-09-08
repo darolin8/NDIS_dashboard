@@ -518,26 +518,138 @@ def plot_3d_clusters(
 # ---------------------------------------
 # 7) Predictive models comparison (baselines)
 # ---------------------------------------
-def create_predictive_risk_scoring(df: pd.DataFrame,
-                                   trained_models: Dict[str, Dict[str, Any]],
-                                   feature_names: List[str]):
-    """Return calculate_risk_score(scenario) using the best model and its TRAINING features."""
-    if not trained_models:
-        return None
+from typing import Dict, List, Any, Optional
+import numpy as np
+import pandas as pd
 
-    best_model_name = max(trained_models, key=lambda x: trained_models[x].get('accuracy', 0))
-    best_model = trained_models[best_model_name]['model']
+def predictive_models_comparison(
+    df: pd.DataFrame,
+    target: str = "reportable_bin",
+    test_size: float = 0.25,
+    random_state: int = 42,
+    extra_leaky_features: Optional[List[str]] = None,
+    split_strategy: str = "random",       # "random" | "time" | "group"
+    time_col: Optional[str] = "incident_date",
+    group_col: Optional[str] = None,
+    leak_corr_threshold: float = 0.98,
+    leak_name_patterns: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Train RF & LogReg; return dict with models, metrics, and training feature_names."""
+    # Build features via your wrapper (works with or without utils/)
+    out = create_comprehensive_features(df)
+    if isinstance(out, tuple) and len(out) == 3:
+        _, _, features_df = out
+    elif isinstance(out, pd.DataFrame):
+        features_df = out
+    else:
+        features_df = pd.DataFrame(out)
+    features_df = features_df.copy()
 
-    # Prefer the feature list the model stored at training time
-    train_feats = trained_models[best_model_name].get('feature_names', feature_names)
-    feature_names = list(train_feats)  # ensure same order as training
+    # Target aligned to features_df.index
+    if target in df.columns:
+        y = df.loc[features_df.index, target].copy()
+    else:
+        y = (df.get("severity_numeric", pd.Series([2]*len(df))).loc[features_df.index] >= 3).astype(int)
 
-    n_expected = getattr(best_model, "n_features_in_", None)
-    if n_expected is not None and len(feature_names) != n_expected:
-        raise ValueError(
-            f"Risk scorer feature count ({len(feature_names)}) != model n_features_in_ ({n_expected}). "
-            f"Pass the training feature list stored with the model."
+    # Drop obvious post-outcome/leaky columns
+    drop_cols = set([
+        target, "reportable", "reportable_bin",
+        "severity", "severity_numeric",
+        "medical_attention_required",
+        "notified_to_commission", "reporting_timeframe",
+        "investigation_required", "incident_resolved",
+    ])
+    if extra_leaky_features:
+        drop_cols.update(extra_leaky_features)
+
+    leak_name_patterns = leak_name_patterns or [
+        "report", "reportable", "notify", "notified",
+        "investigat", "severity", "medical", "outcome",
+        "resolution", "timeframe"
+    ]
+    by_name = [c for c in features_df.columns if any(p in c.lower() for p in leak_name_patterns)]
+    drop_cols.update([c for c in by_name if c in features_df.columns])
+
+    if drop_cols:
+        features_df = features_df.drop(columns=[c for c in drop_cols if c in features_df.columns])
+
+    # Auto-drop near-perfectly correlated columns
+    to_drop_corr = []
+    for c in features_df.columns:
+        s = pd.to_numeric(features_df[c], errors="coerce")
+        if s.std(ddof=0) == 0 or s.isna().all():
+            to_drop_corr.append(c)
+            continue
+        try:
+            corr = abs(s.corr(pd.to_numeric(y, errors="coerce")))
+            if corr >= leak_corr_threshold:
+                to_drop_corr.append(c)
+        except Exception:
+            pass
+    if to_drop_corr:
+        features_df = features_df.drop(columns=to_drop_corr)
+
+    feature_names = features_df.columns.tolist()
+    X = features_df.values
+
+    # Split strategy
+    from sklearn.model_selection import train_test_split, GroupShuffleSplit
+    if split_strategy == "time" and time_col and time_col in df.columns:
+        dt = pd.to_datetime(df.loc[features_df.index, time_col], errors="coerce")
+        cutoff = dt.quantile(0.8)
+        mask_train = dt <= cutoff
+        mask_test  = dt > cutoff
+        X_train, X_test = X[mask_train], X[mask_test]
+        y_train, y_test = y[mask_train], y[mask_test]
+    elif split_strategy == "group" and group_col and group_col in df.columns:
+        groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
+        gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+        train_idx, test_idx = next(gss.split(X, y, groups))
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+    else:
+        # avoid stratify error if y has one class
+        strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state, stratify=strat
         )
+
+    # Models
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+
+    results: Dict[str, Any] = {}
+
+    rf = RandomForestClassifier(n_estimators=200, random_state=random_state)
+    rf.fit(X_train, y_train)
+    rf_pred = rf.predict(X_test)
+    rf_proba = rf.predict_proba(X_test) if hasattr(rf, "predict_proba") else None
+    results["RandomForest"] = {
+        "model": rf,
+        "accuracy": float((rf_pred == y_test).mean()),
+        "y_test": y_test,
+        "predictions": rf_pred,
+        "probabilities": rf_proba,
+        "feature_names": feature_names,
+    }
+
+    try:
+        logreg = LogisticRegression(max_iter=2000, solver="saga", n_jobs=-1)
+    except TypeError:
+        logreg = LogisticRegression(max_iter=2000, solver="saga")
+    lg_pred = logreg.fit(X_train, y_train).predict(X_test)
+    lg_proba = logreg.predict_proba(X_test) if hasattr(logreg, "predict_proba") else None
+    results["LogisticRegression"] = {
+        "model": logreg,
+        "accuracy": float((lg_pred == y_test).mean()),
+        "y_test": y_test,
+        "predictions": lg_pred,
+        "probabilities": lg_proba,
+        "feature_names": feature_names,
+    }
+
+    return results
+
 
     def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
         vec = np.zeros(len(feature_names), dtype=float)
@@ -802,27 +914,52 @@ def create_predictive_risk_scoring(
 ):
     """
     Return calculate_risk_score(scenario) using the best model.
-    Uses the model's TRAINING feature list (stored in trained_models[...]['feature_names'])
-    to avoid n_features_in_ mismatches.
+    Uses the model's TRAINING feature list to avoid n_features_in_ mismatches.
     """
     if not trained_models:
         return None
 
-    # pick best model
     best_model_name = max(trained_models, key=lambda k: trained_models[k].get('accuracy', 0))
     best_model = trained_models[best_model_name]['model']
 
-    # always prefer training-time features saved with the model; fall back to arg
+    # use the saved training feature list in the model record when available
     train_feats = list(trained_models[best_model_name].get('feature_names', feature_names))
     n_expected = getattr(best_model, "n_features_in_", len(train_feats))
-
-    # final safety: if saved list length doesn't match model metadata, trim/pad
     if len(train_feats) != n_expected:
         if len(train_feats) > n_expected:
             train_feats = train_feats[:n_expected]
         else:
-            # pad with dummy columns so shape matches; they will stay zero
             train_feats = train_feats + [f"__pad_{i}__" for i in range(n_expected - len(train_feats))]
+
+def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
+        mapping = {
+            'hour': scenario_data.get('hour', 12),
+            'is_weekend': 1 if scenario_data.get('day_type') == 'weekend' else 0,
+            'is_kitchen': 1 if 'kitchen' in str(scenario_data.get('location', '')).lower() else 0,
+            'is_bathroom': 1 if any(k in str(scenario_data.get('location', '')).lower()
+                                    for k in ['bathroom','toilet','washroom','restroom']) else 0,
+            'participant_incident_count': scenario_data.get('participant_history', 1),
+            'carer_incident_count': scenario_data.get('carer_history', 1),
+            'location_risk_score': scenario_data.get('location_risk', 2),
+        }
+
+        vec = np.zeros(len(train_feats), dtype=float)
+        for i, fn in enumerate(train_feats):
+            vec[i] = float(mapping.get(fn, 0.0))
+        X_one = vec.reshape(1, -1)
+
+        if hasattr(best_model, 'predict_proba'):
+            proba = best_model.predict_proba(X_one)[0]
+            score = float(np.max(proba))
+        else:
+            pred = best_model.predict(X_one)[0]
+            score = float(pred) / 3.0
+
+        level = 'HIGH' if score > 0.7 else ('MEDIUM' if score > 0.4 else 'LOW')
+        return {'risk_score': score, 'risk_level': level, 'confidence': score, 'model_used': best_model_name}
+
+    return calculate_risk_score
+
 
     def calculate_risk_score(scenario_data: Dict[str, Any]) -> Dict[str, Any]:
         # simple name→value mapping for your demo features
