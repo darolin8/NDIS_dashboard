@@ -815,7 +815,7 @@ def display_operational_performance_section(df):
     plot_serious_injury_age_severity(df)
 
 # ----------------------------
-# Compliance / Investigation helpers (NEW)
+# Compliance / Investigation helpers
 # ----------------------------
 def plot_reporting_delay_by_date(
     df: pd.DataFrame,
@@ -893,6 +893,7 @@ def plot_reporting_delay_by_date(
         "Negative delays removed; extreme values clipped."
     )
 
+
 def plot_24h_compliance_rate_by_location(df: pd.DataFrame):
     """Bar chart of % incidents reported within 24h, by location."""
     st.subheader("📍 24-hour compliance by location")
@@ -926,6 +927,7 @@ def plot_24h_compliance_rate_by_location(df: pd.DataFrame):
     )
     fig.update_layout(xaxis_tickangle=-30, showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
+
 
 # ----------------------------
 # Compliance / Investigation (final, single definition)
@@ -1006,7 +1008,6 @@ def display_compliance_investigation_section(df):
     with col2:
         plot_24h_compliance_rate_by_location(df)
 
-    # Simple pipeline bar and CF heatmap
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
 
