@@ -32,9 +32,6 @@ def simple_leakage_check(df, target="reportable_bin"):
     else:
         print("\nNo high correlations found")
 
-# Run the test
 if __name__ == "__main__":
-    # Load the NDIS data for leakage check
-    # Update the path as needed!
-    df = pd.read_csv("text data/ndis_incident_1000.csv")
+    df = pd.read_csv("ndis_incidents_1000.csv")
     simple_leakage_check(df)
