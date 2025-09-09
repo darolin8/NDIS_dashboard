@@ -1089,21 +1089,88 @@ def plot_24h_compliance_rate_by_carer(df):
     st.plotly_chart(fig, use_container_width=True, key="compliance_carer")
 
 def plot_investigation_pipeline(df):
-    need = {'investigation_required', 'action_complete'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning("No data available for investigation pipeline")
-        return
-    all_incidents = len(df)
-    required = int(df['investigation_required'].sum())
-    complete = int(df['action_complete'].sum())
-    values = [all_incidents, required, complete]
-    names = ['All Incidents', 'Required Investigation', 'Action Complete']
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
-    fig = px.bar(x=names, y=values, title="Investigation Pipeline",
-                 labels={'x': 'Stage', 'y': 'Count'},
-                 color=names, color_discrete_sequence=colors)
-    fig.update_layout(showlegend=False, height=400)
-    st.plotly_chart(fig, use_container_width=True, key="investigation_pipeline")
+    st.markdown("---")
+    st.subheader("Enhanced Investigation Pipeline")
+
+    group_by = st.sidebar.selectbox(
+        "Group pipeline by:",
+        ["carer_id", "severity", "incident_type", "location"],
+        index=0
+    )
+
+    df2 = df.copy()
+    
+    # Prepare compliance data based on notification_time_frame instead of date calculations
+    if "notification_time_frame" in df2.columns:
+        df2['within_24h'] = df2['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
+        df2['overdue_action'] = (~df2.get('action_complete', pd.Series(False)).astype(bool)) & (~df2['within_24h'])
+        df2['under_investigation'] = df2.get('investigation_required', pd.Series(False)).astype(bool) & (~df2.get('action_complete', pd.Series(False)).astype(bool))
+        # Create report_delay_hours proxy from notification_time_frame for consistency
+        df2['report_delay_hours'] = df2['notification_time_frame'].map({
+            'Immediate': 0,
+            'Within 24 hours': 12,  # Assume average within 24hrs
+            '24-48 hours': 36,
+            '48-72 hours': 60,
+            'More than 72 hours': 96
+        }).fillna(24)  # Default to 24 hours if not mapped
+    else:
+        # Fallback to original date-based calculation if notification_time_frame not available
+        if "incident_date" in df2.columns and "notification_date" in df2.columns:
+            df2['incident_date'] = pd.to_datetime(df2['incident_date'], errors='coerce')
+            df2['notification_date'] = pd.to_datetime(df2['notification_date'], errors='coerce')
+            df2['report_delay_hours'] = (df2['notification_date'] - df2['incident_date']).dt.total_seconds() / 3600
+            df2['within_24h'] = df2['report_delay_hours'] <= 24
+            df2['overdue_action'] = (~df2.get('action_complete', pd.Series(False)).astype(bool)) & (df2['report_delay_hours'] > 24)
+            df2['under_investigation'] = df2.get('investigation_required', pd.Series(False)).astype(bool) & (~df2.get('action_complete', pd.Series(False)).astype(bool))
+        else:
+            df2['report_delay_hours'] = None
+            df2['within_24h'] = None
+            df2['overdue_action'] = None
+            df2['under_investigation'] = None
+
+    # Aggregate by group
+    agg = df2.groupby(group_by).agg(
+        All_Incidents=('incident_id', 'count') if 'incident_id' in df2.columns else ('report_delay_hours', 'count'),
+        Required_Investigation=('investigation_required', 'sum') if 'investigation_required' in df2.columns else (group_by, 'count'),
+        Under_Investigation=('under_investigation', 'sum') if 'under_investigation' in df2.columns else (group_by, 'count'),
+        Action_Complete=('action_complete', 'sum') if 'action_complete' in df2.columns else (group_by, 'count'),
+        Overdue_Actions=('overdue_action', 'sum') if 'overdue_action' in df2.columns else (group_by, 'count'),
+        Compliance_Breach=('within_24h', lambda x: (~x).sum()) if 'within_24h' in df2.columns else (group_by, 'count')
+    ).reset_index()
+
+    stages = ['All_Incidents', 'Required_Investigation', 'Under_Investigation',
+              'Action_Complete', 'Overdue_Actions', 'Compliance_Breach']
+    melted = agg.melt(id_vars=group_by, value_vars=stages, var_name="Stage", value_name="Count")
+
+    fig = px.bar(
+        melted, x=group_by, y="Count", color="Stage", barmode="group",
+        title=f"Enhanced Investigation Pipeline by {group_by.replace('_', ' ').title()}",
+        labels={group_by: group_by.replace('_', ' ').title(), "Count": "Number of Incidents"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Show pipeline data table"):
+        st.dataframe(agg, use_container_width=True)
+
+    stage_selected = st.selectbox("Filter by Stage", stages, index=0)
+    filtered = df2[df2[group_by].isin(agg[group_by])]
+    if stage_selected == "Under_Investigation":
+        filtered = filtered[filtered['under_investigation']]
+    elif stage_selected == "Action_Complete":
+        filtered = filtered[filtered['action_complete']]
+    elif stage_selected == "Overdue_Actions":
+        filtered = filtered[filtered['overdue_action']]
+    elif stage_selected == "Compliance_Breach":
+        filtered = filtered[~filtered['within_24h']]
+    elif stage_selected == "Required_Investigation":
+        filtered = filtered[filtered['investigation_required']]
+    else:
+        filtered = filtered
+
+    show_cols = [group_by, "incident_id", "incident_date", "notification_time_frame", "report_delay_hours"]
+    show_cols = [col for col in show_cols if col in filtered.columns]
+    with st.expander(f"Show incidents in stage: {stage_selected}"):
+        st.dataframe(filtered[show_cols], use_container_width=True)
 
 def plot_contributing_factors_by_month(df, top_k=25):
     need = {'contributing_factors', 'incident_date'}
