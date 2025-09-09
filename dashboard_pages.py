@@ -833,24 +833,32 @@ def display_compliance_investigation_cards(df):
         st.warning("No data available for compliance cards")
         return
     df = apply_investigation_rules(df)
-
     current_date = pd.to_datetime(df['incident_date'], errors='coerce').max()
     current_month = current_date.to_period('M')
     previous_month = current_month - 1
-
     df = df.copy()
     df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
     current_df = df[df['incident_date'].dt.to_period('M') == current_month]
     previous_df = df[df['incident_date'].dt.to_period('M') == previous_month]
-
+    
     current_df = current_df.copy()
     previous_df = previous_df.copy()
-    current_df['report_delay_hours'] = (current_df['notification_date'] - current_df['incident_date']).dt.total_seconds() / 3600
-    previous_df['report_delay_hours'] = (previous_df['notification_date'] - previous_df['incident_date']).dt.total_seconds() / 3600
-
+    
+    # Use notification_time_frame if available, otherwise fall back to date calculation
+    if 'notification_time_frame' in df.columns:
+        current_df['within_24h'] = current_df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
+        previous_df['within_24h'] = previous_df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
+    else:
+        # Fallback to original date-based calculation
+        current_df['report_delay_hours'] = (current_df['notification_date'] - current_df['incident_date']).dt.total_seconds() / 3600
+        previous_df['report_delay_hours'] = (previous_df['notification_date'] - previous_df['incident_date']).dt.total_seconds() / 3600
+        current_df['within_24h'] = current_df['report_delay_hours'] <= 24
+        previous_df['within_24h'] = previous_df['report_delay_hours'] <= 24
+    
+    
     st.markdown("### 📋 Compliance & Investigation Metrics")
     col1, col2, col3, col4 = st.columns(4)
-
+    
     with col1:
         current_reportable = int(current_df['reportable'].sum()) if len(current_df) > 0 else 0
         previous_reportable = int(previous_df['reportable'].sum()) if len(previous_df) > 0 else 0
@@ -859,25 +867,25 @@ def display_compliance_investigation_cards(df):
         st.metric("📊 Reportable Incidents", current_reportable,
                   delta=f"{trend_arrow} {abs(change)}",
                   delta_color="inverse" if change > 0 else "normal")
-
+    
     with col2:
-        current_compliance = int((current_df['report_delay_hours'] <= 24).sum()) if len(current_df) > 0 else 0
-        previous_compliance = int((previous_df['report_delay_hours'] <= 24).sum()) if len(previous_df) > 0 else 0
+        current_compliance = int(current_df['within_24h'].sum()) if len(current_df) > 0 else 0
+        previous_compliance = int(previous_df['within_24h'].sum()) if len(previous_df) > 0 else 0
         change = current_compliance - previous_compliance
         trend_arrow = "↗️" if change > 0 else "↘️" if change < 0 else "→"
         st.metric("⏱️ 24hr Compliance", current_compliance,
                   delta=f"{trend_arrow} {abs(change)}",
                   delta_color="normal" if change > 0 else "inverse")
-
+    
     with col3:
-        current_overdue = int((current_df['report_delay_hours'] > 24).sum()) if len(current_df) > 0 else 0
-        previous_overdue = int((previous_df['report_delay_hours'] > 24).sum()) if len(previous_df) > 0 else 0
+        current_overdue = int((~current_df['within_24h']).sum()) if len(current_df) > 0 else 0
+        previous_overdue = int((~previous_df['within_24h']).sum()) if len(previous_df) > 0 else 0
         change = current_overdue - previous_overdue
         trend_arrow = "↗️" if change > 0 else "↘️" if change < 0 else "→"
         st.metric("⚠️ Overdue Reports", current_overdue,
                   delta=f"{trend_arrow} {abs(change)}",
                   delta_color="inverse" if change > 0 else "normal")
-
+    
     with col4:
         current_total = len(current_df)
         previous_total = len(previous_df)
