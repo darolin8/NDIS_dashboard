@@ -1082,188 +1082,176 @@ def plot_24h_compliance_rate_by_carer(df):
         # Use notification_time_frame for compliance
         df['within_24h'] = df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
     
-    # Calculate compliance by carer with additional risk metrics
-    compliance_analysis = df.groupby('carer_id').agg(
+    # Calculate compliance by carer with additional metrics
+    compliance_data = df.groupby('carer_id').agg(
         compliance_rate=('within_24h', 'mean'),
         incident_count=('within_24h', 'count'),
         high_severity_count=('severity', lambda x: (x.astype(str).str.lower() == 'high').sum()),
         reportable_count=('reportable', lambda x: x.sum() if 'reportable' in df.columns else 0)
     ).reset_index()
     
-    compliance_analysis['compliance_rate'] = compliance_analysis['compliance_rate'] * 100
-    compliance_analysis['high_severity_count'] = compliance_analysis['high_severity_count'].fillna(0).astype(int)
-    compliance_analysis['reportable_count'] = compliance_analysis['reportable_count'].fillna(0).astype(int)
-    
-    # Calculate risk score (weighted by severity and volume)
-    compliance_analysis['risk_score'] = (
-        (100 - compliance_analysis['compliance_rate']) * 0.6 +  # Compliance weight
-        (compliance_analysis['high_severity_count'] / compliance_analysis['incident_count'] * 100) * 0.3 +  # Severity weight
-        (compliance_analysis['incident_count'] / compliance_analysis['incident_count'].max() * 20) * 0.1  # Volume weight
-    )
+    compliance_data['compliance_rate'] = compliance_data['compliance_rate'] * 100
+    compliance_data['high_severity_count'] = compliance_data['high_severity_count'].fillna(0).astype(int)
+    compliance_data['reportable_count'] = compliance_data['reportable_count'].fillna(0).astype(int)
     
     # Define performance categories
-    def get_performance_category(row):
-        if row['compliance_rate'] >= 95:
-            return "Good (95-100%)"
-        elif row['compliance_rate'] >= 85:
-            return "Monitoring (85-94%)"
-        elif row['compliance_rate'] >= 70:
-            return "Needs Support (70-84%)"
+    def get_category_and_color(compliance_rate):
+        if compliance_rate >= 95:
+            return "Good (95-100%)", "#2E8B57"  # Sea Green
+        elif compliance_rate >= 85:
+            return "Monitoring (85-94%)", "#FFD700"  # Gold
+        elif compliance_rate >= 70:
+            return "Needs Support (70-84%)", "#FF8C00"  # Orange
         else:
-            return "Immediate Attention (<70%)"
+            return "Immediate Attention (<70%)", "#DC143C"  # Crimson
     
-    compliance_analysis['category'] = compliance_analysis.apply(get_performance_category, axis=1)
+    compliance_data['category'], compliance_data['color'] = zip(*compliance_data['compliance_rate'].apply(get_category_and_color))
     
     # Filter controls
-    with st.expander("Focus Settings", expanded=True):
+    with st.expander("Analysis Settings", expanded=True):
         col1, col2, col3 = st.columns(3)
         
         with col1:
             min_incidents = st.slider(
                 "Minimum incidents:",
-                min_value=1, max_value=20, value=5, step=1,
-                help="Focus on carers with sufficient incident history"
+                min_value=1, max_value=15, value=3, step=1,
+                help="Focus on carers with sufficient data"
             )
         
         with col2:
-            focus_mode = st.selectbox(
-                "Show carers:",
-                ["Needs Attention Only", "All Carers", "Problem Areas Only (<85%)"],
+            show_mode = st.selectbox(
+                "Display:",
+                ["Problem Areas Only (<95%)", "Needs Attention (<85%)", "Critical Issues (<70%)", "All Carers"],
                 help="Filter by performance level"
             )
         
         with col3:
-            sort_by = st.selectbox(
-                "Sort by:",
-                ["Risk Score (High to Low)", "Compliance Rate (Low to High)", "Incident Count (High to Low)"],
-                index=0
+            max_display = st.slider(
+                "Max carers to show:",
+                min_value=10, max_value=50, value=25, step=5,
+                help="Limit for chart readability"
             )
     
     # Apply filters
-    filtered_data = compliance_analysis[compliance_analysis['incident_count'] >= min_incidents].copy()
+    filtered_data = compliance_data[compliance_data['incident_count'] >= min_incidents].copy()
     
-    if focus_mode == "Needs Attention Only":
+    if show_mode == "Problem Areas Only (<95%)":
         filtered_data = filtered_data[filtered_data['compliance_rate'] < 95]
-    elif focus_mode == "Problem Areas Only (<85%)":
+    elif show_mode == "Needs Attention (<85%)":
         filtered_data = filtered_data[filtered_data['compliance_rate'] < 85]
+    elif show_mode == "Critical Issues (<70%)":
+        filtered_data = filtered_data[filtered_data['compliance_rate'] < 70]
     
     if filtered_data.empty:
-        st.success("No carers found matching the criteria - this indicates good overall compliance!")
+        st.success(f"No carers found with {show_mode.lower()} - indicating good compliance performance!")
         return
     
-    # Apply sorting
-    if sort_by == "Risk Score (High to Low)":
-        filtered_data = filtered_data.sort_values('risk_score', ascending=False)
-    elif sort_by == "Compliance Rate (Low to High)":
-        filtered_data = filtered_data.sort_values('compliance_rate', ascending=True)
-    else:  # Incident Count
-        filtered_data = filtered_data.sort_values('incident_count', ascending=False)
+    # Sort by compliance rate (worst first) and limit display
+    filtered_data = filtered_data.sort_values('compliance_rate', ascending=True).head(max_display)
     
-    # Limit display for readability
-    display_limit = 40
-    if len(filtered_data) > display_limit:
-        filtered_data = filtered_data.head(display_limit)
-        st.info(f"Showing top {display_limit} carers (filtered from {len(compliance_analysis)} total)")
-    
-    # Color mapping for categories
-    color_map = {
-        "Good (95-100%)": "#2E8B57",  # Sea Green
-        "Monitoring (85-94%)": "#FFD700",  # Gold
-        "Needs Support (70-84%)": "#FF8C00",  # Orange
-        "Immediate Attention (<70%)": "#DC143C"  # Crimson
-    }
-    
-    # Create the plot
-    fig = px.scatter(
+    # Create the bar chart
+    fig = px.bar(
         filtered_data,
         x='carer_id',
         y='compliance_rate',
-        size='incident_count',
         color='category',
-        color_discrete_map=color_map,
-        title=f"Carer Performance Analysis - Risk-Based View ({len(filtered_data)} carers)",
+        color_discrete_map={
+            "Good (95-100%)": "#2E8B57",
+            "Monitoring (85-94%)": "#FFD700", 
+            "Needs Support (70-84%)": "#FF8C00",
+            "Immediate Attention (<70%)": "#DC143C"
+        },
+        title=f"Carer Compliance Analysis - Worst Performers First ({len(filtered_data)} carers shown)",
         labels={
             'compliance_rate': 'Compliance Rate (%)',
             'carer_id': 'Carer ID',
-            'incident_count': 'Incident Count',
-            'category': 'Performance Category'
+            'category': 'Performance Level'
         },
-        size_max=30,
         hover_data={
-            'risk_score': ':.1f',
+            'incident_count': True,
             'high_severity_count': True,
             'reportable_count': True
         }
     )
     
-    # Add performance threshold lines
-    fig.add_hline(y=95, line_dash="dash", line_color="green", opacity=0.5, annotation_text="95% Target")
-    fig.add_hline(y=85, line_dash="dash", line_color="orange", opacity=0.5, annotation_text="85% Monitoring")
-    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, annotation_text="70% Action Required")
+    # Add reference lines for key thresholds
+    fig.add_hline(y=95, line_dash="solid", line_color="green", opacity=0.7, 
+                  annotation_text="95% Target", annotation_position="right")
+    fig.add_hline(y=85, line_dash="dash", line_color="orange", opacity=0.7,
+                  annotation_text="85% Monitoring", annotation_position="right") 
+    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.7,
+                  annotation_text="70% Action Required", annotation_position="right")
     
     fig.update_layout(
         height=500,
         xaxis_tickangle=45,
-        yaxis=dict(range=[0, 100]),
+        yaxis=dict(range=[0, 100], title="Compliance Rate (%)"),
+        xaxis=dict(title="Carer ID"),
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
     )
     
-    # Custom hover template
+    # Enhanced hover template
     fig.update_traces(
         hovertemplate="<b>%{x}</b><br>" +
                       "Compliance: %{y:.1f}%<br>" +
-                      "Total Incidents: %{marker.size}<br>" +
-                      "Risk Score: %{customdata[0]:.1f}<br>" +
+                      "Total Incidents: %{customdata[0]}<br>" +
                       "High Severity: %{customdata[1]}<br>" +
                       "Reportable: %{customdata[2]}<br>" +
-                      "<extra></extra>",
-        customdata=filtered_data[['risk_score', 'high_severity_count', 'reportable_count']].values
+                      "<extra></extra>"
     )
     
-    st.plotly_chart(fig, use_container_width=True, key="compliance_carer_actionable")
+    st.plotly_chart(fig, use_container_width=True, key="compliance_carer_bar")
     
-    # Summary metrics
+    # Summary statistics
     col1, col2, col3, col4 = st.columns(4)
-    needs_attention = len(filtered_data[filtered_data['compliance_rate'] < 85])
-    immediate_attention = len(filtered_data[filtered_data['compliance_rate'] < 70])
-    high_risk = len(filtered_data[filtered_data['risk_score'] > 30])
+    
+    needs_support = len(filtered_data[filtered_data['compliance_rate'] < 85])
+    critical = len(filtered_data[filtered_data['compliance_rate'] < 70])
     avg_compliance = filtered_data['compliance_rate'].mean()
+    total_incidents = filtered_data['incident_count'].sum()
     
     with col1:
-        st.metric("Needs Support", needs_attention, help="Carers below 85% compliance")
+        st.metric("Below 85%", needs_support, help="Carers needing support")
     with col2:
-        st.metric("Immediate Attention", immediate_attention, help="Carers below 70% compliance")
+        st.metric("Below 70%", critical, help="Critical attention required")
     with col3:
-        st.metric("High Risk Score", high_risk, help="Carers with risk score > 30")
+        st.metric("Average Rate", f"{avg_compliance:.1f}%", help="Of displayed carers")
     with col4:
-        st.metric("Average Compliance", f"{avg_compliance:.1f}%", help="Of displayed carers")
+        st.metric("Total Incidents", total_incidents, help="From displayed carers")
     
-    # Action-oriented table for management
-    priority_carers = filtered_data[filtered_data['compliance_rate'] < 85].copy()
-    if not priority_carers.empty:
-        st.subheader("Priority Action List")
-        priority_carers['suggested_action'] = priority_carers.apply(
-            lambda row: "Immediate Review" if row['compliance_rate'] < 70
-            else "Training & Support" if row['high_severity_count'] > 0
-            else "Monitoring & Coaching", axis=1
-        )
-        
-        action_table = priority_carers[[
-            'carer_id', 'compliance_rate', 'incident_count', 
-            'high_severity_count', 'risk_score', 'suggested_action'
-        ]].round(1)
-        
-        action_table.columns = [
-            'Carer ID', 'Compliance (%)', 'Total Incidents',
-            'High Severity', 'Risk Score', 'Suggested Action'
-        ]
-        
-        st.dataframe(
-            action_table.sort_values('Risk Score', ascending=False),
-            use_container_width=True,
-            hide_index=True
-        )
+    # Action table for worst performers
+    if show_mode != "All Carers":
+        worst_performers = filtered_data.head(10)  # Top 10 worst
+        if not worst_performers.empty:
+            st.subheader("Priority Action Required")
+            
+            # Add suggested actions based on data
+            def suggest_action(row):
+                if row['compliance_rate'] < 70:
+                    return "Immediate Review & Training"
+                elif row['high_severity_count'] > 2:
+                    return "Focus on High-Risk Protocols"  
+                elif row['incident_count'] > 10:
+                    return "Workload & Process Review"
+                else:
+                    return "Compliance Coaching"
+            
+            worst_performers['action'] = worst_performers.apply(suggest_action, axis=1)
+            
+            action_table = worst_performers[[
+                'carer_id', 'compliance_rate', 'incident_count', 
+                'high_severity_count', 'reportable_count', 'action'
+            ]].copy()
+            
+            action_table.columns = [
+                'Carer ID', 'Compliance (%)', 'Total Incidents',
+                'High Severity', 'Reportable', 'Suggested Action'
+            ]
+            
+            action_table['Compliance (%)'] = action_table['Compliance (%)'].round(1)
+            
+            st.dataframe(action_table, use_container_width=True, hide_index=True)
     
 def plot_investigation_pipeline(df):
     st.markdown("---")
