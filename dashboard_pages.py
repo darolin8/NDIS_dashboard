@@ -1074,19 +1074,135 @@ def plot_24h_compliance_rate_by_carer(df):
         # Use notification_time_frame for compliance
         df['within_24h'] = df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
     
-    compliance = df.groupby('carer_id')['within_24h'].mean().reset_index()
-    compliance['within_24h'] = compliance['within_24h'] * 100
+    # Calculate compliance by carer with incident counts
+    compliance_raw = df.groupby('carer_id').agg(
+        compliance_rate=('within_24h', 'mean'),
+        incident_count=('within_24h', 'count')
+    ).reset_index()
+    compliance_raw['compliance_rate'] = compliance_raw['compliance_rate'] * 100
+    
+    # Add filter controls in an expander
+    with st.expander("Compliance Analysis Filters", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            show_all = st.checkbox("Show all carers", value=False)
+            if not show_all:
+                compliance_threshold = st.slider(
+                    "Show carers with compliance below:",
+                    min_value=0, max_value=100, value=95, step=5,
+                    help="Filter to show only carers below this compliance rate"
+                )
+            else:
+                compliance_threshold = 100
+        
+        with col2:
+            min_incidents = st.slider(
+                "Minimum incidents per carer:",
+                min_value=1, max_value=int(compliance_raw['incident_count'].max()) if len(compliance_raw) > 0 else 10,
+                value=3, step=1,
+                help="Only show carers with at least this many incidents"
+            )
+        
+        with col3:
+            sort_order = st.selectbox(
+                "Sort by:",
+                ["Compliance Rate (Low to High)", "Compliance Rate (High to Low)", "Incident Count (High to Low)", "Carer ID"],
+                index=0
+            )
+    
+    # Apply filters
+    filtered_compliance = compliance_raw[
+        (compliance_raw['compliance_rate'] <= compliance_threshold) &
+        (compliance_raw['incident_count'] >= min_incidents)
+    ].copy()
+    
+    if filtered_compliance.empty:
+        st.info(f"No carers found with compliance ≤ {compliance_threshold}% and ≥ {min_incidents} incidents")
+        return
+    
+    # Apply sorting
+    if sort_order == "Compliance Rate (Low to High)":
+        filtered_compliance = filtered_compliance.sort_values('compliance_rate', ascending=True)
+    elif sort_order == "Compliance Rate (High to Low)":
+        filtered_compliance = filtered_compliance.sort_values('compliance_rate', ascending=False)
+    elif sort_order == "Incident Count (High to Low)":
+        filtered_compliance = filtered_compliance.sort_values('incident_count', ascending=False)
+    else:  # Carer ID
+        filtered_compliance = filtered_compliance.sort_values('carer_id')
+    
+    # Limit to top 50 for readability
+    if len(filtered_compliance) > 50:
+        filtered_compliance = filtered_compliance.head(50)
+        st.info(f"Showing top 50 carers (out of {len(compliance_raw)} total matching filters)")
+    
+    # Create the plot
     fig = px.bar(
-        compliance,
+        filtered_compliance,
         x='carer_id',
-        y='within_24h',
-        labels={'within_24h': '% Within 24hr', 'carer_id': 'Carer ID'},
-        title="24 Hour Compliance Rate by Carer",
-        color='within_24h',
-        color_continuous_scale='RdYlGn'
+        y='compliance_rate',
+        labels={'compliance_rate': '% Within 24hr', 'carer_id': 'Carer ID'},
+        title=f"24 Hour Compliance Rate by Carer (Showing {len(filtered_compliance)} carers)",
+        color='compliance_rate',
+        color_continuous_scale='RdYlGn',
+        hover_data={
+            'incident_count': True,
+            'compliance_rate': ':.1f'
+        }
     )
-    fig.update_layout(xaxis_tickangle=45, height=400)
+    
+    # Add a reference line at the compliance threshold if not showing all
+    if not show_all:
+        fig.add_hline(y=compliance_threshold, line_dash="dash", line_color="red", 
+                      annotation_text=f"{compliance_threshold}% Threshold")
+    
+    fig.update_layout(
+        xaxis_tickangle=45, 
+        height=500,
+        showlegend=False,
+        xaxis=dict(title="Carer ID"),
+        yaxis=dict(title="% Within 24hr", range=[0, 100])
+    )
+    
+    # Custom hover template
+    fig.update_traces(
+        hovertemplate="<b>%{x}</b><br>" +
+                      "Compliance: %{y:.1f}%<br>" +
+                      "Total Incidents: %{customdata[0]}<br>" +
+                      "<extra></extra>",
+        customdata=filtered_compliance[['incident_count']].values
+    )
+    
     st.plotly_chart(fig, use_container_width=True, key="compliance_carer")
+    
+    # Summary statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        avg_compliance = filtered_compliance['compliance_rate'].mean()
+        st.metric("Average Compliance Rate", f"{avg_compliance:.1f}%")
+    with col2:
+        below_90 = len(filtered_compliance[filtered_compliance['compliance_rate'] < 90])
+        st.metric("Carers Below 90%", below_90)
+    with col3:
+        total_incidents = filtered_compliance['incident_count'].sum()
+        st.metric("Total Incidents (Filtered)", total_incidents)
+    
+    # Show problematic carers table if filtering
+    if not show_all and compliance_threshold < 100:
+        problematic = filtered_compliance[filtered_compliance['compliance_rate'] < 90].copy()
+        if not problematic.empty:
+            st.subheader("Carers Requiring Attention (< 90% Compliance)")
+            problematic['compliance_rate'] = problematic['compliance_rate'].round(1)
+            st.dataframe(
+                problematic[['carer_id', 'compliance_rate', 'incident_count']]
+                .rename(columns={
+                    'carer_id': 'Carer ID',
+                    'compliance_rate': 'Compliance Rate (%)',
+                    'incident_count': 'Total Incidents'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
 
 def plot_investigation_pipeline(df):
     st.markdown("---")
