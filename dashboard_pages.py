@@ -1066,21 +1066,26 @@ def plot_reporting_delay_by_carer(df):
     st.plotly_chart(fig, use_container_width=True, key="reporting_delay_by_carer")
 
 def plot_24h_compliance_rate_by_carer(df):
-    need = {'carer_id', 'notification_time_frame'}
-    if df.empty or not need.issubset(df.columns):
-        # Fallback to date-based calculation if notification_time_frame not available
-        need_fallback = {'carer_id', 'notification_date', 'incident_date'}
-        if not need_fallback.issubset(df.columns):
-            st.warning("No data available for carer compliance rate analysis")
-            return
-        df = df.copy()
-        df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
-        df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-        df['within_24h'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() <= 24*3600
+    need_dates = {'carer_id', 'notification_date', 'incident_date'}
+    if df.empty or not need_dates.issubset(df.columns):
+        st.warning("No data available for carer compliance rate analysis")
+        return
+    
+    df = df.copy()
+    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
+    
+    # Calculate compliance using actual dates (more accurate)
+    df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
+    df['within_24h_dates'] = df['report_delay_hours'] <= 24
+    
+    # Also check notification_time_frame if available for cross-validation
+    if 'notification_time_frame' in df.columns:
+        df['within_24h_timeframe'] = df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
+        # Use date-based calculation as primary, timeframe as backup for missing dates
+        df['within_24h'] = df['within_24h_dates'].fillna(df['within_24h_timeframe'])
     else:
-        df = df.copy()
-        # Use notification_time_frame for compliance
-        df['within_24h'] = df['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
+        df['within_24h'] = df['within_24h_dates']
     
     # Calculate compliance by carer with additional metrics
     compliance_data = df.groupby('carer_id').agg(
@@ -1252,7 +1257,6 @@ def plot_24h_compliance_rate_by_carer(df):
             action_table['Compliance (%)'] = action_table['Compliance (%)'].round(1)
             
             st.dataframe(action_table, use_container_width=True, hide_index=True)
-    
 def plot_investigation_pipeline(df):
     st.markdown("---")
     st.subheader("Enhanced Investigation Pipeline")
