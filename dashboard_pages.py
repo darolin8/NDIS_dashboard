@@ -482,117 +482,217 @@ def add_age_and_age_range_columns(df):
     return df
 
 # NOTE: renamed to avoid clashing with ml_helpers.plot_carer_performance_scatter
-def plot_carer_performance_scatter_local(df):
+def plot_reporting_delay_by_carer(df):
     need = {'carer_id', 'notification_date', 'incident_date'}
     if df.empty or not need.issubset(df.columns):
-        st.warning(f"Missing columns for carer performance analysis: {need}")
+        st.warning("No data available for carer reporting delay analysis")
         return
-
-    data = df.copy()
-    data['incident_date'] = pd.to_datetime(data['incident_date'], errors='coerce')
-    data['notification_date'] = pd.to_datetime(data['notification_date'], errors='coerce')
-    data = data.dropna(subset=['incident_date', 'notification_date', 'carer_id'])
-    data['delay_days'] = (data['notification_date'] - data['incident_date']).dt.days
-    data['carer_id'] = data['carer_id'].astype(str)
-
-    if data.empty:
-        st.info("No valid rows after parsing dates.")
-        return
-
-    # ---- Filters (with 'All' options) ----
-    with st.expander("Filters & Display Options", expanded=True):
-        # Dates
-        min_d = data['incident_date'].min().date()
-        max_d = data['incident_date'].max().date()
-        use_all_dates = st.checkbox("Use all dates", value=True)
-        if not use_all_dates:
-            start_d, end_d = st.date_input("Incident date range", (min_d, max_d))
-            start_d, end_d = pd.to_datetime(start_d), pd.to_datetime(end_d)
-            data = data[(data['incident_date'] >= start_d) & (data['incident_date'] <= end_d)]
-
-        # Carers
-        carer_counts = data['carer_id'].value_counts()
-        carer_options = ["All"] + list(carer_counts.index)
-        selected_carers = st.multiselect(
-            "Carer(s) to include",
-            options=carer_options,
-            default=["All"],
-            help="Choose 'All' to include every carer"
-        )
-        if "All" not in selected_carers and selected_carers:
-            data = data[data['carer_id'].isin(selected_carers)]
-
-        # Recompute for slider bounds
-        carer_counts = data['carer_id'].value_counts()
-        max_inc = int(max(1, (carer_counts.max() if not carer_counts.empty else 1)))
-        min_inc = st.slider("Minimum incidents per carer", 1, max_inc, 1)
-
-        size_max = st.slider("Bubble max size", 20, 100, 60)
-
-    if data.empty:
-        st.info("No rows after filters.")
-        return
-
-    # ---- Aggregate ----
-    perf = (
-        data.groupby('carer_id', as_index=False)
-            .agg(
-                avg_delay=('delay_days', 'mean'),
-                total_incidents=('incident_date', 'count')
+        
+    df = df.copy()
+    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+    df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
+    df['report_delay'] = (df['notification_date'] - df['incident_date']).dt.days
+    
+    # Calculate performance metrics by carer
+    carer_performance = df.groupby('carer_id').agg(
+        avg_delay=('report_delay', 'mean'),
+        incident_count=('report_delay', 'count'),
+        median_delay=('report_delay', 'median'),
+        max_delay=('report_delay', 'max')
+    ).reset_index()
+    
+    # Performance band classification
+    def get_performance_band(avg_delay):
+        if avg_delay <= 1:
+            return "Excellent (<1 day)", "#2E8B57"  # Green
+        elif avg_delay <= 2:
+            return "Good (1-2 days)", "#32CD32"   # Lime Green
+        elif avg_delay <= 3:
+            return "Needs Attention (2-3 days)", "#FFD700"  # Gold
+        else:
+            return "Poor (>3 days)", "#DC143C"   # Red
+    
+    carer_performance['band'], carer_performance['color'] = zip(
+        *carer_performance['avg_delay'].apply(get_performance_band)
+    )
+    
+    # Calculate trend (simplified - could be enhanced with time series analysis)
+    # For now, compare first half vs second half of incidents
+    def calculate_trend(carer_id):
+        carer_data = df[df['carer_id'] == carer_id].sort_values('incident_date')
+        if len(carer_data) < 6:  # Need minimum incidents for trend
+            return 0, "→"
+        
+        mid_point = len(carer_data) // 2
+        first_half_avg = carer_data.iloc[:mid_point]['report_delay'].mean()
+        second_half_avg = carer_data.iloc[mid_point:]['report_delay'].mean()
+        
+        improvement = first_half_avg - second_half_avg  # Positive = improving
+        
+        if improvement > 0.5:
+            return improvement, "↗️"  # Improving
+        elif improvement < -0.5:
+            return abs(improvement), "↘️"  # Declining
+        else:
+            return 0, "→"  # Stable
+    
+    # Apply trend calculation
+    trend_data = carer_performance['carer_id'].apply(calculate_trend)
+    carer_performance['trend_value'], carer_performance['trend_arrow'] = zip(*trend_data)
+    
+    # Filter controls
+    with st.expander("Performance Tracker Settings", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            min_incidents = st.slider(
+                "Minimum incidents:",
+                min_value=3, max_value=20, value=4, step=1,
+                help="Focus on carers with sufficient incident history"
             )
-    )
-    perf = perf[perf['total_incidents'] >= min_inc]
-    if perf.empty:
-        st.info("No carers meet the selected filters/minimum incident count.")
+        
+        with col2:
+            focus_area = st.selectbox(
+                "Focus on:",
+                ["All Performers", "Needs Attention (>1 day)", "Problem Areas (>2 days)", "Poor Performers (>3 days)"],
+                index=0,
+                help="Filter by performance level"
+            )
+        
+        with col3:
+            max_display = st.slider(
+                "Max carers shown:",
+                min_value=15, max_value=50, value=40, step=5
+            )
+    
+    # Apply filters
+    filtered_data = carer_performance[carer_performance['incident_count'] >= min_incidents].copy()
+    
+    if focus_area == "Needs Attention (>1 day)":
+        filtered_data = filtered_data[filtered_data['avg_delay'] > 1]
+    elif focus_area == "Problem Areas (>2 days)":
+        filtered_data = filtered_data[filtered_data['avg_delay'] > 2]
+    elif focus_area == "Poor Performers (>3 days)":
+        filtered_data = filtered_data[filtered_data['avg_delay'] > 3]
+    
+    if filtered_data.empty:
+        st.success("No carers found in the selected focus area - indicating good performance!")
         return
-
-    # ---- Plot (linear axes, no scale toggles) ----
-    fig = px.scatter(
-        perf,
-        x='avg_delay',
-        y='total_incidents',
-        color='carer_id',
-        size='total_incidents',
-        size_max=size_max,
-        labels={
-            'avg_delay': 'Average Notification Delay (days)',
-            'total_incidents': 'Total Incidents',
-            'carer_id': 'Carer'
+    
+    # Sort by worst performers first
+    filtered_data = filtered_data.sort_values('avg_delay', ascending=False).head(max_display)
+    
+    # Create the enhanced bar chart
+    fig = px.bar(
+        filtered_data,
+        x='carer_id',
+        y='avg_delay',
+        color='band',
+        color_discrete_map={
+            "Excellent (<1 day)": "#2E8B57",
+            "Good (1-2 days)": "#32CD32", 
+            "Needs Attention (2-3 days)": "#FFD700",
+            "Poor (>3 days)": "#DC143C"
         },
-        title='Carer Performance Analysis',
-        opacity=0.8
+        title=f"Individual Performance Tracker - Worst Performers First ({len(filtered_data)} carers)",
+        labels={
+            'avg_delay': 'Average Reporting Delay (Days)',
+            'carer_id': 'Carer ID',
+            'band': 'Performance Band'
+        },
+        hover_data={
+            'incident_count': True,
+            'median_delay': ':.1f',
+            'max_delay': True
+        }
     )
-
-    fig.update_traces(
-        marker=dict(line=dict(width=1.5, color='rgba(0,0,0,0.25)')),
-        hovertemplate="Carer: %{marker.color}<br>Avg delay: %{x:.2f} days<br>Total incidents: %{y}<extra></extra>"
-    )
-
-    fig.update_xaxes(
-        showgrid=True, gridwidth=1, gridcolor='lightblue',
-        zeroline=True, zerolinecolor='lightblue', rangemode='tozero',
-        rangeslider=dict(visible=True)
-    )
-    fig.update_yaxes(
-        showgrid=True, gridwidth=1, gridcolor='lightblue',
-        zeroline=True, zerolinecolor='lightblue', rangemode='tozero'
-    )
-
+    
+    # Add target line at 1 day
+    fig.add_hline(y=1, line_dash="solid", line_color="green", line_width=2,
+                  annotation_text="1-Day Target", annotation_position="right")
+    
+    # Add performance band reference lines
+    fig.add_hline(y=2, line_dash="dash", line_color="orange", opacity=0.7,
+                  annotation_text="2-Day Threshold", annotation_position="right")
+    fig.add_hline(y=3, line_dash="dash", line_color="red", opacity=0.7,
+                  annotation_text="3-Day Alert", annotation_position="right")
+    
+    # Customize layout
     fig.update_layout(
-        legend_title_text='Carer',
-        plot_bgcolor='white',
-        hovermode='closest',
-        dragmode='zoom',
-        margin=dict(t=60, r=20, l=60, b=60),
-        uirevision="keep"
+        height=500,
+        xaxis_tickangle=45,
+        yaxis=dict(title="Average Delay (Days)", rangemode='tozero'),
+        xaxis=dict(title="Carer ID"),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
     )
-
-    config = {
-        "displaylogo": False,
-        "scrollZoom": True,
-        "modeBarButtonsToAdd": ["lasso2d", "select2d", "resetScale2d"]
-    }
-    st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
+    
+    # Enhanced hover with trend information
+    fig.update_traces(
+        hovertemplate="<b>%{x}</b><br>" +
+                      "Avg Delay: %{y:.1f} days<br>" +
+                      "Incidents: %{customdata[0]}<br>" +
+                      "Median Delay: %{customdata[1]:.1f} days<br>" +
+                      "Max Delay: %{customdata[2]} days<br>" +
+                      "<extra></extra>"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, key="performance_tracker")
+    
+    # Performance summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    excellent = len(filtered_data[filtered_data['avg_delay'] <= 1])
+    needs_attention = len(filtered_data[filtered_data['avg_delay'] > 2])
+    poor_performers = len(filtered_data[filtered_data['avg_delay'] > 3])
+    avg_delay_overall = filtered_data['avg_delay'].mean()
+    
+    with col1:
+        st.metric("Excellent (≤1 day)", excellent, help="Meeting target standard")
+    with col2:
+        st.metric("Needs Attention (>2 days)", needs_attention, help="Above acceptable threshold")
+    with col3:
+        st.metric("Poor (>3 days)", poor_performers, help="Requires immediate intervention")
+    with col4:
+        st.metric("Average Delay", f"{avg_delay_overall:.1f} days", help="Across displayed carers")
+    
+    # Coaching action table
+    coaching_needed = filtered_data[filtered_data['avg_delay'] > 2].copy()
+    if not coaching_needed.empty:
+        st.subheader("Coaching Action Plan")
+        
+        # Add coaching recommendations
+        def recommend_action(row):
+            if row['avg_delay'] > 3 and row['max_delay'] > 7:
+                return "Immediate Review - Escalation Protocols"
+            elif row['avg_delay'] > 3:
+                return "Intensive Coaching - Daily Reporting"
+            elif row['trend_arrow'] == "↘️":
+                return "Performance Declining - Check Workload"
+            else:
+                return "Standard Coaching - Process Reminder"
+        
+        coaching_needed['recommended_action'] = coaching_needed.apply(recommend_action, axis=1)
+        coaching_needed['trend_display'] = (
+            coaching_needed['trend_arrow'] + " " + 
+            coaching_needed['trend_value'].round(1).astype(str) + " days"
+        )
+        
+        action_table = coaching_needed[[
+            'carer_id', 'avg_delay', 'incident_count', 'trend_display', 'recommended_action'
+        ]].copy()
+        
+        action_table.columns = [
+            'Carer ID', 'Avg Delay (Days)', 'Incidents', 'Trend', 'Recommended Action'
+        ]
+        
+        action_table['Avg Delay (Days)'] = action_table['Avg Delay (Days)'].round(1)
+        
+        st.dataframe(
+            action_table.sort_values('Avg Delay (Days)', ascending=False),
+            use_container_width=True,
+            hide_index=True
+        )
 
 # ----------------------------
 # Investigation rules
