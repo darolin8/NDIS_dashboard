@@ -482,7 +482,7 @@ def add_age_and_age_range_columns(df):
     return df
 
 # NOTE: renamed to avoid clashing with ml_helpers.plot_carer_performance_scatter
-def plot_reporting_delay_by_carer(df):
+def plot_carer_performance_scatter(df):
     need = {'carer_id', 'notification_date', 'incident_date'}
     if df.empty or not need.issubset(df.columns):
         st.warning("No data available for carer reporting delay analysis")
