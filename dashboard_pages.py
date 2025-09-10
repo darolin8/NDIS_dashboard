@@ -1610,7 +1610,6 @@ def plot_24h_compliance_rate_by_carer(df):
             st.dataframe(action_table, use_container_width=True, hide_index=True)
 def plot_investigation_pipeline(df):
     st.markdown("---")
-    st.subheader("Enhanced Investigation Pipeline")
 
     group_by = st.sidebar.selectbox(
         "Group pipeline by:",
