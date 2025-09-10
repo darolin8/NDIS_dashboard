@@ -1114,7 +1114,7 @@ def plot_reporting_delay_by_carer(df):
         with col1:
             min_incidents = st.slider(
                 "Minimum incidents:",
-                min_value=3, max_value=20, value=5, step=1,
+                min_value=3, max_value=20, value=4, step=1,
                 help="Focus on carers with sufficient incident history"
             )
         
@@ -1122,13 +1122,14 @@ def plot_reporting_delay_by_carer(df):
             focus_area = st.selectbox(
                 "Focus on:",
                 ["All Performers", "Needs Attention (>1 day)", "Problem Areas (>2 days)", "Poor Performers (>3 days)"],
+                index=0,
                 help="Filter by performance level"
             )
         
         with col3:
             max_display = st.slider(
                 "Max carers shown:",
-                min_value=15, max_value=50, value=30, step=5
+                min_value=15, max_value=50, value=40, step=5
             )
     
     # Apply filters
