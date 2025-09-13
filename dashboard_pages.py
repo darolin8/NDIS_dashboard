@@ -1378,34 +1378,34 @@ def plot_reporting_delay_by_carer(df):
     with col4:
         st.metric("Average Delay", f"{avg_delay_overall:.1f} days", help="Across displayed carers")
     
-    # Coaching action table
-    coaching_needed = filtered_data[filtered_data['avg_delay'] > 2].copy()
-    if not coaching_needed.empty:
-        st.subheader("Coaching Action Plan")
+    # Compliance action table
+    breach_carers = filtered_data[filtered_data['avg_delay'] > 1.0].copy()
+    if not breach_carers.empty:
+        st.subheader("Compliance Breach Action Plan")
         
-        # Add coaching recommendations
+        # Add compliance action recommendations
         def recommend_action(row):
-            if row['avg_delay'] > 3 and row['max_delay'] > 7:
-                return "Immediate Review - Escalation Protocols"
-            elif row['avg_delay'] > 3:
-                return "Intensive Coaching - Daily Reporting"
+            if row['avg_delay'] > 2.0 and row['max_delay'] > 5:
+                return "Immediate Escalation - Formal Review"
+            elif row['avg_delay'] > 2.0:
+                return "Major Breach - Compliance Training Required"
             elif row['trend_arrow'] == "↘️":
-                return "Performance Declining - Check Workload"
+                return "Declining Performance - Monitor Daily"
             else:
-                return "Standard Coaching - Process Reminder"
+                return "Minor Breach - Process Reminder & Check-in"
         
-        coaching_needed['recommended_action'] = coaching_needed.apply(recommend_action, axis=1)
-        coaching_needed['trend_display'] = (
-            coaching_needed['trend_arrow'] + " " + 
-            coaching_needed['trend_value'].round(1).astype(str) + " days"
+        breach_carers['recommended_action'] = breach_carers.apply(recommend_action, axis=1)
+        breach_carers['trend_display'] = (
+            breach_carers['trend_arrow'] + " " + 
+            breach_carers['trend_value'].round(1).astype(str) + " days"
         )
         
-        action_table = coaching_needed[[
+        action_table = breach_carers[[
             'carer_id', 'avg_delay', 'incident_count', 'trend_display', 'recommended_action'
         ]].copy()
         
         action_table.columns = [
-            'Carer ID', 'Avg Delay (Days)', 'Incidents', 'Trend', 'Recommended Action'
+            'Carer ID', 'Avg Delay (Days)', 'Incidents', 'Trend', 'Compliance Action Required'
         ]
         
         action_table['Avg Delay (Days)'] = action_table['Avg Delay (Days)'].round(1)
@@ -1415,7 +1415,6 @@ def plot_reporting_delay_by_carer(df):
             use_container_width=True,
             hide_index=True
         )
-
 def plot_24h_compliance_rate_by_carer(df):
     need_dates = {'carer_id', 'notification_date', 'incident_date'}
     if df.empty or not need_dates.issubset(df.columns):
