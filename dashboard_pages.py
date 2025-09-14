@@ -382,6 +382,22 @@ def plot_monthly_incidents_by_severity(df):
                       xaxis_title="Month", yaxis_title="Number of Incidents")
     st.plotly_chart(fig, use_container_width=True, key="monthly_incidents_severity")
 
+def plot_incident_types_bar(df):
+    if df.empty or 'incident_type' not in df.columns:
+        st.warning("No data available for incident types")
+        return
+    incident_counts = df['incident_type'].value_counts().head(10)
+    fig = px.bar(
+        x=incident_counts.values,
+        y=incident_counts.index,
+        orientation='h',
+        labels={'x': 'Number of Incidents', 'y': 'Incident Type'},
+        color=incident_counts.values,
+        color_continuous_scale='Viridis',
+        height=400
+    )
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, key="incident_types_bar")
 
 def plot_location_analysis(df):
     if df.empty or 'location' not in df.columns:
@@ -859,9 +875,6 @@ def display_executive_summary_section(df):
     st.markdown('<div class="section-title">Severity Distribution</div>', unsafe_allow_html=True)
     plot_severity_distribution(df)
 
-    st.markdown('<div class="section-title">Top 10 Incident Types</div>', unsafe_allow_html=True)
-    plot_incident_types_bar(df)
-
     st.markdown('<div class="section-title">Location Analysis</div>', unsafe_allow_html=True)
     plot_location_analysis(df)
 
@@ -957,10 +970,11 @@ def display_operational_performance_section(df):
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        plot_medical_outcomes(df)
+        plot_incident_types_bar(df)
     with col2:
-        plot_carer_performance_scatter(df)
-        plot_serious_injury_age_severity(df)
+        plot_medical_outcomes(df)
+    plot_carer_performance_scatter(df)
+    plot_serious_injury_age_severity(df)
 
 # ----------------------------
 # Compliance / Investigation
