@@ -957,10 +957,10 @@ def display_operational_performance_section(df):
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-    with col2:
         plot_medical_outcomes(df)
-    plot_carer_performance_scatter(df)
-    plot_serious_injury_age_severity(df)
+    with col2:
+        plot_carer_performance_scatter(df)
+        plot_serious_injury_age_severity(df)
 
 # ----------------------------
 # Compliance / Investigation
