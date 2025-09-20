@@ -46,20 +46,20 @@ if _missing:
     st.stop()
 
 # Bind names used below
-incident_volume_forecasting      = ML.incident_volume_forecasting
-seasonal_temporal_patterns       = ML.seasonal_temporal_patterns
-plot_time_with_causes            = ML.plot_time_with_causes
-plot_carer_performance_scatter_ML= ML.plot_carer_performance_scatter
-create_comprehensive_features    = ML.create_comprehensive_features
-correlation_analysis             = ML.correlation_analysis
-clustering_analysis              = ML.clustering_analysis
-predictive_models_comparison     = ML.predictive_models_comparison
-profile_incident_type_risk       = ML.incident_type_risk_profiling
-create_predictive_risk_scoring   = ML.create_predictive_risk_scoring
+incident_volume_forecasting        = ML.incident_volume_forecasting
+seasonal_temporal_patterns         = ML.seasonal_temporal_patterns
+plot_time_with_causes              = ML.plot_time_with_causes
+plot_carer_performance_scatter_ML  = ML.plot_carer_performance_scatter
+create_comprehensive_features      = ML.create_comprehensive_features
+correlation_analysis               = ML.correlation_analysis
+clustering_analysis                = ML.clustering_analysis
+predictive_models_comparison       = ML.predictive_models_comparison
+profile_incident_type_risk         = ML.incident_type_risk_profiling
+create_predictive_risk_scoring     = ML.create_predictive_risk_scoring
 enhanced_confusion_matrix_analysis = ML.enhanced_confusion_matrix_analysis
-incident_similarity_analysis     = ML.incident_similarity_analysis
-ensure_incident_datetime         = ML.ensure_incident_datetime
-plot_3d_clusters                 = ML.plot_3d_clusters
+incident_similarity_analysis       = ML.incident_similarity_analysis
+ensure_incident_datetime           = ML.ensure_incident_datetime
+plot_3d_clusters                   = ML.plot_3d_clusters
 # ---- END: robust imports ----
 
 # ----------------------------
@@ -350,7 +350,6 @@ def display_executive_summary_section(df):
                      padding: 1.6rem 1.2rem 1.2rem 1.2rem; min-width: 170px; max-width: 220px; text-align: center; flex: 1;}
     .dashboard-card-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.6rem; color: #222; }
     .dashboard-card-value { font-size: 2.1rem; font-weight: 700; color: #1769aa; margin-bottom: 0.3rem; }
-    .dashboard-card-desc  { font-size: 0.97rem; color: #444; margin-bottom: 0.1rem; }
     .section-title { font-size: 1.35rem; font-weight: 700; margin: 2rem 0 1rem 0; }
     .divider { margin: 2rem 0 2rem 0; border-top: 1px solid #eee; }
     </style>
@@ -408,73 +407,6 @@ def display_executive_summary_section(df):
 # ----------------------------
 # Operational Performance
 # ----------------------------
-def add_age_and_age_range_columns(df):
-    d = df.copy()
-    if 'dob' in d.columns:
-        d['dob'] = pd.to_datetime(d['dob'], errors='coerce')
-        today = pd.to_datetime('today').normalize()
-        d['participant_age'] = ((today - d['dob']).dt.days // 365).astype('float')
-        d['participant_age'] = d['participant_age'].where(d['dob'].notnull())
-        d['participant_age'] = d['participant_age'].astype('Int64')
-
-    def get_age_range(age):
-        if pd.isnull(age): return "Unknown"
-        if age < 18: return "Under 18"
-        elif age < 30: return "18-29"
-        elif age < 45: return "30-44"
-        elif age < 60: return "45-59"
-        else: return "60+"
-
-    if 'participant_age' in d.columns:
-        d['age_range'] = d['participant_age'].apply(get_age_range)
-    return d
-
-def plot_carer_performance_scatter(df):
-    need = {'carer_id', 'notification_date', 'incident_date'}
-    if df.empty or not need.issubset(df.columns):
-        st.warning(f"Missing columns for carer performance analysis: {need}")
-        return
-    data = df.copy()
-    data['incident_date'] = pd.to_datetime(data['incident_date'], errors='coerce')
-    data['notification_date'] = pd.to_datetime(data['notification_date'], errors='coerce')
-    data = data.dropna(subset=['incident_date', 'notification_date', 'carer_id'])
-    data['delay_days'] = (data['notification_date'] - data['incident_date']).dt.days
-    data['carer_id'] = data['carer_id'].astype(str)
-    if data.empty:
-        st.info("No valid rows after parsing dates.")
-        return
-    carer_counts = data['carer_id'].value_counts()
-    perf = data.groupby('carer_id').agg(
-        avg_delay=('delay_days', 'mean'),
-        total_incidents=('incident_date', 'count'),
-        high_severity_count=('severity', lambda x: (x.astype(str).str.lower() == 'high').sum() if 'severity' in data.columns else 0),
-        reportable_count=('reportable', lambda x: x.sum() if 'reportable' in data.columns else 0),
-        date_range=('incident_date', lambda x: (x.max() - x.min()).days),
-    ).reset_index()
-    perf['incidents_per_month'] = perf.apply(
-        lambda row: row['total_incidents'] / (max(row['date_range'], 1) / 30.44) if row['date_range'] > 0 else row['total_incidents'],
-        axis=1
-    )
-    perf['high_severity_count'] = perf['high_severity_count'].fillna(0).astype(int)
-    perf['reportable_count'] = perf['reportable_count'].fillna(0).astype(int)
-    def categorize_workload(ipm):
-        if ipm >= 15: return "High Volume (15+/month)"
-        elif ipm >= 8: return "Medium Volume (8-14/month)"
-        elif ipm >= 3: return "Low Volume (3-7/month)"
-        return "Very Low Volume (<3/month)"
-    perf['workload_category'] = perf['incidents_per_month'].apply(categorize_workload)
-    perf = perf[perf['total_incidents'] >= 3]
-    if perf.empty:
-        st.info("No carers meet the selected filters/minimum incident count.")
-        return
-    fig = px.scatter(perf, x='avg_delay', y='total_incidents', color='workload_category',
-                     size='incidents_per_month', size_max=60,
-                     labels={'avg_delay': 'Average Notification Delay (days)', 'total_incidents': 'Total Incidents'},
-                     title='Workload vs Performance Analysis - Capacity Planning View', opacity=0.85)
-    fig.add_vline(x=2, line_dash="dash", line_color="orange", opacity=0.7,
-                  annotation_text="2-Day Threshold", annotation_position="top")
-    st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter")
-
 def display_operational_performance_section(df):
     st.header(" Operational Performance & Risk Analysis Metrics")
     st.markdown("---")
@@ -512,14 +444,8 @@ def display_operational_performance_section(df):
     col1, col2 = st.columns(2)
     with col1: plot_incident_types_bar(df)
     with col2: plot_medical_outcomes(df)
-    plot_carer_performance_scatter(df)
-    # Optional distribution
-    if {'severity','participant_age'}.issubset(df.columns):
-        serious_df = df[df['severity'].astype(str).str.lower() == 'high']
-        if not serious_df.empty:
-            fig = px.histogram(serious_df, x='participant_age', color='severity',
-                               nbins=20, title="High Severity Incidents: Age Distribution")
-            st.plotly_chart(fig, use_container_width=True, key="serious_injury_age_severity")
+    plot_severity_distribution(df)
+    plot_incident_trends(df)
 
 # ----------------------------
 # Compliance / Investigation
@@ -611,17 +537,18 @@ def display_compliance_investigation_section(df):
     plot_investigation_pipeline(d, group_by=group_by)
 
 # ----------------------------
-# ML Insights (with correlation + cleaned labels)
+# ML Insights (with in-page training + correlation + cleaned labels)
 # ----------------------------
 def display_ml_insights_section(filtered_df):
     """
     ML-focused page:
-      1) Model evaluation
-      2) Predictive risk scoring sandbox
-      3) Similar-incident finder
-      4) Forecasting & seasonality
-      5) Clustering & risk profiles
-      6) Correlations  ← integrated here
+      1) (Restored) Train baseline models
+      2) Model evaluation
+      3) Predictive risk scoring sandbox
+      4) Similar-incident finder
+      5) Forecasting & seasonality
+      6) Clustering & risk profiles
+      7) Correlations
     """
     import numpy as np
     import pandas as pd
@@ -655,12 +582,39 @@ def display_ml_insights_section(filtered_df):
         features_df = safe_num.copy()
 
     # ---------------------------------
-    # 1) Model evaluation
+    # 🔧 Train baseline models (optional) — RESTORED HERE
+    # ---------------------------------
+    with st.expander("🔧 Train baseline models (optional)", expanded=False):
+        st.caption("Trains and stores models in session for the widgets below.")
+        col_a, col_b = st.columns([1,1])
+        with col_a:
+            split_strategy = st.selectbox("Split strategy", ["time", "random"], index=0,
+                                          help="Use 'time' for more realistic evaluation.")
+        with col_b:
+            time_col = st.text_input("Time column (for time split)", value="incident_datetime")
+
+        if st.button("Train / Refresh", use_container_width=True):
+            try:
+                kwargs = {}
+                if split_strategy == "time":
+                    kwargs.update({"split_strategy": "time", "time_col": time_col})
+                else:
+                    kwargs.update({"split_strategy": "random"})
+                st.session_state['trained_models'] = predictive_models_comparison(
+                    df_used,
+                    **kwargs
+                )
+                st.success("✅ Models trained and stored in session.")
+            except Exception as e:
+                st.warning(f"Training failed: {e}")
+
+    # ---------------------------------
+    # 📊 Model evaluation
     # ---------------------------------
     st.subheader("📊 Model Evaluation")
     models = st.session_state.get("trained_models", {})
     if not models:
-        st.info("No trained models found. Use the sidebar on the left to train baseline models.")
+        st.info("No trained models found. Use the expander above to train baseline models.")
     else:
         for model_name, md in models.items():
             try:
@@ -722,7 +676,7 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 2) Predictive Risk Scoring (Sandbox)
+    # 🎯 Predictive Risk Scoring (Sandbox)
     # ---------------------------------
     st.subheader("🎯 Predictive Risk Scoring (Sandbox)")
     if not models:
@@ -795,7 +749,7 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 3) Similar Incident Finder
+    # 🧭 Similar Incident Finder
     # ---------------------------------
     st.subheader("🧭 Similar Incident Finder")
     if len(df_used) >= 3:
@@ -820,7 +774,7 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 4) Forecasting & Seasonality
+    # 📈 Forecasting & Seasonality
     # ---------------------------------
     st.subheader("📈 Forecasting & Seasonality")
     df_used = ensure_incident_datetime(df_used)
@@ -847,7 +801,7 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 5) Clustering & Risk Profiles
+    # 🧩 Clustering & Risk Profiles
     # ---------------------------------
     st.subheader("🧩 Clustering & Risk Profiles")
     with st.expander("Clustering controls", expanded=True):
@@ -892,7 +846,7 @@ def display_ml_insights_section(filtered_df):
     st.divider()
 
     # ---------------------------------
-    # 6) Correlations (IN-PAGE)
+    # 🔗 Correlations (in-page with cleaned labels)
     # ---------------------------------
     st.subheader("🔗 Correlations")
     try:
