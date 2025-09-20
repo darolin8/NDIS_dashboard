@@ -317,11 +317,12 @@ def plot_medical_outcomes(df):
     st.plotly_chart(fig, use_container_width=True, key="medical_outcomes")
 
 def plot_reporter_type_metrics(df):
+    # Replaced "Reporter Types" with carer_id count (per request)
     col1, col2, col3 = st.columns(3)
     with col1:
-        if 'reported_by' in df.columns:
-            value = df['reported_by'].nunique()
-            plot_metric("Reporter Types", value, color_graph="#5B8FF9")
+        if 'carer_id' in df.columns:
+            value = df['carer_id'].nunique()
+            plot_metric("Distinct Carers", value, color_graph="#5B8FF9")
     with col2:
         if 'medical_attention_required' in df.columns:
             value = int(df['medical_attention_required'].sum())
@@ -541,7 +542,6 @@ def plot_carer_performance_scatter_view(df):
         return
 
     # ---- Enhanced Aggregation with Workload Metrics ----
-    # Calculate incidents per month for workload analysis
     perf = data.groupby('carer_id').agg(
         avg_delay=('delay_days', 'mean'),
         total_incidents=('incident_date', 'count'),
@@ -552,42 +552,33 @@ def plot_carer_performance_scatter_view(df):
         last_incident=('incident_date', 'max')
     ).reset_index()
 
-    # Calculate incidents per month
     perf['incidents_per_month'] = perf.apply(
         lambda row: row['total_incidents'] / (max(row['date_range'], 1) / 30.44) if row['date_range'] > 0 else row['total_incidents'],
         axis=1
     )
-    
-    # Clean data
     perf['high_severity_count'] = perf['high_severity_count'].fillna(0).astype(int)
     perf['reportable_count'] = perf['reportable_count'].fillna(0).astype(int)
-    
-    # Risk scoring for enhanced analysis
     perf['risk_score'] = (
-        perf['avg_delay'] * 0.4 +  # Delay impact
-        (perf['high_severity_count'] / perf['total_incidents'] * 10) * 0.3 +  # Severity ratio
-        (perf['reportable_count'] / perf['total_incidents'] * 10) * 0.3  # Reportable ratio
+        perf['avg_delay'] * 0.4 +
+        (perf['high_severity_count'] / perf['total_incidents'] * 10) * 0.3 +
+        (perf['reportable_count'] / perf['total_incidents'] * 10) * 0.3
     )
     
-    # Workload categories for enhanced coloring
     def categorize_workload(incidents_per_month):
         if incidents_per_month >= 15:
-            return "High Volume (15+/month)", "#DC143C"  # Crimson Red
+            return "High Volume (15+/month)", "#DC143C"
         elif incidents_per_month >= 8:
-            return "Medium Volume (8-14/month)", "#FF8C00"  # Dark Orange
+            return "Medium Volume (8-14/month)", "#FF8C00"
         elif incidents_per_month >= 3:
-            return "Low Volume (3-7/month)", "#4682B4"  # Steel Blue
+            return "Low Volume (3-7/month)", "#4682B4"
         else:
-            return "Very Low Volume (<3/month)", "#32CD32"  # Lime Green
+            return "Very Low Volume (<3/month)", "#32CD32"
     
     perf['workload_category'], perf['workload_color'] = zip(
         *perf['incidents_per_month'].apply(categorize_workload)
     )
 
-    # Apply filters
     perf = perf[perf['total_incidents'] >= min_inc]
-    
-    # Apply analysis focus
     if analysis_focus == "High Volume (8+/month)":
         perf = perf[perf['incidents_per_month'] >= 8]
     elif analysis_focus == "Problem Correlation (>2 day delay)":
@@ -599,7 +590,6 @@ def plot_carer_performance_scatter_view(df):
         st.info("No carers meet the selected filters/minimum incident count.")
         return
 
-    # ---- Enhanced Plot ----
     fig = px.scatter(
         perf,
         x='avg_delay',
@@ -608,10 +598,10 @@ def plot_carer_performance_scatter_view(df):
         size='risk_score',
         size_max=size_max,
         color_discrete_map={
-            "High Volume (15+/month)": "#DC143C",      # Crimson Red
-            "Medium Volume (8-14/month)": "#FF8C00",   # Dark Orange
-            "Low Volume (3-7/month)": "#4682B4",       # Steel Blue
-            "Very Low Volume (<3/month)": "#32CD32"    # Lime Green
+            "High Volume (15+/month)": "#DC143C",
+            "Medium Volume (8-14/month)": "#FF8C00",
+            "Low Volume (3-7/month)": "#4682B4",
+            "Very Low Volume (<3/month)": "#32CD32"
         },
         labels={
             'avg_delay': 'Average Notification Delay (days)',
@@ -628,11 +618,9 @@ def plot_carer_performance_scatter_view(df):
         }
     )
 
-    # Add quadrant analysis lines
     fig.add_vline(x=2, line_dash="dash", line_color="orange", opacity=0.7,
                   annotation_text="2-Day Threshold", annotation_position="top")
     
-    # Add regression line if requested
     if show_regression and len(perf) > 3:
         z = np.polyfit(perf['avg_delay'], perf['total_incidents'], 1)
         p = np.poly1d(z)
@@ -640,9 +628,8 @@ def plot_carer_performance_scatter_view(df):
         fig.add_scatter(x=x_trend, y=p(x_trend), mode='lines', name='Trend Line',
                        line=dict(color='red', width=2, dash='dot'))
 
-    # Enhanced hover template
     fig.update_traces(
-        hovertemplate="<b>%{customdata[5]}</b><br>" +  # Carer ID
+        hovertemplate="<b>%{customdata[5]}</b><br>" +
                       "Avg delay: %{x:.2f} days<br>" +
                       "Total incidents: %{y}<br>" +
                       "Incidents/month: %{customdata[0]:.1f}<br>" +
@@ -674,13 +661,7 @@ def plot_carer_performance_scatter_view(df):
         uirevision="keep",
         height=500,
         showlegend=True,
-        legend=dict(
-            orientation="v", 
-            yanchor="middle", 
-            y=0.5, 
-            xanchor="left", 
-            x=1.02
-        )
+        legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
     )
 
     config = {
@@ -690,9 +671,7 @@ def plot_carer_performance_scatter_view(df):
     }
     st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
     
-    # ---- Enhanced Summary Metrics ----
     col1, col2, col3, col4 = st.columns(4)
-    
     high_volume_fast = len(perf[(perf['incidents_per_month'] >= 10) & (perf['avg_delay'] <= 2)])
     high_volume_slow = len(perf[(perf['incidents_per_month'] >= 10) & (perf['avg_delay'] > 2)])
     correlation = perf['avg_delay'].corr(perf['total_incidents']) if len(perf) > 1 else 0
@@ -707,11 +686,9 @@ def plot_carer_performance_scatter_view(df):
     with col4:
         st.metric("System Efficiency", f"{avg_efficiency:.1f}", help="Incidents per day of delay")
     
-    # ---- Capacity Planning Insights ----
     if analysis_focus == "All Workloads" and len(perf) > 5:
         st.subheader("Capacity Planning Insights")
         
-        # Identify optimal performers and overwhelmed carers
         optimal_performers = perf[
             (perf['incidents_per_month'] >= 8) & 
             (perf['avg_delay'] <= 1.5)
@@ -724,13 +701,11 @@ def plot_carer_performance_scatter_view(df):
         
         if not optimal_performers.empty or not overwhelmed_carers.empty:
             col1, col2 = st.columns(2)
-            
             with col1:
                 if not optimal_performers.empty:
                     st.markdown("**High Performers (Model Behavior)**")
                     optimal_performers.columns = ['Carer ID', 'Incidents/Month', 'Avg Delay', 'Total Incidents']
                     st.dataframe(optimal_performers, use_container_width=True, hide_index=True)
-            
             with col2:
                 if not overwhelmed_carers.empty:
                     st.markdown("**Capacity Issues (Need Support)**")
@@ -1091,7 +1066,6 @@ def plot_reporting_delay_by_carer(df):
     df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
     df['report_delay'] = (df['notification_date'] - df['incident_date']).dt.days
     
-    # Calculate performance metrics by carer
     carer_performance = df.groupby('carer_id').agg(
         avg_delay=('report_delay', 'mean'),
         incident_count=('report_delay', 'count'),
@@ -1099,33 +1073,28 @@ def plot_reporting_delay_by_carer(df):
         max_delay=('report_delay', 'max')
     ).reset_index()
     
-    # Performance band classification
     def get_performance_band(avg_delay):
         if avg_delay <= 1:
-            return "Excellent (<1 day)", "#2E8B57"  # Green
+            return "Excellent (<1 day)", "#2E8B57"
         elif avg_delay <= 2:
-            return "Good (1-2 days)", "#32CD32"   # Lime Green
+            return "Good (1-2 days)", "#32CD32"
         elif avg_delay <= 3:
-            return "Needs Attention (2-3 days)", "#FFD700"  # Gold
+            return "Needs Attention (2-3 days)", "#FFD700"
         else:
-            return "Poor (>3 days)", "#DC143C"   # Red
+            return "Poor (>3 days)", "#DC143C"
     
     carer_performance['band'], carer_performance['color'] = zip(
         *carer_performance['avg_delay'].apply(get_performance_band)
     )
     
-    # Trend calc
     def calculate_trend(carer_id):
         carer_data = df[df['carer_id'] == carer_id].sort_values('incident_date')
         if len(carer_data) < 6:
             return 0, "→"
-        
         mid_point = len(carer_data) // 2
         first_half_avg = carer_data.iloc[:mid_point]['report_delay'].mean()
         second_half_avg = carer_data.iloc[mid_point:]['report_delay'].mean()
-        
-        improvement = first_half_avg - second_half_avg  # Positive = improving
-        
+        improvement = first_half_avg - second_half_avg
         if improvement > 0.5:
             return improvement, "↗️"
         elif improvement < -0.5:
@@ -1136,33 +1105,20 @@ def plot_reporting_delay_by_carer(df):
     trend_data = carer_performance['carer_id'].apply(calculate_trend)
     carer_performance['trend_value'], carer_performance['trend_arrow'] = zip(*trend_data)
     
-    # Filters
     with st.expander("Performance Tracker Settings", expanded=True):
         col1, col2, col3 = st.columns(3)
-        
         with col1:
-            min_incidents = st.slider(
-                "Minimum incidents:",
-                min_value=3, max_value=20, value=4, step=1,
-                help="Focus on carers with sufficient incident history"
-            )
-        
+            min_incidents = st.slider("Minimum incidents:", 3, 20, 4, 1)
         with col2:
             focus_area = st.selectbox(
                 "Focus on:",
                 ["All Performers", "Needs Attention (>1 day)", "Problem Areas (>2 days)", "Poor Performers (>3 days)"],
-                index=0,
-                help="Filter by performance level"
+                index=0
             )
-        
         with col3:
-            max_display = st.slider(
-                "Max carers shown:",
-                min_value=15, max_value=50, value=40, step=5
-            )
+            max_display = st.slider("Max carers shown:", 15, 50, 40, 5)
     
     filtered_data = carer_performance[carer_performance['incident_count'] >= min_incidents].copy()
-    
     if focus_area == "Needs Attention (>1 day)":
         filtered_data = filtered_data[filtered_data['avg_delay'] > 1]
     elif focus_area == "Problem Areas (>2 days)":
@@ -1188,33 +1144,17 @@ def plot_reporting_delay_by_carer(df):
             "Poor (>3 days)": "#DC143C"
         },
         title=f"Individual Performance Tracker - Worst Performers First ({len(filtered_data)} carers)",
-        labels={
-            'avg_delay': 'Average Reporting Delay (Days)',
-            'carer_id': 'Carer ID',
-            'band': 'Performance Band'
-        },
-        hover_data={
-            'incident_count': True,
-            'median_delay': ':.1f',
-            'max_delay': True
-        }
+        labels={'avg_delay': 'Average Reporting Delay (Days)','carer_id': 'Carer ID','band': 'Performance Band'},
+        hover_data={'incident_count': True,'median_delay': ':.1f','max_delay': True}
     )
     
-    fig.add_hline(y=1, line_dash="solid", line_color="green", line_width=2,
-                  annotation_text="1-Day Target", annotation_position="right")
-    fig.add_hline(y=2, line_dash="dash", line_color="orange", opacity=0.7,
-                  annotation_text="2-Day Threshold", annotation_position="right")
-    fig.add_hline(y=3, line_dash="dash", line_color="red", opacity=0.7,
-                  annotation_text="3-Day Alert", annotation_position="right")
+    fig.add_hline(y=1, line_dash="solid", line_color="green", line_width=2, annotation_text="1-Day Target", annotation_position="right")
+    fig.add_hline(y=2, line_dash="dash", line_color="orange", opacity=0.7, annotation_text="2-Day Threshold", annotation_position="right")
+    fig.add_hline(y=3, line_dash="dash", line_color="red", opacity=0.7, annotation_text="3-Day Alert", annotation_position="right")
     
-    fig.update_layout(
-        height=500,
-        xaxis_tickangle=45,
-        yaxis=dict(title="Average Delay (Days)", rangemode='tozero'),
-        xaxis=dict(title="Carer ID"),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
-    )
+    fig.update_layout(height=500, xaxis_tickangle=45, yaxis=dict(title="Average Delay (Days)", rangemode='tozero'),
+                      xaxis=dict(title="Carer ID"), showlegend=True,
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     
     fig.update_traces(
         hovertemplate="<b>%{x}</b><br>" +
@@ -1228,56 +1168,31 @@ def plot_reporting_delay_by_carer(df):
     st.plotly_chart(fig, use_container_width=True, key="performance_tracker")
     
     col1, col2, col3, col4 = st.columns(4)
-    
     excellent = len(filtered_data[filtered_data['avg_delay'] <= 1])
     needs_attention = len(filtered_data[filtered_data['avg_delay'] > 2])
     poor_performers = len(filtered_data[filtered_data['avg_delay'] > 3])
     avg_delay_overall = filtered_data['avg_delay'].mean()
-    
-    with col1:
-        st.metric("Excellent (≤1 day)", excellent, help="Meeting target standard")
-    with col2:
-        st.metric("Needs Attention (>2 days)", needs_attention, help="Above acceptable threshold")
-    with col3:
-        st.metric("Poor (>3 days)", poor_performers, help="Requires immediate intervention")
-    with col4:
-        st.metric("Average Delay", f"{avg_delay_overall:.1f} days", help="Across displayed carers")
+    with col1: st.metric("Excellent (≤1 day)", excellent)
+    with col2: st.metric("Needs Attention (>2 days)", needs_attention)
+    with col3: st.metric("Poor (>3 days)", poor_performers)
+    with col4: st.metric("Average Delay", f"{avg_delay_overall:.1f} days")
     
     breach_carers = filtered_data[filtered_data['avg_delay'] > 1.0].copy()
     if not breach_carers.empty:
         st.subheader("Compliance Breach Action Plan")
-        
         def recommend_action(row):
             if row['avg_delay'] > 2.0 and row['max_delay'] > 5:
                 return "Immediate Escalation - Formal Review"
             elif row['avg_delay'] > 2.0:
                 return "Major Breach - Compliance Training Required"
-            elif row['trend_arrow'] == "↘️":
-                return "Declining Performance - Monitor Daily"
             else:
                 return "Minor Breach - Process Reminder & Check-in"
-        
         breach_carers['recommended_action'] = breach_carers.apply(recommend_action, axis=1)
-        breach_carers['trend_display'] = (
-            breach_carers['trend_arrow'] + " " + 
-            breach_carers['trend_value'].round(1).astype(str) + " days"
-        )
-        
-        action_table = breach_carers[[
-            'carer_id', 'avg_delay', 'incident_count', 'trend_display', 'recommended_action'
-        ]].copy()
-        
-        action_table.columns = [
-            'Carer ID', 'Avg Delay (Days)', 'Incidents', 'Trend', 'Compliance Action Required'
-        ]
-        
+        breach_carers['trend_display'] = breach_carers['trend_arrow'] + " " + breach_carers['trend_value'].round(1).astype(str) + " days"
+        action_table = breach_carers[['carer_id','avg_delay','incident_count','trend_display','recommended_action']].copy()
+        action_table.columns = ['Carer ID','Avg Delay (Days)','Incidents','Trend','Compliance Action Required']
         action_table['Avg Delay (Days)'] = action_table['Avg Delay (Days)'].round(1)
-        
-        st.dataframe(
-            action_table.sort_values('Avg Delay (Days)', ascending=False),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(action_table.sort_values('Avg Delay (Days)', ascending=False), use_container_width=True, hide_index=True)
 
 def plot_24h_compliance_rate_by_carer(df):
     need_dates = {'carer_id', 'notification_date', 'incident_date'}
@@ -1288,7 +1203,6 @@ def plot_24h_compliance_rate_by_carer(df):
     df = df.copy()
     df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
     df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
-    
     df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
     df['within_24h_dates'] = df['report_delay_hours'] <= 24
     
@@ -1323,30 +1237,17 @@ def plot_24h_compliance_rate_by_carer(df):
     
     with st.expander("Analysis Settings", expanded=True):
         col1, col2, col3 = st.columns(3)
-        
         with col1:
-            min_incidents = st.slider(
-                "Minimum incidents:",
-                min_value=1, max_value=15, value=3, step=1,
-                help="Focus on carers with sufficient data"
-            )
-        
+            min_incidents = st.slider("Minimum incidents:", 1, 15, 3, 1)
         with col2:
             show_mode = st.selectbox(
                 "Display:",
-                ["Problem Areas Only (<95%)", "Needs Attention (<85%)", "Critical Issues (<70%)", "All Carers"],
-                help="Filter by performance level"
+                ["Problem Areas Only (<95%)", "Needs Attention (<85%)", "Critical Issues (<70%)", "All Carers"]
             )
-        
         with col3:
-            max_display = st.slider(
-                "Max carers to show:",
-                min_value=10, max_value=50, value=25, step=5,
-                help="Limit for chart readability"
-            )
+            max_display = st.slider("Max carers to show:", 10, 50, 25, 5)
     
     filtered_data = compliance_data[compliance_data['incident_count'] >= min_incidents].copy()
-    
     if show_mode == "Problem Areas Only (<95%)":
         filtered_data = filtered_data[filtered_data['compliance_rate'] < 95]
     elif show_mode == "Needs Attention (<85%)":
@@ -1372,33 +1273,17 @@ def plot_24h_compliance_rate_by_carer(df):
             "Immediate Attention (<70%)": "#DC143C"
         },
         title=f"Carer Compliance Analysis - Worst Performers First ({len(filtered_data)} carers shown)",
-        labels={
-            'compliance_rate': 'Compliance Rate (%)',
-            'carer_id': 'Carer ID',
-            'category': 'Performance Level'
-        },
-        hover_data={
-            'incident_count': True,
-            'high_severity_count': True,
-            'reportable_count': True
-        }
+        labels={'compliance_rate': 'Compliance Rate (%)','carer_id': 'Carer ID','category': 'Performance Level'},
+        hover_data={'incident_count': True,'high_severity_count': True,'reportable_count': True}
     )
     
-    fig.add_hline(y=95, line_dash="solid", line_color="green", opacity=0.7, 
-                  annotation_text="95% Target", annotation_position="right")
-    fig.add_hline(y=85, line_dash="dash", line_color="orange", opacity=0.7,
-                  annotation_text="85% Monitoring", annotation_position="right") 
-    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.7,
-                  annotation_text="70% Action Required", annotation_position="right")
+    fig.add_hline(y=95, line_dash="solid", line_color="green", opacity=0.7, annotation_text="95% Target", annotation_position="right")
+    fig.add_hline(y=85, line_dash="dash", line_color="orange", opacity=0.7, annotation_text="85% Monitoring", annotation_position="right") 
+    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.7, annotation_text="70% Action Required", annotation_position="right")
     
-    fig.update_layout(
-        height=500,
-        xaxis_tickangle=45,
-        yaxis=dict(range=[0, 100], title="Compliance Rate (%)"),
-        xaxis=dict(title="Carer ID"),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
-    )
+    fig.update_layout(height=500, xaxis_tickangle=45, yaxis=dict(range=[0, 100], title="Compliance Rate (%)"),
+                      xaxis=dict(title="Carer ID"), showlegend=True,
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     
     fig.update_traces(
         hovertemplate="<b>%{x}</b><br>" +
@@ -1412,26 +1297,19 @@ def plot_24h_compliance_rate_by_carer(df):
     st.plotly_chart(fig, use_container_width=True, key="compliance_carer_bar")
     
     col1, col2, col3, col4 = st.columns(4)
-    
     needs_support = len(filtered_data[filtered_data['compliance_rate'] < 85])
     critical = len(filtered_data[filtered_data['compliance_rate'] < 70])
     avg_compliance = filtered_data['compliance_rate'].mean()
     total_incidents = filtered_data['incident_count'].sum()
-    
-    with col1:
-        st.metric("Below 85%", needs_support, help="Carers needing support")
-    with col2:
-        st.metric("Below 70%", critical, help="Critical attention required")
-    with col3:
-        st.metric("Average Rate", f"{avg_compliance:.1f}%", help="Of displayed carers")
-    with col4:
-        st.metric("Total Incidents", total_incidents, help="From displayed carers")
+    with col1: st.metric("Below 85%", needs_support)
+    with col2: st.metric("Below 70%", critical)
+    with col3: st.metric("Average Rate", f"{avg_compliance:.1f}%")
+    with col4: st.metric("Total Incidents", total_incidents)
     
     if show_mode != "All Carers":
         worst_performers = filtered_data.head(10)
         if not worst_performers.empty:
             st.subheader("Priority Action Required")
-            
             def suggest_action(row):
                 if row['compliance_rate'] < 70:
                     return "Immediate Review & Training"
@@ -1441,26 +1319,22 @@ def plot_24h_compliance_rate_by_carer(df):
                     return "Workload & Process Review"
                 else:
                     return "Compliance Coaching"
-            
             worst_performers['action'] = worst_performers.apply(suggest_action, axis=1)
-            
-            action_table = worst_performers[[
-                'carer_id', 'compliance_rate', 'incident_count', 
-                'high_severity_count', 'reportable_count', 'action'
-            ]].copy()
-            
-            action_table.columns = [
-                'Carer ID', 'Compliance (%)', 'Total Incidents',
-                'High Severity', 'Reportable', 'Suggested Action'
-            ]
-            
+            action_table = worst_performers[['carer_id','compliance_rate','incident_count','high_severity_count','reportable_count','action']].copy()
+            action_table.columns = ['Carer ID','Compliance (%)','Total Incidents','High Severity','Reportable','Suggested Action']
             action_table['Compliance (%)'] = action_table['Compliance (%)'].round(1)
-            
             st.dataframe(action_table, use_container_width=True, hide_index=True)
 
 def plot_investigation_pipeline(df):
     st.markdown("---")
 
+    # Sidebar controls per request:
+    st.sidebar.subheader("Comprehensive Analysis and Reporting System — Filters")
+    # New: carer_id filter replacing "reporter type"
+    carer_vals = sorted(df['carer_id'].dropna().astype(str).unique()) if 'carer_id' in df.columns else []
+    selected_carers = st.sidebar.multiselect("carer_id", options=carer_vals, default=[], help="Filter pipeline to selected carers (optional)")
+
+    # Move 'Group pipeline by' under this section
     group_by = st.sidebar.selectbox(
         "Group pipeline by:",
         ["carer_id", "severity", "incident_type", "location"],
@@ -1468,7 +1342,9 @@ def plot_investigation_pipeline(df):
     )
 
     df2 = df.copy()
-    
+    if selected_carers:
+        df2 = df2[df2['carer_id'].astype(str).isin(selected_carers)]
+
     if "notification_time_frame" in df2.columns:
         df2['within_24h'] = df2['notification_time_frame'].str.contains('24 hour|within 24|immediate', case=False, na=False)
         df2['overdue_action'] = (~df2.get('action_complete', pd.Series(False)).astype(bool)) & (~df2['within_24h'])
@@ -1529,8 +1405,7 @@ def plot_investigation_pipeline(df):
         filtered = filtered[~filtered['within_24h']]
     elif stage_selected == "Required_Investigation":
         filtered = filtered[filtered['investigation_required']]
-    else:
-        filtered = filtered
+    # else All_Incidents -> no extra filter
 
     show_cols = [group_by, "incident_id", "incident_date", "notification_time_frame", "report_delay_hours"]
     show_cols = [col for col in show_cols if col in filtered.columns]
@@ -1546,12 +1421,10 @@ def plot_contributing_factors_by_month(df, top_k=25):
     d = df.copy()
     d['incident_date'] = pd.to_datetime(d['incident_date'], errors='coerce')
     d = d.dropna(subset=['incident_date'])
-
     d['factor_short'] = d['contributing_factors'].apply(shorten_factor)
 
     top_factors = d['factor_short'].value_counts().head(top_k).index
     d = d[d['factor_short'].isin(top_factors)]
-
     d['month_period'] = d['incident_date'].dt.to_period('M')
     d['Count'] = 1
 
@@ -1566,10 +1439,7 @@ def plot_contributing_factors_by_month(df, top_k=25):
     mask = (heatmap == 0)
 
     fig, ax = plt.subplots(figsize=(14, 8))
-    sns.heatmap(
-        heatmap, annot=True, fmt="d", cmap="Blues",
-        mask=mask, cbar_kws={'label': 'Count'}, ax=ax
-    )
+    sns.heatmap(heatmap, annot=True, fmt="d", cmap="Blues", mask=mask, cbar_kws={'label': 'Count'}, ax=ax)
     ax.set_xlabel("Month-Year")
     ax.set_ylabel("Incident Type")
     ax.set_xticklabels([p.strftime('%b %Y') for p in heatmap.columns], rotation=45, ha='right')
@@ -1581,10 +1451,8 @@ def display_compliance_investigation_section(df):
     st.header("Compliance & Investigation Metrics")
     st.markdown("---")
 
-    # Ensure investigation columns for downstream visuals
     df = apply_investigation_rules(df)
 
-    # Compute reporting delay in hours (if possible)
     if 'incident_date' in df.columns and 'notification_date' in df.columns:
         df = df.copy()
         df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
@@ -1599,7 +1467,6 @@ def display_compliance_investigation_section(df):
     reportable_incidents = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
     investigation_rate = (100 * df['investigation_required'].sum() / len(df)) if len(df) > 0 else 0.0
 
-    # Cards
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown(
@@ -1654,7 +1521,7 @@ def display_compliance_investigation_section(df):
 
 
 # ----------------------------
-# ML Insights (robust, minimal dependencies)
+# ML Insights (helpers)
 # ----------------------------
 def _safe_feats_for_clustering(df_feats: pd.DataFrame) -> pd.DataFrame:
     """Build a safe feature frame for clustering (drop outcomes/proxies)."""
@@ -1674,17 +1541,8 @@ def _safe_feats_for_clustering(df_feats: pd.DataFrame) -> pd.DataFrame:
             .fillna(0.0))
 
 def _render_correlations(safe_feats: pd.DataFrame):
-    """Correlation heatmap rendered within the ML Insights page."""
-    import numpy as np
-    import plotly.express as px
-
+    """Correlation heatmap rendered directly on the ML Insights page."""
     st.subheader("🔗 Correlations")
-
-    def clean_label(label):
-        for prefix in ('loc_', 'type_', 'is_'):
-            if isinstance(label, str) and label.startswith(prefix):
-                return label[len(prefix):]
-        return label
 
     num = (safe_feats.select_dtypes(include=[np.number])
                       .replace([np.inf, -np.inf], np.nan)
@@ -1696,6 +1554,13 @@ def _render_correlations(safe_feats: pd.DataFrame):
         return
 
     corr = num.corr()
+
+    def clean_label(label):
+        for prefix in ('loc_', 'type_', 'is_'):
+            if isinstance(label, str) and label.startswith(prefix):
+                return label[len(prefix):]
+        return label
+
     cleaned_columns = [clean_label(c) for c in corr.columns]
 
     fig = px.imshow(
@@ -1709,6 +1574,9 @@ def _render_correlations(safe_feats: pd.DataFrame):
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# ----------------------------
+# ML Insights (page)
+# ----------------------------
 def display_ml_insights_section(filtered_df):
     """
     ML-focused page:
@@ -1717,7 +1585,7 @@ def display_ml_insights_section(filtered_df):
       3) Similar-incident finder
       4) Forecasting & seasonality
       5) Clustering & risk profiles
-      6) Correlations (moved here; no module-level rendering)
+      6) Correlations (directly shown)
     """
     st.header("🤖 ML Insights")
 
@@ -1767,9 +1635,7 @@ def display_ml_insights_section(filtered_df):
             st.write(df_used['reportable_bin'].value_counts())
             if 'reportable' in df_used.columns:
                 try:
-                    corr = df_used['reportable_bin'].astype(float).corr(
-                        df_used['reportable'].astype(int)
-                    )
+                    corr = df_used['reportable_bin'].astype(float).corr(df_used['reportable'].astype(int))
                     st.write(f"**Correlation with 'reportable': {corr:.3f}**")
                     if corr > 0.95:
                         st.error("MAJOR LEAKAGE: reportable_bin is derived from reportable column!")
@@ -1795,6 +1661,7 @@ def display_ml_insights_section(filtered_df):
             except Exception as e:
                 st.warning(f"Could not render metrics for {model_name}: {e}")
 
+        # Feature importance (with LR message restored)
         st.markdown("#### 🔍 Feature Importance (if available)")
         try:
             best_name, best_blob = max(models.items(), key=lambda kv: kv[1].get("accuracy", 0))
@@ -1803,6 +1670,9 @@ def display_ml_insights_section(filtered_df):
                 mdl = best_model.named_steps["model"]
             else:
                 mdl = best_model
+
+            model_class = type(mdl).__name__
+
             if hasattr(mdl, "feature_importances_"):
                 importances = np.array(mdl.feature_importances_)
                 trained_feats = best_blob.get("feature_names", feature_names)
@@ -1817,6 +1687,25 @@ def display_ml_insights_section(filtered_df):
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.caption("No matching feature importances to show.")
+            elif hasattr(mdl, "coef_"):
+                # Explicit message requested
+                if model_class == "LogisticRegression":
+                    st.caption("LogisticRegression does not expose feature importances.")
+                # Show coefficient magnitudes as a helpful proxy
+                try:
+                    coefs = np.ravel(mdl.coef_)
+                    trained_feats = best_blob.get("feature_names", feature_names)
+                    order = np.argsort(np.abs(coefs))[::-1][:20]
+                    coef_df = pd.DataFrame({
+                        "feature": [trained_feats[i] for i in order if i < len(trained_feats)],
+                        "magnitude": [float(abs(coefs[i])) for i in order if i < len(coefs)],
+                    })
+                    if len(coef_df):
+                        fig = px.bar(coef_df, x="magnitude", y="feature", orientation="h",
+                                     title=f"Top Coefficient Magnitudes — {best_name}")
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    pass
             else:
                 st.caption(f"{best_name} does not expose feature importances.")
         except Exception as e:
@@ -1869,7 +1758,6 @@ def display_ml_insights_section(filtered_df):
             c_hist = st.slider("Carer prior incidents", 0, max_c_hist, min(5, max_c_hist))
 
         try:
-            # Simple proxy if available
             if "severity_numeric" in df_used.columns and "location" in df_used.columns:
                 loc_risk = float(df_used.loc[df_used["location"] == location, "severity_numeric"].mean())
                 if not np.isfinite(loc_risk):
@@ -1979,9 +1867,8 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-    # 6) Correlations (now correctly scoped & rendered)
-    with st.expander("🔗 Correlations", expanded=False):
-        _render_correlations(safe_feats)
+    # 6) Correlations — shown directly (no expander)
+    _render_correlations(safe_feats)
 
 
 # ---- Page registry expected by app.py ----
