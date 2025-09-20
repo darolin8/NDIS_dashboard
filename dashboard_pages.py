@@ -2137,8 +2137,6 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-   st.divider()
-
 # ---------------------------------
 # 6) Correlations
 # ---------------------------------
