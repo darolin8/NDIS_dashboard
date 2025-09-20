@@ -1,3 +1,4 @@
+
 # app.py
 # ---- BEGIN: robust import bootstrap (top of app.py) ----
 import os, sys
@@ -44,10 +45,6 @@ except Exception as e:
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
 
-# ✅ ML helper (baseline training)
-from ml_helpers import predictive_models_comparison
-
-
 # ----- CONFIG -----
 st.set_page_config(
     page_title="Incident Management Dashboard",
@@ -86,50 +83,6 @@ def load_data():
         df["incident_weekday"] = df["incident_date"].dt.day_name()
 
     return df
-
-
-# ----- OPTIONAL: ML trainer (sidebar) -----
-def sidebar_ml_controls(df_for_training: pd.DataFrame):
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🤖 ML — Baselines")
-
-    target_choice = st.sidebar.selectbox(
-        "Target",
-        ["Reportable (binary)", "High/Critical (binary)"],
-        help="Reportable uses df['reportable_bin']; High/Critical uses severity_numeric>=3",
-    )
-
-    test_size = st.sidebar.slider("Test size", 0.10, 0.40, 0.25, 0.05)
-    seed = st.sidebar.number_input("Random seed", 0, 9999, 42, step=1)
-
-    if st.sidebar.button("Train models"):
-        use_df = df_for_training.copy()
-
-        # Decide target
-        if target_choice.startswith("Reportable"):
-            if "reportable_bin" not in use_df.columns:
-                st.sidebar.error("Column 'reportable_bin' not found after preparation.")
-                return
-            target_col = "reportable_bin"
-        else:
-            if "severity_numeric" not in use_df.columns:
-                st.sidebar.error("Column 'severity_numeric' not found after preparation.")
-                return
-            use_df["high_crit"] = (use_df["severity_numeric"] >= 3).astype(int)
-            target_col = "high_crit"
-
-        try:
-            models = predictive_models_comparison(
-                use_df, target=target_col, test_size=float(test_size), random_state=int(seed)
-            )
-            st.session_state.trained_models = models
-
-            # Quick success toast
-            best_name, best_blob = max(models.items(), key=lambda kv: kv[1]["accuracy"])
-            st.sidebar.success(f"Best: {best_name} • acc {best_blob['accuracy']:.2%}")
-        except Exception as e:
-            st.sidebar.error(f"Training failed: {e}")
-
 
 # ----- MAIN DASHBOARD -----
 def main():
@@ -246,7 +199,7 @@ def main():
         if selected_incident_type != "All":
             filtered_df = filtered_df[filtered_df["incident_type"] == selected_incident_type]
 
-    # 👤 Carer ID (REPLACES Reporter Type)
+    # 👤 Carer ID (replaces Reporter Type)
     if "carer_id" in df.columns:
         carers = sorted(df["carer_id"].astype(str).dropna().unique())
         carers_with_all = ["All"] + list(carers)
@@ -267,7 +220,7 @@ def main():
         help="Controls grouping in the Enhanced Investigation Pipeline",
     )
 
-    # Page-specific controls (in sidebar)
+    # Page-specific controls
     st.sidebar.markdown("---")
     forecast_horizon = st.sidebar.slider("Forecast months", 3, 12, 6, 1, key="ml_forecast_months")
     top_n_causes = st.sidebar.slider("Top N causes (time chart)", 3, 10, 5, 1, key="ml_top_n_causes")
@@ -315,9 +268,6 @@ def main():
     except Exception:
         st.session_state.features_df_filtered = None
         st.session_state.feature_names_filtered = None
-
-    # === ML: trainer on current slice ===
-    sidebar_ml_controls(filtered_df)
 
     # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
