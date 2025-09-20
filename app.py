@@ -21,8 +21,6 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-
-
 # Next: import dashboard_pages and expose any real error
 try:
     from dashboard_pages import (
@@ -36,13 +34,11 @@ try:
 except Exception as e:
     st.error("Failed to import dashboard_pages. Details:")
     st.exception(e)
-    # Optional: probe where Python looked
     import importlib.util
     spec = importlib.util.find_spec("dashboard_pages")
     st.caption(f"dashboard_pages spec: {spec}")
     st.stop()
 # ---- END: robust import bootstrap ----
-
 
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
@@ -181,7 +177,7 @@ def main():
     st.sidebar.header("Filters")
     filtered_df = df.copy()
 
-    # Date Filter
+    # 📅 Date Filter
     if "incident_date" in df.columns:
         min_date, max_date = df["incident_date"].min(), df["incident_date"].max()
         date_range = st.sidebar.date_input(
@@ -195,7 +191,7 @@ def main():
                 & (filtered_df["incident_date"] <= pd.to_datetime(date_range[1]))
             ]
 
-    # Age Filter
+    # 👥 Age Filter
     if "participant_age" in df.columns:
         age_min = int(df["participant_age"].min())
         age_max = int(df["participant_age"].max())
@@ -211,10 +207,10 @@ def main():
             & (filtered_df["participant_age"] <= age_range[1])
         ]
 
-    # Location Filter
+    # 🏢 Location Filter
     if "location" in df.columns:
         locations = sorted(df["location"].dropna().unique())
-        locations_with_all = ["All"] + locations
+        locations_with_all = ["All"] + list(locations)
         selected_location = st.sidebar.selectbox(
             "🏢 Location",
             options=locations_with_all,
@@ -224,7 +220,7 @@ def main():
         if selected_location != "All":
             filtered_df = filtered_df[filtered_df["location"] == selected_location]
 
-    # Severity Filter
+    # ⚠️ Severity Filter
     if "severity" in df.columns:
         severities = sorted(df["severity"].astype(str).dropna().unique())
         severities_with_all = ["All"] + list(severities)
@@ -237,7 +233,7 @@ def main():
         if selected_severity != "All":
             filtered_df = filtered_df[filtered_df["severity"].astype(str) == selected_severity]
 
-    # Incident Type Filter
+    # 📋 Incident Type Filter
     if "incident_type" in df.columns:
         incident_types = sorted(df["incident_type"].dropna().unique())
         incident_types_with_all = ["All"] + list(incident_types)
@@ -250,18 +246,26 @@ def main():
         if selected_incident_type != "All":
             filtered_df = filtered_df[filtered_df["incident_type"] == selected_incident_type]
 
-    # Reporter Type Filter
-    if "reported_by" in df.columns:
-        reporter_types = sorted(df["reported_by"].dropna().unique())
-        reporter_types_with_all = ["All"] + list(reporter_types)
-        selected_reporter_type = st.sidebar.selectbox(
-            "👤 Reporter Type",
-            options=reporter_types_with_all,
+    # 👤 Carer ID (REPLACES Reporter Type)
+    if "carer_id" in df.columns:
+        carers = sorted(df["carer_id"].astype(str).dropna().unique())
+        carers_with_all = ["All"] + list(carers)
+        selected_carer = st.sidebar.selectbox(
+            "👤 Carer ID",
+            options=carers_with_all,
             index=0,
-            help="Filter by who reported the incident or 'All'",
+            help="Filter by carer or 'All'",
         )
-        if selected_reporter_type != "All":
-            filtered_df = filtered_df[filtered_df["reported_by"] == selected_reporter_type]
+        if selected_carer != "All":
+            filtered_df = filtered_df[filtered_df["carer_id"].astype(str) == selected_carer]
+
+    # 🧩 Group pipeline by (moved here under Filters)
+    group_by = st.sidebar.selectbox(
+        "Group pipeline by:",
+        options=["carer_id", "severity", "incident_type", "location"],
+        index=0,
+        help="Controls grouping in the Enhanced Investigation Pipeline",
+    )
 
     # Page-specific controls (in sidebar)
     st.sidebar.markdown("---")
@@ -298,6 +302,10 @@ def main():
         st.sidebar.markdown("**Quick Stats:**")
         st.sidebar.write(f"🔴 High/Critical: {high_severity_pct:.1f}%")
         st.sidebar.write(f"📊 Reportable: {reportable_pct:.1f}%")
+
+    # === Make filters available to pages ===
+    st.session_state["APP_FILTERED_DF"] = filtered_df
+    st.session_state["APP_GROUP_BY"] = group_by
 
     # === ML: filtered features (optional convenience for pages) ===
     try:
