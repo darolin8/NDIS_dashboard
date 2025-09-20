@@ -2137,15 +2137,38 @@ def display_ml_insights_section(filtered_df):
 
     st.divider()
 
-    # ---------------------------------
-    # 6) Correlations
-    # ---------------------------------
-    st.subheader("🔗 Correlations")
-    try:
-        corr_fig = correlation_analysis(safe_feats, height=900)
-        st.plotly_chart(corr_fig, use_container_width=True)
-    except Exception as e:
-        st.warning(f"Correlation analysis failed: {e}")
+   st.divider()
+
+# ---------------------------------
+# 6) Correlations
+# ---------------------------------
+st.subheader("🔗 Correlations")
+
+def clean_label(label):
+    for prefix in ['loc_', 'type_', 'is_']:
+        if label.startswith(prefix):
+            return label[len(prefix):]
+    return label
+
+try:
+    # Assuming safe_feats is a DataFrame of your features
+    corr_matrix = safe_feats.corr()
+    cleaned_columns = [clean_label(col) for col in corr_matrix.columns]
+
+    import plotly.express as px
+
+    fig = px.imshow(
+        corr_matrix,
+        labels=dict(x="Features", y="Features", color="Correlation"),
+        x=cleaned_columns,
+        y=cleaned_columns,
+        height=900,
+        color_continuous_scale='RdBu'
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+except Exception as e:
+    st.warning(f"Correlation analysis failed: {e}")
 
 
 # ---- Page registry expected by app.py ----
