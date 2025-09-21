@@ -137,14 +137,14 @@ def main():
             [min_date, max_date],
             help="Filter incidents by date range",
         )
-        if len(date_range) == 2:
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
             filtered_df = filtered_df[
                 (filtered_df["incident_date"] >= pd.to_datetime(date_range[0]))
                 & (filtered_df["incident_date"] <= pd.to_datetime(date_range[1]))
             ]
 
     # 👥 Age Filter
-    if "participant_age" in df.columns:
+    if "participant_age" in df.columns and not df["participant_age"].isna().all():
         age_min = int(df["participant_age"].min())
         age_max = int(df["participant_age"].max())
         age_range = st.sidebar.slider(
@@ -198,7 +198,7 @@ def main():
         if selected_incident_type != "All":
             filtered_df = filtered_df[filtered_df["incident_type"] == selected_incident_type]
 
-    # 👤 Carer ID (replaces Reporter Type)
+    # 👤 Carer ID
     if "carer_id" in df.columns:
         carers = sorted(df["carer_id"].astype(str).dropna().unique())
         carers_with_all = ["All"] + list(carers)
@@ -211,7 +211,7 @@ def main():
         if selected_carer != "All":
             filtered_df = filtered_df[filtered_df["carer_id"].astype(str) == selected_carer]
 
-    # 🧩 Group pipeline by (moved here under Filters)
+    # 🧩 Group pipeline by (exposed for pipeline view)
     group_by = st.sidebar.selectbox(
         "Group pipeline by:",
         options=["carer_id", "severity", "incident_type", "location"],
@@ -242,14 +242,22 @@ def main():
     if len(filtered_df) > 0:
         st.sidebar.metric(
             "Date Range (Days)",
-            (filtered_df["incident_date"].max() - filtered_df["incident_date"].min()).days,
+            (filtered_df["incident_date"].max() - filtered_df["incident_date"].min()).days
+            if "incident_date" in filtered_df.columns else 0,
         )
         st.sidebar.metric("Locations", filtered_df["location"].nunique() if "location" in filtered_df.columns else 0)
         st.sidebar.metric("Incident Types", filtered_df["incident_type"].nunique() if "incident_type" in filtered_df.columns else 0)
 
-        # Slightly safer quick stats using prepped columns (ML-related)
-        high_severity_pct = (filtered_df.get("severity_numeric", pd.Series([0]*len(filtered_df))) >= 3).mean() * 100
-        reportable_pct = filtered_df.get("reportable_bin", pd.Series([0]*len(filtered_df))).mean() * 100
+        # Quick stats using prepared columns (if present)
+        high_severity_pct = (
+            (filtered_df.get("severity_numeric", pd.Series([0]*len(filtered_df))) >= 3)
+            .mean() * 100
+            if len(filtered_df) else 0
+        )
+        reportable_pct = (
+            filtered_df.get("reportable_bin", pd.Series([0]*len(filtered_df))).mean() * 100
+            if len(filtered_df) else 0
+        )
 
         st.sidebar.markdown("**Quick Stats:**")
         st.sidebar.write(f"🔴 High/Critical: {high_severity_pct:.1f}%")
