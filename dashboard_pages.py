@@ -1,4 +1,3 @@
-# dashboard_pages.py
 # ---- BEGIN: robust imports (top of dashboard_pages.py) ----
 import os, sys, importlib
 import streamlit as st
@@ -34,11 +33,7 @@ REQUIRED = [
     "clustering_analysis",
     "predictive_models_comparison",
     "incident_type_risk_profiling",
-    "create_predictive_risk_scoring",
-    "enhanced_confusion_matrix_analysis",
-    "incident_similarity_analysis",
-    "ensure_incident_datetime",
-    "plot_3d_clusters",
+    "create_predictive_risk_scoring",# if you call it here
 ]
 _missing = [name for name in REQUIRED if not hasattr(ML, name)]
 if _missing:
@@ -46,33 +41,76 @@ if _missing:
     st.stop()
 
 # Bind names used below
-incident_volume_forecasting        = ML.incident_volume_forecasting
-seasonal_temporal_patterns         = ML.seasonal_temporal_patterns
-plot_time_with_causes              = ML.plot_time_with_causes
-plot_carer_performance_scatter_ML  = ML.plot_carer_performance_scatter
-create_comprehensive_features      = ML.create_comprehensive_features
-correlation_analysis               = ML.correlation_analysis
-clustering_analysis                = ML.clustering_analysis
-predictive_models_comparison       = ML.predictive_models_comparison
-profile_incident_type_risk         = ML.incident_type_risk_profiling
-create_predictive_risk_scoring     = ML.create_predictive_risk_scoring
-enhanced_confusion_matrix_analysis = ML.enhanced_confusion_matrix_analysis
-incident_similarity_analysis       = ML.incident_similarity_analysis
-ensure_incident_datetime           = ML.ensure_incident_datetime
-plot_3d_clusters                   = ML.plot_3d_clusters
+incident_volume_forecasting      = ML.incident_volume_forecasting
+seasonal_temporal_patterns       = ML.seasonal_temporal_patterns
+plot_time_with_causes            = ML.plot_time_with_causes
+plot_carer_performance_scatter   = ML.plot_carer_performance_scatter
+create_comprehensive_features    = ML.create_comprehensive_features
+correlation_analysis             = ML.correlation_analysis
+clustering_analysis              = ML.clustering_analysis
+predictive_models_comparison     = ML.predictive_models_comparison
+profile_incident_type_risk       = getattr(ML, "profile_incident_type_risk", ML.incident_type_risk_profiling)
+create_predictive_risk_scoring   = getattr(ML, "create_predictive_risk_scoring", None)
 # ---- END: robust imports ----
+
 
 # ----------------------------
 # Imports
 # ----------------------------
-import re, random
+import os
+import re
+import random
 from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
+
+
+from ml_helpers import (
+    # Charts/utilities you already used
+    incident_volume_forecasting,
+    seasonal_temporal_patterns,
+    plot_time_with_causes,
+    create_comprehensive_features,
+    correlation_analysis,
+    clustering_analysis,
+    predictive_models_comparison,
+    incident_type_risk_profiling as profile_incident_type_risk,
+    # 🔽 New ML bits for the Insights page
+    enhanced_confusion_matrix_analysis,
+    create_predictive_risk_scoring,
+    incident_similarity_analysis,
+    ensure_incident_datetime,
+    plot_3d_clusters,
+)
+
+
+# Compatibility wrapper so we don't care which signature ml_helpers currently exposes
+def _call_incident_forecast(df, horizon):
+    try:
+        # preferred alias that accepts `periods`
+        from ml_helpers import forecast_incident_volume
+        return forecast_incident_volume(df, periods=int(horizon))
+    except Exception:
+        # fall back to the direct function, try several kwargs
+        from ml_helpers import incident_volume_forecasting as _ivf
+        for kwargs in (
+            {"horizon_months": int(horizon)},
+            {"months": int(horizon)},
+            {"n_periods": int(horizon)},
+            {"horizon": int(horizon)},
+        ):
+            try:
+                return _ivf(df, **kwargs)
+            except TypeError:
+                continue
+        # last resort: positional
+        return _ivf(df, int(horizon))
 
 # ----------------------------
 # Utility
@@ -88,12 +126,15 @@ def calculate_trend(current_value, previous_value):
     else:
         return 0, "→"
 
-def clean_label(label: str) -> str:
-    """Remove standard prefixes from feature names for nicer display."""
-    for prefix in ("loc_", "type_", "is_"):
-        if label.startswith(prefix):
-            return label[len(prefix):]
-    return label
+def load_ndis_data():
+    """Load the NDIS incident CSV from GitHub and return a pandas DataFrame."""
+    url = "https://raw.githubusercontent.com/darolin8/NDIS_dashboard/main/text%20data/ndis_incident_1000.csv"
+    try:
+        df = pd.read_csv(url)
+        return df
+    except Exception as e:
+        st.error(f"Could not load data from GitHub: {e}")
+        return pd.DataFrame()
 
 # ----------------------------
 # Metric/Gauge cards
@@ -155,35 +196,63 @@ def plot_gauge(indicator_number, indicator_color, indicator_suffix, indicator_ti
     st.plotly_chart(fig, use_container_width=True, key=indicator_title.replace(" ", "_")+"_gauge")
 
 # ----------------------------
-# Core plots (Exec/Operational)
+# Core plots
 # ----------------------------
 def plot_time_analysis(df):
     if df.empty or 'incident_time' not in df.columns:
         st.warning("No time data available for analysis")
         return
-    data = df.copy()
-    data['incident_hour'] = pd.to_datetime(data['incident_time'], errors='coerce').dt.hour
-    data = data.dropna(subset=['incident_hour'])
-    data['incident_hour'] = data['incident_hour'].astype(int)
-    cause_col = next((c for c in ["incident_type", "contributing_factors", "cause", "root_cause"] if c in data.columns), None)
+
+    df = df.copy()
+    df['incident_hour'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.hour
+    df = df.dropna(subset=['incident_hour'])
+    df['incident_hour'] = df['incident_hour'].astype(int)
+
+    # Select the first present cause column
+    cause_col = None
+    for c in ["incident_type", "contributing_factors", "cause", "root_cause"]:
+        if c in df.columns:
+            cause_col = c
+            break
     if cause_col is None:
         st.warning("No cause column found. Expected one of: incident_type / contributing_factors / cause / root_cause.")
         return
-    data[cause_col] = data[cause_col].astype(str).fillna("Unknown")
-    top_n = int(st.session_state.get("ml_top_n_causes", 5))
-    top_causes = data[cause_col].value_counts().head(top_n).index
-    data['cause_group'] = np.where(data[cause_col].isin(top_causes), data[cause_col], 'Other')
+
+    df[cause_col] = df[cause_col].astype(str).fillna("Unknown")
+    top_n = 5
+    top_causes = df[cause_col].value_counts().head(top_n).index
+    df['cause_group'] = np.where(df[cause_col].isin(top_causes), df[cause_col], 'Other')
+
     hours = list(range(24))
-    grouped = data.groupby(['incident_hour', 'cause_group']).size().reset_index(name='count')
+    grouped = df.groupby(['incident_hour', 'cause_group']).size().reset_index(name='count')
     pivot = (grouped.pivot_table(index='incident_hour', columns='cause_group',
                                  values='count', aggfunc='sum', fill_value=0)
                    .reindex(hours, fill_value=0))
     totals = pivot.sum(axis=1)
+
     fig = go.Figure()
+
+    # Stacked bars for causes
     for cause in sorted(pivot.columns):
-        fig.add_trace(go.Bar(x=hours, y=pivot[cause].values, name=str(cause), opacity=0.7))
-    fig.add_trace(go.Scatter(x=hours, y=totals.values, mode="lines+markers",
-                             name="Total incidents", line=dict(width=3, color="orange"), yaxis="y2"))
+        fig.add_trace(go.Bar(
+            x=hours,
+            y=pivot[cause].values,
+            name=str(cause),
+            opacity=0.7,
+            hovertemplate="Hour %{x}: %{y} incidents<br>Cause: " + str(cause) + "<extra></extra>",
+        ))
+
+    # Line for total incidents
+    fig.add_trace(go.Scatter(
+        x=hours,
+        y=totals.values,
+        mode="lines+markers",
+        name="Total incidents",
+        line=dict(width=3, color="orange"),
+        yaxis="y2",
+        hovertemplate="Hour %{x}: %{y} total<extra></extra>",
+    ))
+
     fig.update_layout(
         barmode="stack",
         xaxis=dict(title="Hour of Day", tickmode="linear", tick0=0, dtick=2, range=[-0.5, 23.5]),
@@ -206,25 +275,35 @@ def plot_weekday_analysis(df):
         else:
             st.warning("No data available for weekday analysis")
             return
+
     weekday_counts = df['incident_weekday'].value_counts()
-    order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-    weekday_counts = weekday_counts.reindex(order, fill_value=0)
-    fig = px.bar(x=weekday_counts.index, y=weekday_counts.values,
-                 labels={'x': 'Day of Week', 'y': 'Number of Incidents'},
-                 color=weekday_counts.values, color_continuous_scale='Plasma')
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    weekday_counts = weekday_counts.reindex(day_order, fill_value=0)
+
+    fig = px.bar(
+        x=weekday_counts.index,
+        y=weekday_counts.values,
+        labels={'x': 'Day of Week', 'y': 'Number of Incidents'},
+        color=weekday_counts.values,
+        color_continuous_scale='Plasma'
+    )
     st.plotly_chart(fig, use_container_width=True, key="weekday_analysis")
 
 def plot_reportable_analysis(df):
     if df.empty or 'reportable' not in df.columns:
         st.warning("No data available for reportable analysis")
         return
-    counts = df['reportable'].value_counts()
-    if set(counts.index) <= {0, 1}:
-        counts.index = ['Not Reportable' if i == 0 else 'Reportable' for i in counts.index]
-    elif set(counts.index) <= {False, True}:
-        counts.index = ['Not Reportable' if not i else 'Reportable' for i in counts.index]
-    fig = px.pie(values=counts.values, names=counts.index,
-                 color_discrete_sequence=['#90EE90', '#FFB6C1'])
+    reportable_counts = df['reportable'].value_counts()
+    if set(reportable_counts.index) <= {0, 1}:
+        reportable_counts.index = ['Not Reportable' if i == 0 else 'Reportable' for i in reportable_counts.index]
+    elif set(reportable_counts.index) <= {False, True}:
+        reportable_counts.index = ['Not Reportable' if not i else 'Reportable' for i in reportable_counts.index]
+
+    fig = px.pie(
+        values=reportable_counts.values,
+        names=reportable_counts.index,
+        color_discrete_sequence=['#90EE90', '#FFB6C1']
+    )
     st.plotly_chart(fig, use_container_width=True, key="reportable_analysis")
 
 def plot_medical_outcomes(df):
@@ -237,21 +316,46 @@ def plot_medical_outcomes(df):
         'Medical Attention Required': int(df['medical_attention_required'].sum()),
         'No Medical Intervention': int(len(df) - df[['treatment_required', 'medical_attention_required']].any(axis=1).sum())
     }
-    fig = px.bar(x=list(medical_summary.keys()), y=list(medical_summary.values()),
-                 title="Medical Intervention Requirements",
-                 labels={'x': 'Medical Outcome', 'y': 'Number of Cases'},
-                 color=list(medical_summary.values()), color_continuous_scale='RdYlBu_r', height=400)
+    fig = px.bar(
+        x=list(medical_summary.keys()),
+        y=list(medical_summary.values()),
+        title="Medical Intervention Requirements",
+        labels={'x': 'Medical Outcome', 'y': 'Number of Cases'},
+        color=list(medical_summary.values()),
+        color_continuous_scale='RdYlBu_r',
+        height=400
+    )
     fig.update_layout(showlegend=False, xaxis_tickangle=-15)
     st.plotly_chart(fig, use_container_width=True, key="medical_outcomes")
+
+def plot_reporter_type_metrics(df):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if 'reported_by' in df.columns:
+            value = df['reported_by'].nunique()
+            plot_metric("Reporter Types", value, color_graph="#5B8FF9")
+    with col2:
+        if 'medical_attention_required' in df.columns:
+            value = int(df['medical_attention_required'].sum())
+            plot_metric("Medical Attention Required", value, color_graph="#F6BD16")
+    with col3:
+        if 'participant_age' in df.columns:
+            avg_age = df['participant_age'].mean()
+            plot_metric("Avg Participant Age", avg_age, suffix=" yrs", color_graph="#5AD8A6")
 
 def plot_severity_distribution(df):
     if df.empty or 'severity' not in df.columns:
         st.warning("No data available for severity distribution")
         return
-    counts = df['severity'].value_counts()
+    severity_counts = df['severity'].value_counts()
     colors = {'High': '#FF2B2B', 'Moderate': '#FF8700', 'Low': '#29B09D'}
-    fig = px.pie(values=counts.values, names=counts.index, color=counts.index,
-                 color_discrete_map=colors, height=400)
+    fig = px.pie(
+        values=severity_counts.values,
+        names=severity_counts.index,
+        color=severity_counts.index,
+        color_discrete_map=colors,
+        height=400
+    )
     fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=12)
     fig.update_layout(showlegend=True, legend=dict(orientation="v", yanchor="middle", y=0.5))
     st.plotly_chart(fig, use_container_width=True, key="severity_dist")
@@ -261,13 +365,19 @@ def plot_monthly_incidents_by_severity(df):
     if df.empty or not need.issubset(df.columns):
         st.warning("No data available for monthly trends")
         return
-    d = df.copy()
-    d['incident_date'] = pd.to_datetime(d['incident_date'], errors='coerce')
-    d['year_month'] = d['incident_date'].dt.to_period('M').astype(str)
-    monthly = d.groupby(['year_month', 'severity']).size().reset_index(name='count')
-    fig = px.bar(monthly, x='year_month', y='count', color='severity',
-                 labels={'year_month': 'Month', 'count': 'Number of Incidents'},
-                 color_discrete_map={'High': '#FF2B2B', 'Moderate': '#FF8700', 'Low': '#29B09D'}, height=400)
+    df = df.copy()
+    df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
+    df['year_month'] = df['incident_date'].dt.to_period('M').astype(str)
+    monthly_severity = df.groupby(['year_month', 'severity']).size().reset_index(name='count')
+    fig = px.bar(
+        monthly_severity,
+        x='year_month',
+        y='count',
+        color='severity',
+        labels={'year_month': 'Month', 'count': 'Number of Incidents'},
+        color_discrete_map={'High': '#FF2B2B', 'Moderate': '#FF8700', 'Low': '#29B09D'},
+        height=400
+    )
     fig.update_layout(xaxis_tickangle=-45, legend_title="Severity", showlegend=True,
                       xaxis_title="Month", yaxis_title="Number of Incidents")
     st.plotly_chart(fig, use_container_width=True, key="monthly_incidents_severity")
@@ -276,10 +386,16 @@ def plot_incident_types_bar(df):
     if df.empty or 'incident_type' not in df.columns:
         st.warning("No data available for incident types")
         return
-    counts = df['incident_type'].value_counts().head(10)
-    fig = px.bar(x=counts.values, y=counts.index, orientation='h',
-                 labels={'x': 'Number of Incidents', 'y': 'Incident Type'},
-                 color=counts.values, color_continuous_scale='Viridis', height=400)
+    incident_counts = df['incident_type'].value_counts().head(10)
+    fig = px.bar(
+        x=incident_counts.values,
+        y=incident_counts.index,
+        orientation='h',
+        labels={'x': 'Number of Incidents', 'y': 'Incident Type'},
+        color=incident_counts.values,
+        color_continuous_scale='Viridis',
+        height=400
+    )
     fig.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False)
     st.plotly_chart(fig, use_container_width=True, key="incident_types_bar")
 
@@ -287,27 +403,352 @@ def plot_location_analysis(df):
     if df.empty or 'location' not in df.columns:
         st.warning("No data available for location analysis")
         return
-    counts = df['location'].value_counts().head(8)
-    vals = counts.values
-    black_red = [
+
+    location_counts = df['location'].value_counts().head(8)
+    vals = location_counts.values
+
+    # Black -> Red continuous scale
+    black_red_scale = [
         [0.00, "#000000"], [0.15, "#1a0000"], [0.30, "#330000"], [0.45, "#4d0000"],
         [0.60, "#660000"], [0.75, "#800000"], [0.90, "#b30000"], [1.00, "#ff0000"],
     ]
-    fig = px.bar(x=counts.index, y=vals, labels={'x': 'Location', 'y': 'Number of Incidents'},
-                 color=vals, color_continuous_scale=black_red, range_color=[vals.min(), vals.max()], height=400)
-    fig.update_layout(xaxis_tickangle=-45, showlegend=False, coloraxis_colorbar=dict(title="Color", len=1.5))
+
+    fig = px.bar(
+        x=location_counts.index,
+        y=vals,
+        labels={'x': 'Location', 'y': 'Number of Incidents'},
+        color=vals,
+        color_continuous_scale=black_red_scale,
+        range_color=[vals.min(), vals.max()],
+        height=400
+    )
+    fig.update_layout(xaxis_tickangle=-45, showlegend=False,
+                      coloraxis_colorbar=dict(title="Color", len=1.5))
     st.plotly_chart(fig, use_container_width=True, key="location_analysis")
 
 def plot_incident_trends(df):
     if df.empty or 'incident_date' not in df.columns:
         st.warning("No data available for incident trends")
         return
-    daily = df.groupby(pd.to_datetime(df['incident_date'], errors='coerce').dt.date).size().reset_index(name='count')
-    daily.columns = ['date', 'incidents']
-    fig = px.line(daily, x='date', y='incidents', title="Daily Incident Trends", markers=True)
+    daily_counts = df.groupby(pd.to_datetime(df['incident_date'], errors='coerce').dt.date).size().reset_index(name='count')
+    daily_counts.columns = ['date', 'incidents']
+    fig = px.line(daily_counts, x='date', y='incidents', title="Daily Incident Trends", markers=True)
     fig.update_layout(xaxis_title="Date", yaxis_title="Number of Incidents", height=300)
     st.plotly_chart(fig, use_container_width=True, key="incident_trends")
 
+def plot_serious_injury_age_severity(df):
+    need = {'severity', 'participant_age'}
+    if df.empty or not need.issubset(df.columns):
+        st.info("No high severity incidents found for age analysis")
+        return
+    serious_df = df[df['severity'].astype(str).str.lower() == 'high']
+    if not serious_df.empty:
+        fig = px.histogram(
+            serious_df,
+            x='participant_age',
+            color='severity',
+            nbins=20,
+            title="High Severity Incidents: Age Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True, key="serious_injury_age_severity")
+    else:
+        st.info("No high severity incidents found for age analysis")
+
+def add_age_and_age_range_columns(df):
+    df = df.copy()
+    if 'dob' in df.columns:
+        df['dob'] = pd.to_datetime(df['dob'], errors='coerce')
+        today = pd.to_datetime('today').normalize()
+        df['participant_age'] = ((today - df['dob']).dt.days // 365).astype('float')
+        df['participant_age'] = df['participant_age'].where(df['dob'].notnull())
+        df['participant_age'] = df['participant_age'].astype('Int64')
+
+    def get_age_range(age):
+        if pd.isnull(age):
+            return "Unknown"
+        if age < 18:
+            return "Under 18"
+        elif age < 30:
+            return "18-29"
+        elif age < 45:
+            return "30-44"
+        elif age < 60:
+            return "45-59"
+        else:
+            return "60+"
+
+    if 'participant_age' in df.columns:
+        df['age_range'] = df['participant_age'].apply(get_age_range)
+    return df
+
+# NOTE: renamed to avoid clashing with ml_helpers.plot_carer_performance_scatter
+def plot_carer_performance_scatter(df):
+    need = {'carer_id', 'notification_date', 'incident_date'}
+    if df.empty or not need.issubset(df.columns):
+        st.warning(f"Missing columns for carer performance analysis: {need}")
+        return
+
+    data = df.copy()
+    data['incident_date'] = pd.to_datetime(data['incident_date'], errors='coerce')
+    data['notification_date'] = pd.to_datetime(data['notification_date'], errors='coerce')
+    data = data.dropna(subset=['incident_date', 'notification_date', 'carer_id'])
+    data['delay_days'] = (data['notification_date'] - data['incident_date']).dt.days
+    data['carer_id'] = data['carer_id'].astype(str)
+
+    if data.empty:
+        st.info("No valid rows after parsing dates.")
+        return
+
+    # ---- Enhanced Filters & Display Options ----
+    with st.expander("Workload Analysis Settings", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Dates
+            min_d = data['incident_date'].min().date()
+            max_d = data['incident_date'].max().date()
+            use_all_dates = st.checkbox("Use all dates", value=True)
+            if not use_all_dates:
+                start_d, end_d = st.date_input("Incident date range", (min_d, max_d))
+                start_d, end_d = pd.to_datetime(start_d), pd.to_datetime(end_d)
+                data = data[(data['incident_date'] >= start_d) & (data['incident_date'] <= end_d)]
+
+        with col2:
+            # Analysis focus
+            analysis_focus = st.selectbox(
+                "Analysis focus:",
+                ["All Workloads", "High Volume (8+/month)", "Problem Correlation (>2 day delay)", "Efficiency Analysis"],
+                help="Different analytical perspectives"
+            )
+            
+            show_regression = st.checkbox(
+                "Show correlation line",
+                value=True,
+                help="Display trend line showing workload-delay relationship"
+            )
+
+        with col3:
+            # Carers filter
+            carer_counts = data['carer_id'].value_counts()
+            carer_options = ["All"] + list(carer_counts.index[:20])  # Limit options for UI
+            selected_carers = st.multiselect(
+                "Carer(s) to include",
+                options=carer_options,
+                default=["All"],
+                help="Choose 'All' to include every carer"
+            )
+            if "All" not in selected_carers and selected_carers:
+                data = data[data['carer_id'].isin(selected_carers)]
+
+        # Additional controls
+        col4, col5 = st.columns(2)
+        with col4:
+            max_inc = int(max(1, (carer_counts.max() if not carer_counts.empty else 1)))
+            min_inc = st.slider("Minimum incidents per carer", 1, min(max_inc, 20), 3)
+        with col5:
+            size_max = st.slider("Bubble max size", 20, 100, 60)
+
+    if data.empty:
+        st.info("No rows after filters.")
+        return
+
+    # ---- Enhanced Aggregation with Workload Metrics ----
+    # Calculate incidents per month for workload analysis
+    perf = data.groupby('carer_id').agg(
+        avg_delay=('delay_days', 'mean'),
+        total_incidents=('incident_date', 'count'),
+        high_severity_count=('severity', lambda x: (x.astype(str).str.lower() == 'high').sum() if 'severity' in data.columns else 0),
+        reportable_count=('reportable', lambda x: x.sum() if 'reportable' in data.columns else 0),
+        date_range=('incident_date', lambda x: (x.max() - x.min()).days),
+        first_incident=('incident_date', 'min'),
+        last_incident=('incident_date', 'max')
+    ).reset_index()
+
+    # Calculate incidents per month
+    perf['incidents_per_month'] = perf.apply(
+        lambda row: row['total_incidents'] / (max(row['date_range'], 1) / 30.44) if row['date_range'] > 0 else row['total_incidents'],
+        axis=1
+    )
+    
+    # Clean data
+    perf['high_severity_count'] = perf['high_severity_count'].fillna(0).astype(int)
+    perf['reportable_count'] = perf['reportable_count'].fillna(0).astype(int)
+    
+    # Risk scoring for enhanced analysis
+    perf['risk_score'] = (
+        perf['avg_delay'] * 0.4 +  # Delay impact
+        (perf['high_severity_count'] / perf['total_incidents'] * 10) * 0.3 +  # Severity ratio
+        (perf['reportable_count'] / perf['total_incidents'] * 10) * 0.3  # Reportable ratio
+    )
+    
+    # Workload categories for enhanced coloring
+    def categorize_workload(incidents_per_month):
+        if incidents_per_month >= 15:
+            return "High Volume (15+/month)", "#DC143C"  # Crimson Red
+        elif incidents_per_month >= 8:
+            return "Medium Volume (8-14/month)", "#FF8C00"  # Dark Orange
+        elif incidents_per_month >= 3:
+            return "Low Volume (3-7/month)", "#4682B4"  # Steel Blue
+        else:
+            return "Very Low Volume (<3/month)", "#32CD32"  # Lime Green
+    
+    perf['workload_category'], perf['workload_color'] = zip(
+        *perf['incidents_per_month'].apply(categorize_workload)
+    )
+
+    # Apply filters
+    perf = perf[perf['total_incidents'] >= min_inc]
+    
+    # Apply analysis focus
+    if analysis_focus == "High Volume (8+/month)":
+        perf = perf[perf['incidents_per_month'] >= 8]
+    elif analysis_focus == "Problem Correlation (>2 day delay)":
+        perf = perf[perf['avg_delay'] > 2]
+    elif analysis_focus == "Efficiency Analysis":
+        perf = perf[(perf['incidents_per_month'] >= 5) & (perf['avg_delay'] <= 2)]
+    
+    if perf.empty:
+        st.info("No carers meet the selected filters/minimum incident count.")
+        return
+
+    # ---- Enhanced Plot ----
+    fig = px.scatter(
+        perf,
+        x='avg_delay',
+        y='total_incidents',
+        color='workload_category',
+        size='risk_score',
+        size_max=size_max,
+        color_discrete_map={
+            "High Volume (15+/month)": "#DC143C",      # Crimson Red
+            "Medium Volume (8-14/month)": "#FF8C00",   # Dark Orange
+            "Low Volume (3-7/month)": "#4682B4",       # Steel Blue
+            "Very Low Volume (<3/month)": "#32CD32"    # Lime Green
+        },
+        labels={
+            'avg_delay': 'Average Notification Delay (days)',
+            'total_incidents': 'Total Incidents',
+            'workload_category': 'Workload Level'
+        },
+        title='Workload vs Performance Analysis - Capacity Planning View',
+        opacity=0.8,
+        hover_data={
+            'incidents_per_month': ':.1f',
+            'high_severity_count': True,
+            'reportable_count': True,
+            'risk_score': ':.1f'
+        }
+    )
+
+    # Add quadrant analysis lines
+    fig.add_vline(x=2, line_dash="dash", line_color="orange", opacity=0.7,
+                  annotation_text="2-Day Threshold", annotation_position="top")
+    
+    # Add regression line if requested
+    if show_regression and len(perf) > 3:
+        import numpy as np
+        z = np.polyfit(perf['avg_delay'], perf['total_incidents'], 1)
+        p = np.poly1d(z)
+        x_trend = np.linspace(perf['avg_delay'].min(), perf['avg_delay'].max(), 100)
+        fig.add_scatter(x=x_trend, y=p(x_trend), mode='lines', name='Trend Line',
+                       line=dict(color='red', width=2, dash='dot'))
+
+    # Enhanced hover template
+    fig.update_traces(
+        hovertemplate="<b>%{customdata[5]}</b><br>" +  # Carer ID
+                      "Avg delay: %{x:.2f} days<br>" +
+                      "Total incidents: %{y}<br>" +
+                      "Incidents/month: %{customdata[0]:.1f}<br>" +
+                      "High severity: %{customdata[1]}<br>" +
+                      "Reportable: %{customdata[2]}<br>" +
+                      "Risk score: %{customdata[3]:.1f}<br>" +
+                      "<extra></extra>",
+        customdata=perf[['incidents_per_month', 'high_severity_count', 'reportable_count', 'risk_score', 'workload_category', 'carer_id']].values
+    )
+
+    fig.update_xaxes(
+        showgrid=True, gridwidth=1, gridcolor='lightblue',
+        zeroline=True, zerolinecolor='lightblue', rangemode='tozero',
+        rangeslider=dict(visible=True),
+        title="Average Notification Delay (days)"
+    )
+    fig.update_yaxes(
+        showgrid=True, gridwidth=1, gridcolor='lightblue',
+        zeroline=True, zerolinecolor='lightblue', rangemode='tozero',
+        title="Total Incidents"
+    )
+
+    fig.update_layout(
+        legend_title_text='Workload Level',
+        plot_bgcolor='white',
+        hovermode='closest',
+        dragmode='zoom',
+        margin=dict(t=60, r=20, l=60, b=60),
+        uirevision="keep",
+        height=500,
+        showlegend=True,
+        legend=dict(
+            orientation="v", 
+            yanchor="middle", 
+            y=0.5, 
+            xanchor="left", 
+            x=1.02
+        )
+    )
+
+    config = {
+        "displaylogo": False,
+        "scrollZoom": True,
+        "modeBarButtonsToAdd": ["lasso2d", "select2d", "resetScale2d"]
+    }
+    st.plotly_chart(fig, use_container_width=True, key="carer_performance_scatter", config=config)
+    
+    # ---- Enhanced Summary Metrics ----
+    col1, col2, col3, col4 = st.columns(4)
+    
+    high_volume_fast = len(perf[(perf['incidents_per_month'] >= 10) & (perf['avg_delay'] <= 2)])
+    high_volume_slow = len(perf[(perf['incidents_per_month'] >= 10) & (perf['avg_delay'] > 2)])
+    correlation = perf['avg_delay'].corr(perf['total_incidents']) if len(perf) > 1 else 0
+    avg_efficiency = perf['incidents_per_month'].mean() / perf['avg_delay'].mean() if perf['avg_delay'].mean() > 0 else 0
+    
+    with col1:
+        st.metric("Efficient High-Volume", high_volume_fast, help="10+/month, ≤2 day delay")
+    with col2:
+        st.metric("Overwhelmed High-Volume", high_volume_slow, help="10+/month, >2 day delay")
+    with col3:
+        st.metric("Volume-Delay Correlation", f"{correlation:.2f}", help="Positive = more volume = more delay")
+    with col4:
+        st.metric("System Efficiency", f"{avg_efficiency:.1f}", help="Incidents per day of delay")
+    
+    # ---- Capacity Planning Insights ----
+    if analysis_focus == "All Workloads" and len(perf) > 5:
+        st.subheader("Capacity Planning Insights")
+        
+        # Identify optimal performers and overwhelmed carers
+        optimal_performers = perf[
+            (perf['incidents_per_month'] >= 8) & 
+            (perf['avg_delay'] <= 1.5)
+        ][['carer_id', 'incidents_per_month', 'avg_delay', 'total_incidents']].round(1)
+        
+        overwhelmed_carers = perf[
+            (perf['incidents_per_month'] >= 8) & 
+            (perf['avg_delay'] > 3)
+        ][['carer_id', 'incidents_per_month', 'avg_delay', 'total_incidents']].round(1)
+        
+        if not optimal_performers.empty or not overwhelmed_carers.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if not optimal_performers.empty:
+                    st.markdown("**High Performers (Model Behavior)**")
+                    optimal_performers.columns = ['Carer ID', 'Incidents/Month', 'Avg Delay', 'Total Incidents']
+                    st.dataframe(optimal_performers, use_container_width=True, hide_index=True)
+            
+            with col2:
+                if not overwhelmed_carers.empty:
+                    st.markdown("**Capacity Issues (Need Support)**")
+                    overwhelmed_carers.columns = ['Carer ID', 'Incidents/Month', 'Avg Delay', 'Total Incidents']
+                    st.dataframe(overwhelmed_carers, use_container_width=True, hide_index=True)
 # ----------------------------
 # Investigation rules
 # ----------------------------
@@ -333,10 +774,12 @@ def apply_investigation_rules(df):
             return True
         return False
 
-    d = df.copy()
-    d['investigation_required'] = d.apply(requires_investigation, axis=1)
-    d['action_complete'] = d.apply(action_completed, axis=1)
-    return d
+    df = df.copy()
+    df['investigation_required'] = df.apply(requires_investigation, axis=1)
+    df['action_complete'] = df.apply(action_completed, axis=1)
+    return df
+
+
 
 # ----------------------------
 # Executive Summary
@@ -344,26 +787,51 @@ def apply_investigation_rules(df):
 def display_executive_summary_section(df):
     st.markdown("""
     <style>
-    .main-container {max-width: 1100px; margin: 0 auto; padding: 18px 24px;}
-    .card-container {display: flex; gap: 2rem; margin-bottom: 2.5rem; justify-content: flex-start; flex-wrap: wrap;}
-    .dashboard-card {background: #fff; border: 1px solid #e3e3e3; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-                     padding: 1.6rem 1.2rem 1.2rem 1.2rem; min-width: 170px; max-width: 220px; text-align: center; flex: 1;}
+    .main-container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 18px 24px;
+    }
+    .card-container {
+        display: flex;
+        gap: 2rem;
+        margin-bottom: 2.5rem;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+    .dashboard-card {
+        background: #fff;
+        border: 1px solid #e3e3e3;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        padding: 1.6rem 1.2rem 1.2rem 1.2rem;
+        min-width: 170px;
+        max-width: 220px;
+        text-align: center;
+        flex: 1;
+    }
     .dashboard-card-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.6rem; color: #222; }
     .dashboard-card-value { font-size: 2.1rem; font-weight: 700; color: #1769aa; margin-bottom: 0.3rem; }
+    .dashboard-card-desc  { font-size: 0.97rem; color: #444; margin-bottom: 0.1rem; }
     .section-title { font-size: 1.35rem; font-weight: 700; margin: 2rem 0 1rem 0; }
     .divider { margin: 2rem 0 2rem 0; border-top: 1px solid #eee; }
     </style>
     """, unsafe_allow_html=True)
 
+    # ---- CARD DATA ----
     top_type = df['incident_type'].value_counts().idxmax() if 'incident_type' in df.columns and not df.empty else "N/A"
 
-    latest_month_str = "N/A"; latest_month_count = 0
-    prev_month_str   = "N/A"; prev_month_count   = 0
+    latest_month_str = "N/A"
+    latest_month_count = 0
+    prev_month_str = "N/A"
+    prev_month_count = 0
+
     if 'incident_date' in df.columns and not df.empty:
         d = pd.to_datetime(df['incident_date'], errors='coerce')
         latest_month = d.max().to_period('M')
         latest_month_str = latest_month.strftime('%B %Y')
         latest_month_count = (d.dt.to_period('M') == latest_month).sum()
+
         prev_month = latest_month - 1
         prev_month_str = prev_month.strftime('%B %Y')
         prev_month_count = (d.dt.to_period('M') == prev_month).sum()
@@ -374,34 +842,57 @@ def display_executive_summary_section(df):
     st.markdown('<div class="main-container">', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="card-container">
-      <div class="dashboard-card"><div class="dashboard-card-title">Top Incident Type</div>
-        <div class="dashboard-card-value">{top_type}</div><div class="dashboard-card-desc">Most frequent</div></div>
-      <div class="dashboard-card"><div class="dashboard-card-title">Latest Month Incidents</div>
-        <div class="dashboard-card-value">{latest_month_count}</div><div class="dashboard-card-desc">{latest_month_str}</div></div>
-      <div class="dashboard-card"><div class="dashboard-card-title">Previous Month Incidents</div>
-        <div class="dashboard-card-value">{prev_month_count}</div><div class="dashboard-card-desc">{prev_month_str}</div></div>
-      <div class="dashboard-card"><div class="dashboard-card-title">High Severity Incidents</div>
-        <div class="dashboard-card-value">{high_severity_count}</div><div class="dashboard-card-desc">Critical cases</div></div>
-      <div class="dashboard-card"><div class="dashboard-card-title">Reportable Incidents</div>
-        <div class="dashboard-card-value">{reportable_count}</div><div class="dashboard-card-desc">Regulatory events</div></div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Top Incident Type</div>
+        <div class="dashboard-card-value">{top_type}</div>
+        <div class="dashboard-card-desc">Most frequent</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Latest Month Incidents</div>
+        <div class="dashboard-card-value">{latest_month_count}</div>
+        <div class="dashboard-card-desc">{latest_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Previous Month Incidents</div>
+        <div class="dashboard-card-value">{prev_month_count}</div>
+        <div class="dashboard-card-desc">{prev_month_str}</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">High Severity Incidents</div>
+        <div class="dashboard-card-value">{high_severity_count}</div>
+        <div class="dashboard-card-desc">Critical cases</div>
+      </div>
+      <div class="dashboard-card">
+        <div class="dashboard-card-title">Reportable Incidents</div>
+        <div class="dashboard-card-value">{reportable_count}</div>
+        <div class="dashboard-card-desc">Regulatory events</div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
+    # --- Summary visuals ---
     st.markdown('<div class="section-title">Severity Distribution</div>', unsafe_allow_html=True)
     plot_severity_distribution(df)
+
     st.markdown('<div class="section-title">Location Analysis</div>', unsafe_allow_html=True)
     plot_location_analysis(df)
+
     st.markdown('<div class="section-title">Monthly Trends</div>', unsafe_allow_html=True)
     plot_monthly_incidents_by_severity(df)
+
     st.markdown('<div class="section-title">Daily Incident Trends</div>', unsafe_allow_html=True)
     plot_incident_trends(df)
+
     st.markdown('<div class="section-title">Incidents by Day of Week</div>', unsafe_allow_html=True)
     plot_weekday_analysis(df)
+
     st.markdown('<div class="section-title">Incidents by Hour of Day</div>', unsafe_allow_html=True)
     plot_time_analysis(df)
+
     st.markdown('<div class="section-title">Reportable Analysis</div>', unsafe_allow_html=True)
     plot_reportable_analysis(df)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ----------------------------
@@ -484,7 +975,6 @@ def display_operational_performance_section(df):
         plot_medical_outcomes(df)
     plot_carer_performance_scatter(df)
     plot_serious_injury_age_severity(df)
-
 
 # ----------------------------
 # Compliance / Investigation
@@ -1314,6 +1804,7 @@ def display_compliance_investigation_section(df):
         plot_24h_compliance_rate_by_carer(df)
     plot_investigation_pipeline(df)
     plot_contributing_factors_by_month(df)
+
 
     # Compute reporting delay in hours (if possible)
     d = apply_investigation_rules(filtered_df)
