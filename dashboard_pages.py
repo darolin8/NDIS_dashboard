@@ -1320,42 +1320,43 @@ def display_compliance_investigation_section(df):
         st.info("No data available.")
         return
 
+    # Ensure investigation flags & delays
     df = apply_investigation_rules(df).copy()
     if {'incident_date','notification_date'}.issubset(df.columns):
         df['incident_date'] = pd.to_datetime(df['incident_date'], errors='coerce')
         df['notification_date'] = pd.to_datetime(df['notification_date'], errors='coerce')
         df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
-        within_24 = (df['report_delay_hours'] <= 24).sum()
-        overdue = (df['report_delay_hours'] > 24).sum()
+        within_24 = int((df['report_delay_hours'] <= 24).sum())
+        overdue = int((df['report_delay_hours'] > 24).sum())
+        df['within_24h'] = df['report_delay_hours'] <= 24
     else:
         within_24, overdue = 0, 0
+        df['within_24h'] = False
 
     reportable_incidents = int(df['reportable'].sum()) if 'reportable' in df.columns else 0
     investigation_rate = (100 * df['investigation_required'].sum() / len(df)) if len(df) > 0 else 0.0
 
+    # Top metric cards
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Reportable Incidents", reportable_incidents)
-    with col2:
-        st.metric("24hr Compliance", within_24)
-    with col3:
-        st.metric("Overdue Reports", overdue)
-    with col4:
-        st.metric("Investigation Rate", f"{investigation_rate:.1f}%")
+    with col1: st.metric("Reportable Incidents", reportable_incidents)
+    with col2: st.metric("24hr Compliance", within_24)
+    with col3: st.metric("Overdue Reports", overdue)
+    with col4: st.metric("Investigation Rate", f"{investigation_rate:.1f}%")
 
     st.markdown("---")
 
-    if "incident_date" in df.columns and "report_delay_hours" in df.columns:
+    # 1) Average reporting delay over time
+    if {"incident_date","report_delay_hours"}.issubset(df.columns):
         df_delay = df[['incident_date', 'report_delay_hours']].dropna().copy()
-        df_delay['incident_date'] = df_delay['incident_date'].dt.date
+        df_delay['incident_date'] = pd.to_datetime(df_delay['incident_date']).dt.date
         grouped = df_delay.groupby('incident_date')['report_delay_hours'].mean().reset_index()
         fig_delay = px.line(grouped, x='incident_date', y='report_delay_hours',
                             title="Average Reporting Delay by Incident Date (hours)", markers=True)
         fig_delay.update_layout(xaxis_title="Date", yaxis_title="Avg Delay (hours)")
         st.plotly_chart(fig_delay, use_container_width=True)
 
-    if {"location", "report_delay_hours"}.issubset(df.columns):
-        df['within_24h'] = df['report_delay_hours'] <= 24
+    # 2) 24hr compliance by location
+    if {"location","within_24h"}.issubset(df.columns):
         compliance_loc = (df.groupby('location')['within_24h'].mean().sort_values() * 100)
         fig_compliance_loc = px.bar(
             x=compliance_loc.index, y=compliance_loc.values,
@@ -1365,7 +1366,8 @@ def display_compliance_investigation_section(df):
         )
         st.plotly_chart(fig_compliance_loc, use_container_width=True)
 
-    if {"carer_id", "within_24h"}.issubset(df.columns):
+    # 3) 24hr compliance by carer (simple)
+    if {"carer_id","within_24h"}.issubset(df.columns):
         compliance_carer_simple = (df.groupby('carer_id')['within_24h'].mean().sort_values() * 100)
         fig_compliance_carer_simple = px.bar(
             x=compliance_carer_simple.index, y=compliance_carer_simple.values,
@@ -1375,13 +1377,18 @@ def display_compliance_investigation_section(df):
         )
         st.plotly_chart(fig_compliance_carer_simple, use_container_width=True)
 
+    # 4) Worst-first carer delay tracker (detailed)
     colA, colB = st.columns(2)
     with colA:
         plot_reporting_delay_by_carer(df)
+    # 5) Worst-first 24h compliance by carer (detailed)
     with colB:
         plot_24h_compliance_rate_by_carer(df)
 
+    # 6) Pipeline (groupable & filterable)
     plot_investigation_pipeline(df)
+
+    # 7) Contributing factors heatmap
     plot_contributing_factors_by_month(df)
 
 # ----------------------------
