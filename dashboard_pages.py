@@ -304,7 +304,7 @@ def plot_incident_trends(df):
         return
     daily = df.groupby(pd.to_datetime(df['incident_date'], errors='coerce').dt.date).size().reset_index(name='count')
     daily.columns = ['date', 'incidents']
-    fig = px.line(daily, x='date', y='incidents', markers=True)
+    fig = px.line(daily, x='date', y='incidents', title="Daily Incident Trends", markers=True)
     fig.update_layout(xaxis_title="Date", yaxis_title="Number of Incidents", height=300)
     st.plotly_chart(fig, use_container_width=True, key="incident_trends")
 
