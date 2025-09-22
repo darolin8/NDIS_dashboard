@@ -1328,6 +1328,7 @@ def display_compliance_investigation_section(df):
         df['report_delay_hours'] = (df['notification_date'] - df['incident_date']).dt.total_seconds() / 3600
         within_24 = int((df['report_delay_hours'] <= 24).sum())
         overdue = int((df['report_delay_hours'] > 24).sum())
+        # keep this even though we removed the simple compliance charts
         df['within_24h'] = df['report_delay_hours'] <= 24
     else:
         within_24, overdue = 0, 0
@@ -1345,7 +1346,7 @@ def display_compliance_investigation_section(df):
 
     st.markdown("---")
 
-    # 1) Average reporting delay over time
+    # 1) Average reporting delay over time (kept)
     if {"incident_date","report_delay_hours"}.issubset(df.columns):
         df_delay = df[['incident_date', 'report_delay_hours']].dropna().copy()
         df_delay['incident_date'] = pd.to_datetime(df_delay['incident_date']).dt.date
@@ -1355,41 +1356,19 @@ def display_compliance_investigation_section(df):
         fig_delay.update_layout(xaxis_title="Date", yaxis_title="Avg Delay (hours)")
         st.plotly_chart(fig_delay, use_container_width=True)
 
-    # 2) 24hr compliance by location
-    if {"location","within_24h"}.issubset(df.columns):
-        compliance_loc = (df.groupby('location')['within_24h'].mean().sort_values() * 100)
-        fig_compliance_loc = px.bar(
-            x=compliance_loc.index, y=compliance_loc.values,
-            labels={'x': 'Location', 'y': '% Within 24hr'},
-            title="24 Hour Compliance Rate by Location",
-            color=compliance_loc.values, color_continuous_scale='RdYlGn'
-        )
-        st.plotly_chart(fig_compliance_loc, use_container_width=True)
-
-    # 3) 24hr compliance by carer (simple)
-    if {"carer_id","within_24h"}.issubset(df.columns):
-        compliance_carer_simple = (df.groupby('carer_id')['within_24h'].mean().sort_values() * 100)
-        fig_compliance_carer_simple = px.bar(
-            x=compliance_carer_simple.index, y=compliance_carer_simple.values,
-            labels={'x': 'Carer ID', 'y': '% Within 24hr'},
-            title="24 Hour Compliance Rate by Carer (Simple)",
-            color=compliance_carer_simple.values, color_continuous_scale='RdYlGn'
-        )
-        st.plotly_chart(fig_compliance_carer_simple, use_container_width=True)
-
-    # 4) Worst-first carer delay tracker (detailed)
+    # 2) Detailed per-carer charts (kept)
     colA, colB = st.columns(2)
     with colA:
-        plot_reporting_delay_by_carer(df)
-    # 5) Worst-first 24h compliance by carer (detailed)
+        plot_reporting_delay_by_carer(df)          # worst-first delay tracker (detailed)
     with colB:
-        plot_24h_compliance_rate_by_carer(df)
+        plot_24h_compliance_rate_by_carer(df)      # worst-first 24h compliance (detailed)
 
-    # 6) Pipeline (groupable & filterable)
+    # 3) Pipeline (kept)
     plot_investigation_pipeline(df)
 
-    # 7) Contributing factors heatmap
+    # 4) Contributing factors heatmap (kept)
     plot_contributing_factors_by_month(df)
+
 
 # ----------------------------
 # ML Insights
