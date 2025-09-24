@@ -1,3 +1,4 @@
+
 # ml_helpers.py
 # Utilities and analytics helpers for the NDIS dashboard.
 # - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
@@ -1337,11 +1338,9 @@ def create_predictive_risk_scoring(
         from sklearn.pipeline import Pipeline
         if isinstance(model, Pipeline):
             for name, step in model.steps:
-                # custom selector / guard
                 if hasattr(step, "columns_out_") and isinstance(step.columns_out_, (list, tuple)):
                     expected_cols = list(step.columns_out_)
                     break
-                # many sklearn transformers expose feature names
                 if hasattr(step, "get_feature_names_out"):
                     try:
                         expected_cols = list(step.get_feature_names_out())
@@ -1361,7 +1360,6 @@ def create_predictive_risk_scoring(
     except Exception:
         expected_n = None
     if expected_n is None and hasattr(model, "steps"):
-        # last step might have it
         try:
             expected_n = getattr(model.steps[-1][1], "n_features_in_", None)
         except Exception:
