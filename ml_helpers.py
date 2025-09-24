@@ -175,6 +175,104 @@ def create_comprehensive_features(df: pd.DataFrame):
     if _create_comprehensive_features is not None:
         return _create_comprehensive_features(df)
     return _fallback_features(df)
+# --- Investigation rules (keeps your function name) ---
+def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy of df with:
+      - investigation_required (bool)
+      - investigation_reason (str; semicolon-separated)
+    Compatible with missing columns and won’t crash if fields are absent.
+
+    Heuristics (any triggers investigation):
+      • severity ∈ {'High','Critical'}
+      • medical_attention_required == truthy (or medical_attention_required_bin == 1)
+      • incident_type contains 'abuse' or 'neglect'
+      • participant_vulnerable == truthy (if present)
+      • delay_to_report_hours > 24 (if present)
+      • participant_incident_count >= 3 (if present)
+      • carer_incident_count >= 5 (if present)
+    Existing columns are respected: we only *add* True/Reasons; we don’t clear your existing True flags.
+    """
+    d = df.copy()
+
+    def _truthy(series_like) -> pd.Series:
+        if series_like is None:
+            return pd.Series(False, index=d.index)
+        s = pd.Series(series_like)
+        if str(s.dtype) == "bool":
+            return s.fillna(False)
+        if s.dtype.kind in "biu":
+            return (s.fillna(0).astype(int) != 0)
+        return s.astype(str).str.strip().str.lower().isin({"1", "true", "yes", "y", "t"})
+
+    # Normalize severity → string for checks
+    sev = d.get("severity")
+    sev_str = sev.astype(str).str.strip().str.title() if sev is not None else pd.Series("", index=d.index)
+
+    # Medical attention (either the *_bin column or a text column)
+    med_bin = d.get("medical_attention_required_bin")
+    med_text = d.get("medical_attention_required")
+    med_truth = _truthy(med_bin if med_bin is not None else med_text)
+
+    # Incident type text
+    itype = d.get("incident_type")
+    itype_str = itype.astype(str).str.lower() if itype is not None else pd.Series("", index=d.index)
+
+    # Optional columns
+    vulnerable = _truthy(d.get("participant_vulnerable"))
+    delay_hours = pd.to_numeric(d.get("delay_to_report_hours"), errors="coerce") if "delay_to_report_hours" in d.columns else pd.Series(np.nan, index=d.index)
+    p_hist = pd.to_numeric(d.get("participant_incident_count"), errors="coerce") if "participant_incident_count" in d.columns else pd.Series(0, index=d.index)
+    c_hist = pd.to_numeric(d.get("carer_incident_count"), errors="coerce") if "carer_incident_count" in d.columns else pd.Series(0, index=d.index)
+
+    # Rule masks
+    m_sev = sev_str.isin(["High", "Critical"])
+    m_med = med_truth
+    m_abuse_neglect = itype_str.str.contains(r"\babuse\b|\bneglect\b", regex=True, na=False)
+    m_vuln = vulnerable
+    m_delay = delay_hours.fillna(0) > 24
+    m_repeat_participant = p_hist.fillna(0) >= 3
+    m_repeat_carer = c_hist.fillna(0) >= 5
+
+    # Build reason strings (vectorized concat)
+    reason = pd.Series("", index=d.index, dtype=object)
+
+    def _add_reason(mask: pd.Series, text: str):
+        nonlocal reason
+        to_add = mask.fillna(False)
+        if to_add.any():
+            sep = reason.where(reason.eq(""), "; ").mask(reason.eq(""), "")
+            reason = reason.where(~to_add, reason + sep + text)
+
+    _add_reason(m_sev, "High or Critical severity")
+    _add_reason(m_med, "Medical attention required")
+    _add_reason(m_abuse_neglect, "Abuse/Neglect incident type")
+    _add_reason(m_vuln, "Participant marked as vulnerable")
+    _add_reason(m_delay, "Reported >24h after incident")
+    _add_reason(m_repeat_participant, "Repeat incidents for participant (>=3)")
+    _add_reason(m_repeat_carer, "Repeat incidents for carer (>=5)")
+
+    # Final flag: any rule true
+    rules_flag = (m_sev | m_med | m_abuse_neglect | m_vuln | m_delay | m_repeat_participant | m_repeat_carer).fillna(False)
+
+    # Respect existing columns if present (don’t remove existing True/Reasons)
+    existing_flag = _truthy(d.get("investigation_required"))
+    d["investigation_required"] = (existing_flag | rules_flag).astype(bool)
+
+    existing_reason = d.get("investigation_reason")
+    if existing_reason is not None:
+        existing_reason = existing_reason.fillna("").astype(str)
+        sep = existing_reason.where(existing_reason.eq(""), "; ").mask(existing_reason.eq(""), "")
+        # only append new reasons where we are newly True or existing reason empty
+        needs_reason = d["investigation_required"] & ((existing_reason == "") | (reason != ""))
+        d["investigation_reason"] = np.where(
+            needs_reason,
+            (existing_reason + sep + reason).str.strip("; ").str.strip(),
+            existing_reason
+        )
+    else:
+        d["investigation_reason"] = np.where(d["investigation_required"], reason, "")
+
+    return d
 
 
 # ---------------------------------------
