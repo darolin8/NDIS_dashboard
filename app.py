@@ -1,5 +1,6 @@
-# ---- BEGIN: ultra-robust ml_helpers import (top of app.py) ----
-import os, sys, importlib, importlib.util
+# app.py
+# ---- BEGIN: robust import bootstrap (top of app.py) ----
+import os, sys
 import streamlit as st
 import pandas as pd
 
@@ -11,60 +12,37 @@ UTILS_DIR = os.path.join(APP_DIR, "utils")
 if os.path.isdir(UTILS_DIR) and UTILS_DIR not in sys.path:
     sys.path.insert(0, UTILS_DIR)
 
-def _diagnose_module(name):
-    spec = importlib.util.find_spec(name)
-    st.caption(f"🔎 find_spec('{name}') → {spec}")
-    st.caption(f"sys.path[0:5] → {sys.path[:5]}")
-    try:
-        st.caption(f"APP_DIR contents → {sorted(os.listdir(APP_DIR))[:20]}")
-    except Exception:
-        pass
-    if os.path.isdir(UTILS_DIR):
-        try:
-            st.caption(f"utils/ contents → {sorted(os.listdir(UTILS_DIR))[:20]}")
-        except Exception:
-            pass
-
-# 1) Try a normal import first
+# First: load ml_helpers directly and expose any real error
 try:
     import ml_helpers as ML
-    st.success(f"✅ ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
-except Exception as e1:
-    st.warning("Normal import failed; diagnosing & attempting direct file load…")
-    _diagnose_module("ml_helpers")
+    st.info(f"ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
+except Exception as e:
+    st.error("Failed to import ml_helpers. Details:")
+    st.exception(e)
+    st.stop()
 
-    # 2) If ml_helpers.py exists beside app.py, load it directly by path
-    ml_path_candidates = [
-        os.path.join(APP_DIR, "ml_helpers.py"),
-        os.path.join(UTILS_DIR, "ml_helpers.py"),
-    ]
-    ml_path = next((p for p in ml_path_candidates if os.path.isfile(p)), None)
-
-    if ml_path:
-        try:
-            loader = importlib.machinery.SourceFileLoader("ml_helpers", ml_path)
-            spec = importlib.util.spec_from_loader(loader.name, loader)
-            ML = importlib.util.module_from_spec(spec)
-            loader.exec_module(ML)
-            sys.modules["ml_helpers"] = ML
-            st.success(f"✅ Loaded ml_helpers directly from file: {ml_path}")
-        except Exception as e2:
-            st.error("❌ Could not load ml_helpers even via file loader.")
-            st.exception(e2)
-            st.stop()
-    else:
-        st.error("❌ ml_helpers.py not found next to app.py or in utils/.")
-        st.info("Make sure the file is named exactly 'ml_helpers.py' and lives in the same folder as app.py.")
-        st.exception(e1)
-        st.stop()
-# ---- END: ultra-robust ml_helpers import ----
-
+# Next: import dashboard_pages and expose any real error
+try:
+    from dashboard_pages import (
+        display_executive_summary_section,
+        display_operational_performance_section,
+        display_compliance_investigation_section,
+        display_ml_insights_section,
+        apply_investigation_rules,
+        PAGE_TO_RENDERER,
+    )
+except Exception as e:
+    st.error("Failed to import dashboard_pages. Details:")
+    st.exception(e)
+    import importlib.util
+    spec = importlib.util.find_spec("dashboard_pages")
+    st.caption(f"dashboard_pages spec: {spec}")
+    st.stop()
+# ---- END: robust import bootstrap ----
 
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
-from ml_helpers import apply_investigation_rules
-
 
 # ----- CONFIG -----
 st.set_page_config(
@@ -116,16 +94,6 @@ def main():
 
     # === ML: standardise & feature-ready ===
     df = prepare_ndis_data(df)  # adds severity_numeric, reportable_bin, histories, location_risk, etc.
-
-    # 🔒 Build post-notify, intake-only targets (constructed from info available at/after notification timestamps,
-    # but trained with only intake-time features). This function is defined in ml_helpers.py.
-    try:
-        df = ML.build_labels_post_notify(df)
-    except AttributeError:
-        st.warning(
-            "build_labels_post_notify() not found in ml_helpers; "
-            "continuing without post-notify targets."
-        )
 
     # Keep in session for other pages
     st.session_state.df = df
@@ -307,220 +275,6 @@ def main():
     except Exception:
         st.session_state.features_df_filtered = None
         st.session_state.feature_names_filtered = None
-
-    # =========================
-    # 🤖 Intake-only modeling
-    # =========================
-    st.sidebar.markdown("---")
-    st.sidebar.header("🤖 Intake-only modeling (post-notify targets)")
-
-    TARGETS = {
-        "Medical attention (≤72h or final flag)": "medical_attention_required",
-        "Investigation opened (≤7 days)": "investigation_required",
-        "Notify delay > 24 hours": "delay_over_24h",
-    }
-    target_label = st.sidebar.selectbox("Target", list(TARGETS.keys()))
-    target_col = TARGETS[target_label]
-
-    test_size_pct = st.sidebar.slider("Test size (latest % of time)", 10, 40, 20, step=5)
-    leak_corr_threshold = st.sidebar.slider("Leak correlation threshold", 0.60, 0.95, 0.80, 0.01)
-    run_training = st.sidebar.button("▶️ Train intake-only models")
-
-    if run_training:
-        with st.spinner(f"Training models for **{target_label}**…"):
-            try:
-                results = ML.predictive_models_comparison(
-                    df=df,                         # use full (pre-filter) to keep time ordering intact
-                    target=target_col,
-                    test_size=test_size_pct / 100.0,
-                    split_strategy="time_grouped",      # custom: time split + identity guard
-                    time_col="incident_datetime",
-                    group_cols=["participant_id", "carer_id"],
-                    intake_only=True,                   # hard-ban leaky / post-outcome features
-                    leak_corr_threshold=leak_corr_threshold,
-                )
-                st.session_state.trained_models = results
-                st.success("Models trained and stored in session.")
-            except TypeError:
-                # Fallback if your ml_helpers doesn't yet expose time_grouped/intake_only kwargs
-                results = ML.predictive_models_comparison(
-                    df=df,
-                    target=target_col,
-                    test_size=test_size_pct / 100.0,
-                    split_strategy="time",
-                    time_col="incident_datetime",
-                    leak_corr_threshold=leak_corr_threshold,
-                )
-                st.session_state.trained_models = results
-                st.info(
-                    "Trained with basic time split (fallback). "
-                    "Update ml_helpers.predictive_models_comparison to use time_grouped + intake_only."
-                )
-            except Exception as e:
-                st.error("Training failed:")
-                st.exception(e)
-
-        # Inline preview of the selected model’s performance
-        if st.session_state.trained_models:
-            st.subheader("Intake-only model results (preview)")
-            names = list(st.session_state.trained_models.keys())
-            chosen = st.selectbox("Select model", names, index=0)
-            blob = st.session_state.trained_models[chosen]
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Test accuracy", f"{blob['accuracy']:.3f}")
-            if blob.get("cv_scores"):
-                cv_mean = sum(blob["cv_scores"]) / len(blob["cv_scores"])
-                c2.metric("Train CV accuracy (mean)", f"{cv_mean:.3f}")
-            c3.metric("Features used", len(blob.get("feature_names", [])))
-
-            # Try to render the enhanced confusion matrix from ml_helpers
-            try:
-                fig = ML.enhanced_confusion_matrix_analysis(
-                    y_test=blob["y_test"],
-                    y_pred=blob["predictions"],
-                    y_proba=blob["probabilities"],
-                    target_names=(["No", "Yes"] if pd.Series(blob["y_test"]).nunique() == 2
-                                  else [str(c) for c in sorted(pd.Series(blob["y_test"]).unique())]),
-                    model_name=chosen,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not render confusion matrix: {e}")
-
-            with st.expander("Show kept features"):
-                st.write(blob.get("feature_names", []))
-
-    # === Executive Summary (drop-in) ===
-def display_executive_summary_section(df):
-    """
-    Render an executive summary for the current (filtered) dataframe.
-    Safe with missing columns. Uses Streamlit metrics & simple charts.
-    """
-    import streamlit as st
-    import pandas as pd
-    import numpy as np
-
-    if df is None or len(df) == 0:
-        st.info("No data to summarise.")
-        return df
-
-    d = df.copy()
-
-    # ---------- Dates ----------
-    # Prefer incident_datetime, else incident_date
-    if "incident_datetime" in d.columns:
-        dt = pd.to_datetime(d["incident_datetime"], errors="coerce")
-    else:
-        dt = pd.to_datetime(d.get("incident_date", pd.NaT), errors="coerce")
-    now = pd.Timestamp.utcnow().tz_localize(None)
-    last_30_start = now - pd.Timedelta(days=30)
-    prev_30_start = now - pd.Timedelta(days=60)
-
-    # Masks (handle NaT gracefully)
-    m_last30 = dt >= last_30_start
-    m_prev30 = (dt >= prev_30_start) & (dt < last_30_start)
-
-    # ---------- Totals & deltas ----------
-    total_incidents = int(len(d))
-    incidents_last_30 = int(m_last30.fillna(False).sum())
-    incidents_prev_30 = int(m_prev30.fillna(False).sum())
-    delta_30 = incidents_last_30 - incidents_prev_30
-
-    # ---------- Investigations ----------
-    # We respect your new column; if absent we compute a cautious default = 0
-    inv_col = d.get("investigation_required", None)
-    if inv_col is not None:
-        inv_flag = (
-            inv_col.astype(str).str.strip().str.lower()
-            .isin({"1", "true", "yes", "y", "t"})
-            if inv_col.dtype.kind not in "biu"
-            else inv_col.astype(bool)
-        )
-        inv_rate = float(inv_flag.mean()) if len(inv_flag) else 0.0
-    else:
-        inv_rate = 0.0
-
-    # ---------- Medical attention ----------
-    if "medical_attention_required_bin" in d.columns:
-        med_rate = float(pd.to_numeric(d["medical_attention_required_bin"], errors="coerce").fillna(0).clip(0,1).mean())
-    elif "medical_attention_required" in d.columns:
-        med_rate = float(
-            d["medical_attention_required"].astype(str).str.strip().str.lower()
-            .isin({"1", "true", "yes", "y", "t"}).mean()
-        )
-    else:
-        med_rate = 0.0
-
-    # ---------- Severity ----------
-    if "severity" in d.columns:
-        sev_series = d["severity"].astype(str).str.title()
-    elif "severity_numeric" in d.columns:
-        m = {1:"Low", 2:"Medium", 3:"High", 4:"Critical"}
-        sev_series = d["severity_numeric"].map(m).fillna("Medium").astype(str)
-    else:
-        sev_series = pd.Series(["Unknown"]*len(d))
-    sev_counts = sev_series.value_counts(dropna=False)
-
-    # ---------- Incident types ----------
-    itype = d.get("incident_type")
-    if itype is not None:
-        top_types = itype.astype(str).str.strip().replace({"": "Unknown"}).value_counts().head(7)
-    else:
-        top_types = pd.Series(dtype=int)
-
-    # ---------- Layout ----------
-    st.markdown("## Executive Summary")
-
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.metric("Total incidents", f"{total_incidents:,}")
-    with k2:
-        st.metric("Last 30 days", f"{incidents_last_30:,}", delta=f"{delta_30:+,}")
-    with k3:
-        st.metric("Investigation rate", f"{inv_rate:.1%}")
-    with k4:
-        st.metric("Medical attention rate", f"{med_rate:.1%}")
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.markdown("#### Incident types (Top)")
-        if len(top_types):
-            st.bar_chart(top_types.sort_values(ascending=True))
-        else:
-            st.caption("No `incident_type` column found.")
-
-    with c2:
-        st.markdown("#### Severity mix")
-        if len(sev_counts):
-            # Streamlit has no native pie; use Plotly if available
-            try:
-                import plotly.express as px
-                fig = px.pie(sev_counts.reset_index(), names="index", values="severity",
-                             title=None)
-                fig.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception:
-                st.bar_chart(sev_counts.sort_values(ascending=True))
-        else:
-            st.caption("No severity data found.")
-
-    # Optional: show investigations by reason if present
-    if "investigation_reason" in d.columns:
-        with st.expander("Investigation reasons (sample)"):
-            sample = (
-                d.loc[d.get("investigation_required", False) == True, ["investigation_reason"]]
-                .dropna()
-                .head(25)
-            )
-            if len(sample):
-                st.dataframe(sample, use_container_width=True)
-            else:
-                st.caption("No investigation reasons available.")
-
-    return df
-
 
     # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
