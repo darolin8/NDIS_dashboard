@@ -1517,8 +1517,8 @@ def display_ml_insights_section(filtered_df):
             st.warning("Risk scorer could not be created from the current models.")
         else:
             try:
-                expected_n = getattr(models[best_key]['model'], 'n_features_in_', '?')
-                st.caption(f"Model expects {expected_n} features; scorer using {len(trained_feature_names)}.")
+                n_expected = getattr(models[best_key]['model'], 'n_features_in_', '?')
+                st.caption(f"Model expects {n_expected} features; scorer using {len(trained_feature_names)}.")
             except Exception:
                 pass
 
