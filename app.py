@@ -1,8 +1,6 @@
-# app.py
-# ---- BEGIN: robust import bootstrap (top of app.py) ----
-import os, sys
+# ---- BEGIN: ultra-robust ml_helpers import (top of app.py) ----
+import os, sys, importlib, importlib.util
 import streamlit as st
-import pandas as pd
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
@@ -12,33 +10,54 @@ UTILS_DIR = os.path.join(APP_DIR, "utils")
 if os.path.isdir(UTILS_DIR) and UTILS_DIR not in sys.path:
     sys.path.insert(0, UTILS_DIR)
 
-# First: load ml_helpers directly and expose any real error
+def _diagnose_module(name):
+    spec = importlib.util.find_spec(name)
+    st.caption(f"🔎 find_spec('{name}') → {spec}")
+    st.caption(f"sys.path[0:5] → {sys.path[:5]}")
+    try:
+        st.caption(f"APP_DIR contents → {sorted(os.listdir(APP_DIR))[:20]}")
+    except Exception:
+        pass
+    if os.path.isdir(UTILS_DIR):
+        try:
+            st.caption(f"utils/ contents → {sorted(os.listdir(UTILS_DIR))[:20]}")
+        except Exception:
+            pass
+
+# 1) Try a normal import first
 try:
     import ml_helpers as ML
-    st.info(f"ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
-except Exception as e:
-    st.error("Failed to import ml_helpers. Details:")
-    st.exception(e)
-    st.stop()
+    st.success(f"✅ ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
+except Exception as e1:
+    st.warning("Normal import failed; diagnosing & attempting direct file load…")
+    _diagnose_module("ml_helpers")
 
-# Next: import dashboard_pages and expose any real error
-try:
-    from dashboard_pages import (
-        display_executive_summary_section,
-        display_operational_performance_section,
-        display_compliance_investigation_section,
-        display_ml_insights_section,
-        apply_investigation_rules,
-        PAGE_TO_RENDERER,
-    )
-except Exception as e:
-    st.error("Failed to import dashboard_pages. Details:")
-    st.exception(e)
-    import importlib.util
-    spec = importlib.util.find_spec("dashboard_pages")
-    st.caption(f"dashboard_pages spec: {spec}")
-    st.stop()
-# ---- END: robust import bootstrap ----
+    # 2) If ml_helpers.py exists beside app.py, load it directly by path
+    ml_path_candidates = [
+        os.path.join(APP_DIR, "ml_helpers.py"),
+        os.path.join(UTILS_DIR, "ml_helpers.py"),
+    ]
+    ml_path = next((p for p in ml_path_candidates if os.path.isfile(p)), None)
+
+    if ml_path:
+        try:
+            loader = importlib.machinery.SourceFileLoader("ml_helpers", ml_path)
+            spec = importlib.util.spec_from_loader(loader.name, loader)
+            ML = importlib.util.module_from_spec(spec)
+            loader.exec_module(ML)
+            sys.modules["ml_helpers"] = ML
+            st.success(f"✅ Loaded ml_helpers directly from file: {ml_path}")
+        except Exception as e2:
+            st.error("❌ Could not load ml_helpers even via file loader.")
+            st.exception(e2)
+            st.stop()
+    else:
+        st.error("❌ ml_helpers.py not found next to app.py or in utils/.")
+        st.info("Make sure the file is named exactly 'ml_helpers.py' and lives in the same folder as app.py.")
+        st.exception(e1)
+        st.stop()
+# ---- END: ultra-robust ml_helpers import ----
+
 
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
