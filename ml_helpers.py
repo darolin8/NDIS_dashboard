@@ -29,6 +29,37 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 
+   # ml_helpers.py
+# Utilities and analytics helpers for the NDIS dashboard.
+# - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
+# - Baseline visuals + models
+# - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
+from __future__ import annotations
+
+import warnings
+warnings.filterwarnings("ignore")
+
+from typing import Tuple, Dict, Any, Optional, List, Callable
+import re
+
+import numpy as np
+import pandas as pd
+
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.stattools import adfuller
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
+
 # ---------------------------------------
 # Optional enhanced prep from utils/ (no __init__.py required)
 # ---------------------------------------
@@ -47,6 +78,106 @@ def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
     if _prepare_ndis_data is not None:
         return _prepare_ndis_data(df)
     return df.copy()
+
+
+# ---------------------------------------
+# Intake-only guards & post-notify label builders
+# ---------------------------------------
+INTAKE_FORBIDDEN_PATTERNS = [
+    # post-outcome / post-processing
+    "reportable", "report_", "reported_", "notify", "notified", "notification_delay",
+    "investigat", "outcome", "closed", "closure", "completed", "completion",
+    "action_", "follow", "resolution", "status", "sla", "breach", "escalat",
+    "medical", "hospital", "clinic", "treatment",
+    # direct target proxies
+    "severity", "high_crit", "target", "label",
+    # future-derived durations
+    "time_to_", "days_to_", "hours_to_", "minutes_to_",
+]
+
+def _is_forbidden(name: str) -> bool:
+    n = str(name).lower()
+    return any(pat in n for pat in INTAKE_FORBIDDEN_PATTERNS)
+
+def enforce_intake_only(features_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop columns that cannot be known at notification time and keep numeric, clean values."""
+    keep = [c for c in features_df.columns if not _is_forbidden(c)]
+    dropped = sorted(set(features_df.columns) - set(keep))
+    if dropped:
+        print(f"Intake-only guard: dropped {len(dropped)} post-outcome/forbidden columns")
+    X = (
+        features_df[keep]
+        .select_dtypes(include=[np.number])
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    return X
+
+def _to_dt(s): 
+    return pd.to_datetime(s, errors="coerce")
+
+def build_labels_post_notify(
+    df: pd.DataFrame,
+    *,
+    t_notify_col: str = "incident_datetime",
+    t_occurrence_col: str = "incident_occurrence_datetime",
+    medical_event_time_col: str = "medical_event_datetime",
+    medical_flag_col: str = "medical_attention_required",
+    investigation_opened_time_col: str = "investigation_opened_datetime",
+    repeat_window_days: int = 30
+) -> pd.DataFrame:
+    """
+    Adds post-notify, leakage-safe targets:
+      - delay_over_24h
+      - medical_attention_required (within 72h or final flag)
+      - investigation_required (opened within 7d)
+      - repeat_30d (same participant within 30d)
+    """
+    d = df.copy()
+    d["_t_notify"] = _to_dt(d.get(t_notify_col))
+    d["_t_occ"]    = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
+    d["_t_med"]    = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
+    d["_t_inv"]    = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
+
+    # 1) Delay >24h (occurrence -> notify)
+    if d["_t_occ"].notna().any():
+        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
+        d["delay_over_24h"] = (delta_h > 24).astype(int)
+    else:
+        d["delay_over_24h"] = 0
+
+    # 2) Medical attention within 72h of notify (or final flag)
+    has_med_time = d["_t_med"].notna()
+    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
+    med_flag = d.get(medical_flag_col, 0)
+    med_flag = med_flag.astype(str).str.lower().isin(["yes","true","1"]).astype(int)
+    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
+
+    # 3) Investigation required within 7 days
+    if d["_t_inv"].notna().any():
+        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
+        d["investigation_required"] = within_7d.astype(int)
+    else:
+        d["investigation_required"] = 0
+
+    # 4) Repeat in 30 days for the same participant
+    if "participant_id" in d.columns:
+        d = d.sort_values(["participant_id", "_t_notify"])
+        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
+        d["repeat_30d"] = (
+            next_time.notna() &
+            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
+        ).astype(int)
+        d = d.sort_index()
+    else:
+        d["repeat_30d"] = 0
+
+    # Optional numeric severity for fallback target only (do not use as features)
+    if "severity_numeric" not in d.columns and "severity" in d.columns:
+        sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
+
+    return d
 
 
 # ---------------------------------------
@@ -796,160 +927,157 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
 
 def predictive_models_comparison(
     df: pd.DataFrame,
-    target: str = "high_severity",  # default now predicts High/Critical severity
-    test_size: float = 0.25,
+    target: str = "high_severity",
+    test_size: float = 0.20,
     random_state: int = 42,
-    extra_leaky_features: Optional[List[str]] = None,
-    split_strategy: str = "time",
+    split_strategy: str = "time_grouped",   # changed default
     time_col: Optional[str] = "incident_datetime",
-    group_col: Optional[str] = None,
-    leak_corr_threshold: float = 0.80,  # Lowered from 0.90
+    group_cols: Optional[List[str]] = None, # ['participant_id','carer_id'] if present
+    leak_corr_threshold: float = 0.80,
     leak_name_patterns: Optional[List[str]] = None,
+    intake_only: bool = True,               # NEW: enforce intake-only features
 ) -> Dict[str, Any]:
     """
-    Enhanced version with better leakage detection and validation.
+    Leakage-resilient training/evaluation:
+      - Intake-only feature filter (name-based hard ban)
+      - Temporal split (old -> train, newest -> test)
+      - Identity guarding: any participant/carer in test is removed from train
     """
-    from sklearn.model_selection import train_test_split, GroupShuffleSplit, cross_val_score, StratifiedKFold
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
-    
-    # 1) Create features (using your existing function)
-    out = create_comprehensive_features(df)
-    if isinstance(out, tuple) and len(out) == 3:
-        _, _, features_df = out
-    elif isinstance(out, pd.DataFrame):
-        features_df = out
-    else:
-        features_df = pd.DataFrame(out)
-    features_df = features_df.copy()
+    from sklearn.pipeline import Pipeline
+    import numpy as np
+    import pandas as pd
 
-    # 2) Target preparation
-    if target in df.columns:
-        y = df.loc[features_df.index, target].copy()
-    else:
-        y = (df.get("severity_numeric", pd.Series([2]*len(df))).loc[features_df.index] >= 3).astype(int)
-
-    print(f"Dataset size: {len(features_df)} samples, {len(features_df.columns)} features")
-    print(f"Target distribution: {y.value_counts().to_dict()}")
-
-    # 3) Data splitting (keeping your existing logic)
+    # 0) Resolve datetime & groups
     df_dt = ensure_incident_datetime(df)
     if time_col not in df_dt.columns:
-        time_col = "incident_date" if "incident_date" in df_dt.columns else None
+        time_col = "incident_date" if "incident_date" in df_dt.columns else "incident_datetime"
+    dt = pd.to_datetime(df_dt[time_col], errors="coerce")
 
-    if split_strategy == "time" and time_col:
-        dt = pd.to_datetime(df_dt.loc[features_df.index, time_col], errors="coerce")
-        cutoff = dt.quantile(0.75)  # Use more data for training
-        mask_train = dt <= cutoff
-        mask_test = dt > cutoff
-        X_train_df, X_test_df = features_df[mask_train], features_df[mask_test]
-        y_train, y_test = y[mask_train], y[mask_test]
-    elif split_strategy == "group" and group_col and group_col in df.columns:
-        groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
-        gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
-        train_idx, test_idx = next(gss.split(features_df, y, groups))
-        X_train_df, X_test_df = features_df.iloc[train_idx], features_df.iloc[test_idx]
-        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+    if group_cols is None:
+        group_cols = [c for c in ["participant_id", "carer_id"] if c in df_dt.columns]
+    if group_cols:
+        df_dt["_groupkey"] = df_dt[group_cols].astype(str).agg("|".join, axis=1)
     else:
-        strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
-        X_train_df, X_test_df, y_train, y_test = train_test_split(
-            features_df, y, test_size=test_size, random_state=random_state, stratify=strat
-        )
+        df_dt["_groupkey"] = "NA"
+
+    # 1) Build features
+    out = create_comprehensive_features(df_dt)
+    if isinstance(out, tuple) and len(out) == 3:
+        _, feature_names, features_df = out
+    elif isinstance(out, pd.DataFrame):
+        features_df = out.copy()
+        feature_names = list(features_df.columns)
+    else:
+        features_df = pd.DataFrame(out).copy()
+        feature_names = list(features_df.columns)
+
+    # Align indices
+    idx = features_df.index.intersection(df_dt.index)
+    features_df, df_dt, dt = features_df.loc[idx], df_dt.loc[idx], dt.loc[idx]
+
+    # 2) Target
+    if target in df_dt.columns:
+        y = df_dt[target].astype(int)
+    else:
+        if "severity_numeric" in df_dt.columns:
+            y = (df_dt["severity_numeric"] >= 3).astype(int)
+            print("Target not found; falling back to high/critical from severity_numeric (⚠ consider a decision-relevant target).")
+        else:
+            raise ValueError(f"Target '{target}' not found and no severity_numeric to fallback.")
+    if any(k in target.lower() for k in ["severity", "reportable"]):
+        print("⚠ WARNING: Target appears definition-linked (severity/reportable). Prefer a pre-outcome decision target (e.g., investigation_required).")
+
+    # 3) Intake-only feature enforcement
+    if intake_only:
+        features_df = enforce_intake_only(features_df)
+
+    # 4) Temporal split → newest test_size to test
+    order = dt.sort_values(kind="mergesort")
+    if len(order) == 0:
+        raise ValueError("No valid timestamps for temporal split.")
+    cutoff_time = order.iloc[int(np.floor((1 - test_size) * len(order)))]
+    test_mask = dt > cutoff_time
+    train_mask = ~test_mask
+
+    X_train_df, X_test_df = features_df[train_mask], features_df[test_mask]
+    y_train, y_test = y[train_mask], y[test_mask]
+
+    # 4b) Identity guard: drop groups overlapping between splits
+    gkey = df_dt["_groupkey"]
+    overlap = set(gkey[train_mask]) & set(gkey[test_mask])
+    if overlap and any(k != "NA" for k in overlap):
+        drop_mask = gkey.isin(overlap) & train_mask
+        X_train_df, y_train = X_train_df[~drop_mask], y_train[~drop_mask]
+        print(f"Identity guard: removed {int(drop_mask.sum())} train rows sharing identities with test.")
 
     print(f"Training set: {len(X_train_df)}, Test set: {len(X_test_df)}")
 
-    # 4) Enhanced leakage detection patterns
-    enhanced_patterns = leak_name_patterns or [
+    # 5) Guard patterns merged with defaults
+    enhanced_patterns = (leak_name_patterns or []) + [
         "report", "reportable", "notify", "notified",
         "investigat", "severity", "medical", "outcome",
         "resolution", "timeframe", "delay", "compliance",
-        "follow", "action", "result", "status", "closed"
+        "follow", "action", "result", "status", "closed", "sla", "breach",
+        "hospital", "clinic", "treatment"
     ]
 
-    # 6) Models with more conservative settings
     rf_pipe = Pipeline([
-        ("guard", LeakageGuard(
-            columns_out=None,
-            drop_patterns=enhanced_patterns,
-            corr_threshold=leak_corr_threshold
-        )),
+        ("guard", LeakageGuard(columns_out=None, drop_patterns=enhanced_patterns, corr_threshold=leak_corr_threshold)),
         ("model", RandomForestClassifier(
-            n_estimators=50,      # Reduced to prevent overfitting
-            max_depth=4,          # Limit depth
-            min_samples_split=10, # Require more samples to split
-            min_samples_leaf=5,   # Require more samples in leaf
-            random_state=random_state,
-            class_weight='balanced'
+            n_estimators=80, max_depth=5, min_samples_split=15, min_samples_leaf=6,
+            random_state=random_state, class_weight="balanced_subsample"
         )),
     ])
 
     lr_pipe = Pipeline([
-        ("guard", LeakageGuard(
-            columns_out=None,
-            drop_patterns=enhanced_patterns,
-            corr_threshold=leak_corr_threshold
-        )),
+        ("guard", LeakageGuard(columns_out=None, drop_patterns=enhanced_patterns, corr_threshold=leak_corr_threshold)),
         ("scaler", StandardScaler(with_mean=True)),
         ("model", LogisticRegression(
-            max_iter=1000, 
-            solver="liblinear",  # Better for small datasets
-            C=0.1,              # More regularization
-            random_state=random_state,
-            class_weight='balanced'
+            max_iter=1000, solver="liblinear", C=0.15, random_state=random_state, class_weight="balanced"
         )),
     ])
 
     results: Dict[str, Any] = {}
-
-    # 7) Train and evaluate models
     for name, pipe in [("RandomForest", rf_pipe), ("LogisticRegression", lr_pipe)]:
-        print(f"\n=== Training {name} ===")
-        
-        # Fit model
+        print(f"\n=== Training {name} (intake-only={intake_only}, time_grouped) ===")
         pipe.fit(X_train_df, y_train)
-        
-        # Show leakage detection results
         pipe.named_steps["guard"].print_leakage_report()
-        
-        # Predictions
-        pred = pipe.predict(X_test_df)
+
+        pred  = pipe.predict(X_test_df)
         proba = pipe.predict_proba(X_test_df) if hasattr(pipe, "predict_proba") else None
-        test_accuracy = (pred == y_test).mean()
-        
-        # Cross-validation on training set
+        acc   = float((pred == y_test).mean())
+
         cv_scores = None
-        if len(X_train_df) > 10:
+        if len(X_train_df) >= 60:
             try:
-                cv = StratifiedKFold(n_splits=min(3, len(X_train_df)//10), shuffle=True, random_state=random_state)
-                cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring='accuracy')
-                print(f"Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+                cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_state)
+                cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring="roc_auc")
+                print(f"Train CV ROC AUC: {cv_scores.mean():.3f} (+/- {cv_scores.std()*2:.3f})")
             except Exception as e:
-                print(f"Cross-validation failed: {e}")
-        
-        feature_names = list(pipe.named_steps["guard"].get_feature_names_out())
-        
+                print(f"CV failed: {e}")
+
+        kept = list(pipe.named_steps["guard"].get_feature_names_out())
         results[name] = {
             "model": pipe,
-            "accuracy": float(test_accuracy),
+            "accuracy": acc,
             "cv_scores": cv_scores.tolist() if cv_scores is not None else None,
             "y_test": y_test,
             "predictions": pred,
             "probabilities": proba,
-            "feature_names": feature_names,
+            "feature_names": kept,
         }
-        
-        print(f"Test accuracy: {test_accuracy:.3f}")
-        print(f"Features used: {len(feature_names)}")
-        
-        # Warn about perfect performance
-        if test_accuracy >= 0.98:
-            print("⚠️  WARNING: Very high accuracy detected!")
-            print("   This may indicate data leakage or overfitting.")
-            if cv_scores is not None and cv_scores.mean() < 0.9:
-                print("   Cross-validation shows much lower performance - likely overfitting.")
+        print(f"Test accuracy: {acc:.3f}")
+        print(f"Features used: {len(kept)}")
+
+        if acc >= 0.98:
+            print("⚠️  WARNING: Very high accuracy detected — re-check leakage/targets.")
 
     return results
+
 
 # ---------------------------------------
 # 8) Incident type risk profiling
@@ -1528,3 +1656,31 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
+
+
+# ---------------------------------------
+# (Optional) Quick helper to train three intake-only, post-notify targets
+# ---------------------------------------
+def train_intake_only_examples(df_raw: pd.DataFrame):
+    """
+    Example: trains three intake-only models with leakage-safe labels.
+    Returns a dict of results keyed by target name.
+    """
+    df_lab = build_labels_post_notify(df_raw)
+
+    results = {}
+    for target in ["medical_attention_required", "investigation_required", "delay_over_24h"]:
+        try:
+            res = predictive_models_comparison(
+                df=df_lab,
+                target=target,
+                split_strategy="time_grouped",          # newest 20% as test, identity-guarded
+                time_col="incident_datetime",
+                group_cols=["participant_id","carer_id"],
+                intake_only=True,                       # hard-ban post-outcome columns as features
+                leak_corr_threshold=0.80
+            )
+            results[target] = res
+        except Exception as e:
+            print(f"Skipping {target}: {e}")
+    return results
