@@ -18,6 +18,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.stattools import adfuller
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -175,104 +179,6 @@ def create_comprehensive_features(df: pd.DataFrame):
     if _create_comprehensive_features is not None:
         return _create_comprehensive_features(df)
     return _fallback_features(df)
-# --- Investigation rules (keeps your function name) ---
-def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return a copy of df with:
-      - investigation_required (bool)
-      - investigation_reason (str; semicolon-separated)
-    Compatible with missing columns and won’t crash if fields are absent.
-
-    Heuristics (any triggers investigation):
-      • severity ∈ {'High','Critical'}
-      • medical_attention_required == truthy (or medical_attention_required_bin == 1)
-      • incident_type contains 'abuse' or 'neglect'
-      • participant_vulnerable == truthy (if present)
-      • delay_to_report_hours > 24 (if present)
-      • participant_incident_count >= 3 (if present)
-      • carer_incident_count >= 5 (if present)
-    Existing columns are respected: we only *add* True/Reasons; we don’t clear your existing True flags.
-    """
-    d = df.copy()
-
-    def _truthy(series_like) -> pd.Series:
-        if series_like is None:
-            return pd.Series(False, index=d.index)
-        s = pd.Series(series_like)
-        if str(s.dtype) == "bool":
-            return s.fillna(False)
-        if s.dtype.kind in "biu":
-            return (s.fillna(0).astype(int) != 0)
-        return s.astype(str).str.strip().str.lower().isin({"1", "true", "yes", "y", "t"})
-
-    # Normalize severity → string for checks
-    sev = d.get("severity")
-    sev_str = sev.astype(str).str.strip().str.title() if sev is not None else pd.Series("", index=d.index)
-
-    # Medical attention (either the *_bin column or a text column)
-    med_bin = d.get("medical_attention_required_bin")
-    med_text = d.get("medical_attention_required")
-    med_truth = _truthy(med_bin if med_bin is not None else med_text)
-
-    # Incident type text
-    itype = d.get("incident_type")
-    itype_str = itype.astype(str).str.lower() if itype is not None else pd.Series("", index=d.index)
-
-    # Optional columns
-    vulnerable = _truthy(d.get("participant_vulnerable"))
-    delay_hours = pd.to_numeric(d.get("delay_to_report_hours"), errors="coerce") if "delay_to_report_hours" in d.columns else pd.Series(np.nan, index=d.index)
-    p_hist = pd.to_numeric(d.get("participant_incident_count"), errors="coerce") if "participant_incident_count" in d.columns else pd.Series(0, index=d.index)
-    c_hist = pd.to_numeric(d.get("carer_incident_count"), errors="coerce") if "carer_incident_count" in d.columns else pd.Series(0, index=d.index)
-
-    # Rule masks
-    m_sev = sev_str.isin(["High", "Critical"])
-    m_med = med_truth
-    m_abuse_neglect = itype_str.str.contains(r"\babuse\b|\bneglect\b", regex=True, na=False)
-    m_vuln = vulnerable
-    m_delay = delay_hours.fillna(0) > 24
-    m_repeat_participant = p_hist.fillna(0) >= 3
-    m_repeat_carer = c_hist.fillna(0) >= 5
-
-    # Build reason strings (vectorized concat)
-    reason = pd.Series("", index=d.index, dtype=object)
-
-    def _add_reason(mask: pd.Series, text: str):
-        nonlocal reason
-        to_add = mask.fillna(False)
-        if to_add.any():
-            sep = reason.where(reason.eq(""), "; ").mask(reason.eq(""), "")
-            reason = reason.where(~to_add, reason + sep + text)
-
-    _add_reason(m_sev, "High or Critical severity")
-    _add_reason(m_med, "Medical attention required")
-    _add_reason(m_abuse_neglect, "Abuse/Neglect incident type")
-    _add_reason(m_vuln, "Participant marked as vulnerable")
-    _add_reason(m_delay, "Reported >24h after incident")
-    _add_reason(m_repeat_participant, "Repeat incidents for participant (>=3)")
-    _add_reason(m_repeat_carer, "Repeat incidents for carer (>=5)")
-
-    # Final flag: any rule true
-    rules_flag = (m_sev | m_med | m_abuse_neglect | m_vuln | m_delay | m_repeat_participant | m_repeat_carer).fillna(False)
-
-    # Respect existing columns if present (don’t remove existing True/Reasons)
-    existing_flag = _truthy(d.get("investigation_required"))
-    d["investigation_required"] = (existing_flag | rules_flag).astype(bool)
-
-    existing_reason = d.get("investigation_reason")
-    if existing_reason is not None:
-        existing_reason = existing_reason.fillna("").astype(str)
-        sep = existing_reason.where(existing_reason.eq(""), "; ").mask(existing_reason.eq(""), "")
-        # only append new reasons where we are newly True or existing reason empty
-        needs_reason = d["investigation_required"] & ((existing_reason == "") | (reason != ""))
-        d["investigation_reason"] = np.where(
-            needs_reason,
-            (existing_reason + sep + reason).str.strip("; ").str.strip(),
-            existing_reason
-        )
-    else:
-        d["investigation_reason"] = np.where(d["investigation_required"], reason, "")
-
-    return d
 
 
 # ---------------------------------------
@@ -940,14 +846,12 @@ def predictive_models_comparison(
         X_train_df, X_test_df = features_df[mask_train], features_df[mask_test]
         y_train, y_test = y[mask_train], y[mask_test]
     elif split_strategy == "group" and group_col and group_col in df.columns:
-        from sklearn.model_selection import GroupShuffleSplit
         groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
         gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
         train_idx, test_idx = next(gss.split(features_df, y, groups))
         X_train_df, X_test_df = features_df.iloc[train_idx], features_df.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     else:
-        from sklearn.model_selection import train_test_split
         strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
         X_train_df, X_test_df, y_train, y_test = train_test_split(
             features_df, y, test_size=test_size, random_state=random_state, stratify=strat
@@ -956,14 +860,14 @@ def predictive_models_comparison(
     print(f"Training set: {len(X_train_df)}, Test set: {len(X_test_df)}")
 
     # 4) Enhanced leakage detection patterns
-    enhanced_patterns = (leak_name_patterns or [
+    enhanced_patterns = leak_name_patterns or [
         "report", "reportable", "notify", "notified",
         "investigat", "severity", "medical", "outcome",
         "resolution", "timeframe", "delay", "compliance",
         "follow", "action", "result", "status", "closed"
-    ])
+    ]
 
-    # 6) Models with conservative settings
+    # 6) Models with more conservative settings
     rf_pipe = Pipeline([
         ("guard", LeakageGuard(
             columns_out=None,
@@ -971,10 +875,10 @@ def predictive_models_comparison(
             corr_threshold=leak_corr_threshold
         )),
         ("model", RandomForestClassifier(
-            n_estimators=50,
-            max_depth=4,
-            min_samples_split=10,
-            min_samples_leaf=5,
+            n_estimators=50,      # Reduced to prevent overfitting
+            max_depth=4,          # Limit depth
+            min_samples_split=10, # Require more samples to split
+            min_samples_leaf=5,   # Require more samples in leaf
             random_state=random_state,
             class_weight='balanced'
         )),
@@ -989,8 +893,8 @@ def predictive_models_comparison(
         ("scaler", StandardScaler(with_mean=True)),
         ("model", LogisticRegression(
             max_iter=1000, 
-            solver="liblinear",
-            C=0.1,
+            solver="liblinear",  # Better for small datasets
+            C=0.1,              # More regularization
             random_state=random_state,
             class_weight='balanced'
         )),
@@ -1017,7 +921,7 @@ def predictive_models_comparison(
         cv_scores = None
         if len(X_train_df) > 10:
             try:
-                cv = StratifiedKFold(n_splits=min(3, max(2, len(X_train_df)//10)), shuffle=True, random_state=random_state)
+                cv = StratifiedKFold(n_splits=min(3, len(X_train_df)//10), shuffle=True, random_state=random_state)
                 cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring='accuracy')
                 print(f"Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
             except Exception as e:
@@ -1038,8 +942,12 @@ def predictive_models_comparison(
         print(f"Test accuracy: {test_accuracy:.3f}")
         print(f"Features used: {len(feature_names)}")
         
+        # Warn about perfect performance
         if test_accuracy >= 0.98:
-            print("⚠️  WARNING: Very high accuracy detected — re-check leakage/targets.")
+            print("⚠️  WARNING: Very high accuracy detected!")
+            print("   This may indicate data leakage or overfitting.")
+            if cv_scores is not None and cv_scores.mean() < 0.9:
+                print("   Cross-validation shows much lower performance - likely overfitting.")
 
     return results
 
@@ -1291,8 +1199,8 @@ def create_predictive_risk_scoring(
 
     # If it's a Pipeline, try to get names from a step
     try:
-        from sklearn.pipeline import Pipeline as _PL
-        if isinstance(model, _PL):
+        from sklearn.pipeline import Pipeline
+        if isinstance(model, Pipeline):
             for name, step in model.steps:
                 # custom selector / guard
                 if hasattr(step, "columns_out_") and isinstance(step.columns_out_, (list, tuple)):
@@ -1620,235 +1528,3 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
-# --- helpers (safe datetime cast) ---
-def _to_dt(s):
-    return pd.to_datetime(s, errors="coerce")
-
-
-# ========================================
-# Post-notify label builder (leak-safe)
-# ========================================
-def build_labels_post_notify(
-    df: pd.DataFrame,
-    *,
-    t_notify_col: str = "incident_datetime",                 # when the incident was logged/notified
-    t_occurrence_col: str = "incident_occurrence_datetime",  # when it actually occurred (if you have it)
-    medical_event_time_col: str = "medical_event_datetime",  # time medical attention actually happened
-    medical_flag_col: str = "medical_attention_required",    # existing yes/no flag (any style)
-    investigation_opened_time_col: str = "investigation_opened_datetime",
-    repeat_window_days: int = 30
-) -> pd.DataFrame:
-    """
-    Adds leakage-safe, post-notification targets to df:
-      • delay_over_24h
-      • medical_attention_required
-      • investigation_required
-      • repeat_30d
-    Works even if some timestamp columns are missing.
-    """
-    d = df.copy()
-
-    # Ensure we have a usable notify datetime (fall back to incident_date)
-    d = ensure_incident_datetime(d)
-    d["_t_notify"] = _to_dt(d.get(t_notify_col, d.get("incident_datetime")))
-
-    # Optional timestamps
-    d["_t_occ"] = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
-    d["_t_med"] = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
-    d["_t_inv"] = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
-
-    # 1) Delay > 24h between occurrence and notify
-    if d["_t_occ"].notna().any():
-        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
-        d["delay_over_24h"] = (delta_h > 24).astype(int)
-    else:
-        d["delay_over_24h"] = 0
-
-    # 2) Medical attention within 72h of notify OR a final yes-flag
-    med_flag = d.get(medical_flag_col, 0)
-    med_flag = pd.Series(med_flag).astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
-    has_med_time = d["_t_med"].notna()
-    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
-    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
-
-    # 3) Investigation opened within 7 days of notify (if we have a timestamp)
-    if d["_t_inv"].notna().any():
-        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
-        d["investigation_required"] = within_7d.astype(int)
-    else:
-        # fallback: keep existing column if already present; otherwise derive a cautious heuristic
-        if "investigation_required" not in d.columns:
-            # Heuristic: high/critical, medical attention, or repeat within 30d → likely investigation
-            sev_map = {"low":1, "medium":2, "high":3, "critical":4}
-            sev_num = (
-                d.get("severity_numeric") if "severity_numeric" in d.columns
-                else d.get("severity", pd.Series(index=d.index, dtype=object)).astype(str).str.lower().map(sev_map)
-            ).fillna(2)
-            # compute repeat_30d first (used below)
-            # (will be overwritten by the proper section later if we also have participant_id)
-            d["repeat_30d"] = 0
-            d["investigation_required"] = (
-                (sev_num >= 3) |
-                (d["medical_attention_required"] == 1)
-            ).astype(int)
-
-    # 4) Repeat within 30 days for the same participant (needs participant_id)
-    if "participant_id" in d.columns:
-        d = d.sort_values(["participant_id", "_t_notify"])
-        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
-        d["repeat_30d"] = (
-            next_time.notna() &
-            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
-        ).astype(int)
-        d = d.sort_index()
-    else:
-        d["repeat_30d"] = d.get("repeat_30d", 0)
-
-    # Provide severity_numeric if only textual severity exists
-    if "severity_numeric" not in d.columns and "severity" in d.columns:
-        sev_map2 = {"Low":1, "Medium":2, "High":3, "Critical":4}
-        d["severity_numeric"] = d["severity"].map(sev_map2).fillna(2).astype(int)
-
-    return d
-# ========================================
-# Investigation rules 
-# ========================================
-def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure/derive `investigation_required` using simple, explainable rules,
-    but DO NOT overwrite a pre-existing explicit flag.
-    Rules (OR logic):
-      • severity High/Critical
-      • medical_attention_required == 1 (or 'yes')
-      • repeat_30d == 1
-      • keywords in contributing_factors/description (optional)
-    """
-    d = df.copy()
-
-    # If already present, normalise to 0/1 and return
-    if "investigation_required" in d.columns:
-        d["investigation_required"] = (
-            pd.to_numeric(d["investigation_required"], errors="coerce")
-            .fillna(
-                d["investigation_required"].astype(str).str.lower()
-                .isin(["1","true","yes","y","t"])
-            ).astype(int)
-        )
-        return d
-
-    # Severity → numeric
-    sev_num = None
-    if "severity_numeric" in d.columns:
-        sev_num = pd.to_numeric(d["severity_numeric"], errors="coerce")
-    elif "severity" in d.columns:
-        sev_map = {"low":1, "medium":2, "high":3, "critical":4}
-        sev_num = d["severity"].astype(str).str.lower().map(sev_map)
-    else:
-        sev_num = pd.Series(2, index=d.index)  # default Medium
-
-    # Medical flag to 0/1
-    if "medical_attention_required" in d.columns:
-        med = d["medical_attention_required"]
-        if med.dtype.kind in "biu":
-            med_bin = (med > 0).astype(int)
-        else:
-            med_bin = med.astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
-    elif "medical_attention_required_bin" in d.columns:
-        med_bin = pd.to_numeric(d["medical_attention_required_bin"], errors="coerce").fillna(0).clip(0,1).astype(int)
-    else:
-        med_bin = pd.Series(0, index=d.index)
-
-    # Repeat flag if present
-    rep = pd.to_numeric(d.get("repeat_30d", 0), errors="coerce").fillna(0).clip(0,1).astype(int)
-
-    # Optional text signals
-    text_cols = []
-    if "contributing_factors" in d.columns: text_cols.append("contributing_factors")
-    if "description" in d.columns:          text_cols.append("description")
-    risky = pd.Series(False, index=d.index)
-    if text_cols:
-        pat = re.compile(r"\b(assault|abuse|allegation|injur|fracture|police|violence|unsafe|neglect)\b", re.I)
-        risky = d[text_cols].astype(str).apply(lambda s: any(bool(pat.search(x)) for x in s), axis=1)
-
-    inv = (
-        (sev_num.fillna(2) >= 3) |     # High/Critical
-        (med_bin == 1) |
-        (rep == 1) |
-        (risky)
-    ).astype(int)
-
-    d["investigation_required"] = inv
-    return d
-
-# -------------------------------
-# Leak-safe post-notify targets
-# -------------------------------
-def _to_dt(s):
-    import pandas as pd
-    return pd.to_datetime(s, errors="coerce")
-
-def build_labels_post_notify(
-    df: pd.DataFrame,
-    *,
-    t_notify_col: str = "incident_datetime",
-    t_occurrence_col: str = "incident_occurrence_datetime",
-    medical_event_time_col: str = "medical_event_datetime",
-    medical_flag_col: str = "medical_attention_required",
-    investigation_opened_time_col: str = "investigation_opened_datetime",
-    repeat_window_days: int = 30
-) -> pd.DataFrame:
-    d = df.copy()
-
-    # ensure notify time
-    if "incident_datetime" not in d.columns:
-        if "incident_date" in d.columns:
-            d["incident_datetime"] = pd.to_datetime(d["incident_date"], errors="coerce")
-        else:
-            d["incident_datetime"] = pd.NaT
-    d["_t_notify"] = _to_dt(d.get(t_notify_col, d.get("incident_datetime")))
-
-    # optional timestamps
-    d["_t_occ"] = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
-    d["_t_med"] = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
-    d["_t_inv"] = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
-
-    # 1) >24h delay (occurrence → notify)
-    if d["_t_occ"].notna().any():
-        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
-        d["delay_over_24h"] = (delta_h > 24).astype(int)
-    else:
-        d["delay_over_24h"] = 0
-
-    # 2) Medical attention within 72h OR final yes-flag
-    med_flag = d.get(medical_flag_col, 0)
-    med_flag = pd.Series(med_flag).astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
-    has_med_time = d["_t_med"].notna()
-    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
-    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
-
-    # 3) Investigation opened within 7 days
-    if d["_t_inv"].notna().any():
-        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
-        d["investigation_required"] = within_7d.astype(int)
-    else:
-        if "investigation_required" not in d.columns:
-            d["investigation_required"] = 0  # don’t guess here if we have no time
-
-    # 4) Repeat within 30 days for same participant
-    if "participant_id" in d.columns:
-        d = d.sort_values(["participant_id", "_t_notify"])
-        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
-        d["repeat_30d"] = (
-            next_time.notna() &
-            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
-        ).astype(int)
-        d = d.sort_index()
-    else:
-        d["repeat_30d"] = 0
-
-    # severity_numeric helper if missing
-    if "severity_numeric" not in d.columns and "severity" in d.columns:
-        sev_map = {"Low":1, "Medium":2, "High":3, "Critical":4}
-        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
-
-    return d
