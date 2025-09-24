@@ -5,13 +5,6 @@
 # - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
 from __future__ import annotations
 
-   # ml_helpers.py
-# Utilities and analytics helpers for the NDIS dashboard.
-# - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
-# - Baseline visuals + models
-# - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
-from __future__ import annotations
-
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -89,7 +82,7 @@ def enforce_intake_only(features_df: pd.DataFrame) -> pd.DataFrame:
     )
     return X
 
-def _to_dt(s): 
+def _to_dt(s):
     return pd.to_datetime(s, errors="coerce")
 
 def build_labels_post_notify(
@@ -153,6 +146,43 @@ def build_labels_post_notify(
         sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
         d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
 
+    return d
+
+
+# ---------------------------------------
+# Keep your original function name
+# ---------------------------------------
+def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure an 'investigation_required' column exists in a leakage-safe way.
+
+    Priority:
+      1) If timing columns exist, derive labels via build_labels_post_notify() (safe post-notify).
+      2) Otherwise, intake-time fallback: investigation if severity is High/Critical OR
+         medical_attention_required is True. (Does not use future info.)
+    """
+    d = df.copy()
+
+    # If already present, keep what the dataset has.
+    if "investigation_required" in d.columns:
+        return d
+
+    # Prefer safe post-notify derivation if timing fields exist.
+    if ("investigation_opened_datetime" in d.columns) or ("medical_event_datetime" in d.columns):
+        d = build_labels_post_notify(d)
+        return d
+
+    # Intake-time fallback (no future fields):
+    if "severity_numeric" not in d.columns and "severity" in d.columns:
+        sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
+
+    med = d.get("medical_attention_required", 0)
+    med_bin = pd.Series(med, index=d.index).astype(str).str.lower().isin(["yes", "true", "1"]).astype(int)
+
+    sev_num = d.get("severity_numeric", pd.Series([2] * len(d), index=d.index)).astype(int)
+
+    d["investigation_required"] = ((sev_num >= 3) | (med_bin == 1)).astype(int)
     return d
 
 
@@ -328,12 +358,12 @@ def incident_volume_forecasting(
             "lower": np.maximum(0, forecast.values - 1.96 * std_val),
             "upper": forecast.values + 1.96 * std_val,
         }, index=idx)
-        
+
         out = pd.DataFrame({"actual": y})
         fc_df = pd.concat([forecast, conf_int], axis=1)
         merged = out.join(fc_df, how="outer")
         merged.index.name = "date"
-        
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
         fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
@@ -351,11 +381,11 @@ def incident_volume_forecasting(
 
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX
-        
+
         # Apply log transformation to prevent negative predictions
         y_positive = np.maximum(y, 0.1)  # Ensure positive values
         y_log = np.log1p(y_positive)  # log1p handles near-zero values better
-        
+
         # More conservative seasonal parameters
         if len(y) >= 2 * season_length:
             # Full seasonal model only with sufficient data
@@ -369,50 +399,50 @@ def incident_volume_forecasting(
             # No seasonality
             seasonal_order = (0, 0, 0, 0)
             order = (1, 1, 1)
-        
+
         # Fit model with conservative settings
         model = SARIMAX(
-            y_log, 
-            order=order, 
+            y_log,
+            order=order,
             seasonal_order=seasonal_order,
             enforce_stationarity=True,
             enforce_invertibility=True,
             concentrate_scale=True  # Better numerical stability
         )
-        
+
         # Fit with better optimization settings
         res = model.fit(
-            disp=False, 
+            disp=False,
             maxiter=200,
             method='lbfgs',  # More stable than default
             optim_score='harvey'  # Alternative scoring
         )
-        
+
         # Get forecast in log space
         fc = res.get_forecast(steps=H)
         forecast_log = fc.predicted_mean
         conf_log = fc.conf_int(alpha=0.05)  # 95% interval
-        
+
         # Transform back to original space
         forecast = np.expm1(forecast_log).rename("forecast")
         conf_int = pd.DataFrame({
             "lower": np.maximum(0, np.expm1(conf_log.iloc[:, 0]).values),  # Ensure non-negative
             "upper": np.expm1(conf_log.iloc[:, 1]).values
         }, index=forecast.index)
-        
+
         # Additional sanity checks
         max_historical = y.max()
         forecast = np.minimum(forecast, max_historical * 3)  # Cap extreme forecasts
         conf_int["upper"] = np.minimum(conf_int["upper"], max_historical * 4)
-        
+
         use_sarimax = True
-        
+
     except Exception as e:
         print(f"SARIMAX failed: {e}")
         # Enhanced seasonal naive fallback
         try:
             idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
-            
+
             if len(y) >= season_length:
                 # Use seasonal pattern with trend adjustment
                 last_season = y[-season_length:].values
@@ -423,7 +453,7 @@ def incident_volume_forecasting(
                     trend = max(-0.1, min(0.1, (recent_avg - older_avg) / older_avg))  # Cap trend
                 else:
                     trend = 0
-                
+
                 # Apply trend to seasonal pattern
                 base_vals = last_season * (1 + trend)
                 vals = np.tile(base_vals, int(np.ceil(H / season_length)))[:H]
@@ -435,18 +465,18 @@ def incident_volume_forecasting(
                 else:
                     trend = 0
                 vals = [max(0.1, y.iloc[-1] + trend * i) for i in range(1, H + 1)]
-            
+
             forecast = pd.Series(vals, index=idx, name="forecast")
-            
+
             # Confidence intervals based on historical volatility
             historical_std = y.std()
             expanding_std = np.array([historical_std * np.sqrt(i) for i in range(1, H + 1)])
-            
+
             conf_int = pd.DataFrame({
                 "lower": np.maximum(0, forecast.values - 1.96 * expanding_std),
                 "upper": forecast.values + 1.96 * expanding_std,
             }, index=idx)
-            
+
         except Exception:
             # Ultimate fallback: flat forecast
             idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
@@ -466,46 +496,46 @@ def incident_volume_forecasting(
 
     # Enhanced figure with better styling
     fig = go.Figure()
-    
+
     # Historical data
     fig.add_trace(go.Scatter(
-        x=y.index, y=y.values, 
-        mode="lines+markers", 
+        x=y.index, y=y.values,
+        mode="lines+markers",
         name="Actual",
         line=dict(color='steelblue', width=2),
         marker=dict(size=4)
     ))
-    
+
     # Forecast
     fig.add_trace(go.Scatter(
-        x=forecast.index, y=forecast.values, 
-        mode="lines+markers", 
+        x=forecast.index, y=forecast.values,
+        mode="lines+markers",
         name="Forecast",
         line=dict(color='orange', width=2, dash='dash'),
         marker=dict(size=4)
     ))
-    
+
     # Confidence interval
     fig.add_trace(go.Scatter(
         x=list(conf_int.index) + list(conf_int.index[::-1]),
         y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
-        fill="toself", 
-        opacity=0.2, 
-        line=dict(width=0), 
+        fill="toself",
+        opacity=0.2,
+        line=dict(width=0),
         name="95% interval",
         fillcolor='orange'
     ))
-    
+
     model_type = 'SARIMAX (Log-transformed)' if use_sarimax else 'Enhanced Seasonal Naive'
     fig.update_layout(
         title=f"Monthly Incident Forecast ({model_type})",
-        xaxis_title="Month", 
-        yaxis_title="Incidents", 
+        xaxis_title="Month",
+        yaxis_title="Incidents",
         hovermode="x unified",
         showlegend=True,
         yaxis=dict(rangemode='tozero')  # Ensure y-axis starts at 0
     )
-    
+
     return fig, merged
 
 
@@ -725,15 +755,15 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
     def __init__(self, columns_out=None, drop_patterns=None, corr_threshold=None):
         # Match your existing interface
         self.columns_out_ = list(columns_out) if columns_out is not None else []
-        
+
         # Enhanced leakage detection parameters
         self.drop_patterns = [p.lower() for p in (drop_patterns or [])]
         self.corr_threshold = corr_threshold or 0.85
-        
+
         # Additional leakage detection
         self.variance_threshold = 0.01
         self.max_unique_ratio = 0.95
-        
+
         # For reporting
         self.leakage_report_ = {}
 
@@ -744,9 +774,9 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
         else:
             df = pd.DataFrame(X)
             df.columns = [f"feature_{i}" for i in range(df.shape[1])]
-        
+
         df.columns = [str(c) for c in df.columns]
-        
+
         # Initialize leakage tracking
         drops = set()
         self.leakage_report_ = {
@@ -756,16 +786,16 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
             'unique_ratio_drops': [],
             'explicit_leaky_features': []
         }
-        
+
         # 1. If columns_out_ was provided, use those (existing behavior)
         if self.columns_out_:
             # Keep existing behavior but add leakage checks
             available = [c for c in self.columns_out_ if c in df.columns]
-            
+
             # Check these columns for leakage patterns
             for c in available:
                 c_lower = c.lower()
-                
+
                 # Check for leaky patterns
                 leaky_patterns = [
                     'report', 'reportable', 'notify', 'notified',
@@ -773,34 +803,34 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                     'resolution', 'timeframe', 'delay', 'compliance',
                     'follow', 'action', 'result', 'status', 'closed'
                 ]
-                
+
                 for pattern in leaky_patterns:
                     if pattern in c_lower:
                         drops.add(c)
                         self.leakage_report_['explicit_leaky_features'].append((c, pattern))
                         break
-            
+
             # Remove detected leaky features
             self.columns_out_ = [c for c in available if c not in drops]
-        
+
         else:
             # Auto-select numeric columns with leakage detection (existing fallback behavior)
             numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            
+
             # Apply enhanced leakage detection
             for c in numeric_cols:
                 c_lower = c.lower()
-                
+
                 # 1. Pattern-based detection
                 for pattern in self.drop_patterns:
                     if pattern in c_lower:
                         drops.add(c)
                         self.leakage_report_['pattern_drops'].append((c, pattern))
                         break
-                
+
                 if c in drops:
                     continue
-                
+
                 # 2. High correlation with target
                 if y is not None:
                     try:
@@ -808,23 +838,23 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                         if s.isna().all():
                             drops.add(c)
                             continue
-                        
+
                         # Remove near-constant features
                         if s.std(ddof=0) <= self.variance_threshold:
                             drops.add(c)
                             self.leakage_report_['variance_drops'].append(c)
                             continue
-                        
+
                         # Check correlation with target
                         y_series = pd.Series(y).astype(float)
                         corr = abs(s.corr(y_series))
                         if np.isfinite(corr) and corr >= self.corr_threshold:
                             drops.add(c)
                             self.leakage_report_['correlation_drops'].append((c, corr))
-                            
+
                     except Exception:
                         drops.add(c)
-                
+
                 # 3. Features with too many unique values (potential IDs)
                 try:
                     unique_ratio = df[c].nunique() / len(df)
@@ -833,10 +863,10 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                         self.leakage_report_['unique_ratio_drops'].append((c, unique_ratio))
                 except Exception:
                     pass
-            
+
             # Set final columns
             self.columns_out_ = [c for c in numeric_cols if c not in drops]
-        
+
         # Ensure we have at least some features
         if len(self.columns_out_) == 0:
             print("WARNING: All features were dropped by leakage guard. Keeping one safe feature.")
@@ -857,7 +887,7 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                     self.columns_out_ = [safest]
                 else:
                     self.columns_out_ = [numeric_cols[0]]
-        
+
         return self
 
     def transform(self, X):
@@ -876,19 +906,19 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
         # Fallback: return empty array (existing behavior)
         if len(self.columns_out_) == 0:
             return np.ones((arr.shape[0], 1), dtype=float)  # Emergency fallback
-        
+
         return np.empty((arr.shape[0], 0), dtype=float)
 
     def get_feature_names_out(self, input_features=None):
         return np.array(self.columns_out_, dtype=object)
-    
+
     def print_leakage_report(self):
         """Print what was detected and dropped."""
         print("=== LEAKAGE DETECTION REPORT ===")
         total_drops = sum(len(items) for items in self.leakage_report_.values())
         print(f"Features kept: {len(self.columns_out_)}")
         print(f"Potential leakage features detected: {total_drops}")
-        
+
         for category, items in self.leakage_report_.items():
             if items:
                 print(f"\n{category.replace('_', ' ').title()}:")
@@ -1004,7 +1034,8 @@ def predictive_models_comparison(
     rf_pipe = Pipeline([
         ("guard", LeakageGuard(columns_out=None, drop_patterns=enhanced_patterns, corr_threshold=leak_corr_threshold)),
         ("model", RandomForestClassifier(
-            n_estimators=80, max_depth=5, min_samples_split=15, min_samples_leaf=6,
+            n_e
+            stimators=80, max_depth=5, min_samples_split=15, min_samples_leaf=6,
             random_state=random_state, class_weight="balanced_subsample"
         )),
     ])
