@@ -1,6 +1,7 @@
 # ---- BEGIN: ultra-robust ml_helpers import (top of app.py) ----
 import os, sys, importlib, importlib.util
 import streamlit as st
+import pandas as pd
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
