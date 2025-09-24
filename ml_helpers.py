@@ -1620,3 +1620,163 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
+# --- helpers (safe datetime cast) ---
+def _to_dt(s):
+    return pd.to_datetime(s, errors="coerce")
+
+
+# ========================================
+# Post-notify label builder (leak-safe)
+# ========================================
+def build_labels_post_notify(
+    df: pd.DataFrame,
+    *,
+    t_notify_col: str = "incident_datetime",                 # when the incident was logged/notified
+    t_occurrence_col: str = "incident_occurrence_datetime",  # when it actually occurred (if you have it)
+    medical_event_time_col: str = "medical_event_datetime",  # time medical attention actually happened
+    medical_flag_col: str = "medical_attention_required",    # existing yes/no flag (any style)
+    investigation_opened_time_col: str = "investigation_opened_datetime",
+    repeat_window_days: int = 30
+) -> pd.DataFrame:
+    """
+    Adds leakage-safe, post-notification targets to df:
+      • delay_over_24h
+      • medical_attention_required
+      • investigation_required
+      • repeat_30d
+    Works even if some timestamp columns are missing.
+    """
+    d = df.copy()
+
+    # Ensure we have a usable notify datetime (fall back to incident_date)
+    d = ensure_incident_datetime(d)
+    d["_t_notify"] = _to_dt(d.get(t_notify_col, d.get("incident_datetime")))
+
+    # Optional timestamps
+    d["_t_occ"] = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
+    d["_t_med"] = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
+    d["_t_inv"] = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
+
+    # 1) Delay > 24h between occurrence and notify
+    if d["_t_occ"].notna().any():
+        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
+        d["delay_over_24h"] = (delta_h > 24).astype(int)
+    else:
+        d["delay_over_24h"] = 0
+
+    # 2) Medical attention within 72h of notify OR a final yes-flag
+    med_flag = d.get(medical_flag_col, 0)
+    med_flag = pd.Series(med_flag).astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
+    has_med_time = d["_t_med"].notna()
+    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
+    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
+
+    # 3) Investigation opened within 7 days of notify (if we have a timestamp)
+    if d["_t_inv"].notna().any():
+        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
+        d["investigation_required"] = within_7d.astype(int)
+    else:
+        # fallback: keep existing column if already present; otherwise derive a cautious heuristic
+        if "investigation_required" not in d.columns:
+            # Heuristic: high/critical, medical attention, or repeat within 30d → likely investigation
+            sev_map = {"low":1, "medium":2, "high":3, "critical":4}
+            sev_num = (
+                d.get("severity_numeric") if "severity_numeric" in d.columns
+                else d.get("severity", pd.Series(index=d.index, dtype=object)).astype(str).str.lower().map(sev_map)
+            ).fillna(2)
+            # compute repeat_30d first (used below)
+            # (will be overwritten by the proper section later if we also have participant_id)
+            d["repeat_30d"] = 0
+            d["investigation_required"] = (
+                (sev_num >= 3) |
+                (d["medical_attention_required"] == 1)
+            ).astype(int)
+
+    # 4) Repeat within 30 days for the same participant (needs participant_id)
+    if "participant_id" in d.columns:
+        d = d.sort_values(["participant_id", "_t_notify"])
+        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
+        d["repeat_30d"] = (
+            next_time.notna() &
+            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
+        ).astype(int)
+        d = d.sort_index()
+    else:
+        d["repeat_30d"] = d.get("repeat_30d", 0)
+
+    # Provide severity_numeric if only textual severity exists
+    if "severity_numeric" not in d.columns and "severity" in d.columns:
+        sev_map2 = {"Low":1, "Medium":2, "High":3, "Critical":4}
+        d["severity_numeric"] = d["severity"].map(sev_map2).fillna(2).astype(int)
+
+    return d
+# ========================================
+# Investigation rules 
+# ========================================
+def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure/derive `investigation_required` using simple, explainable rules,
+    but DO NOT overwrite a pre-existing explicit flag.
+    Rules (OR logic):
+      • severity High/Critical
+      • medical_attention_required == 1 (or 'yes')
+      • repeat_30d == 1
+      • keywords in contributing_factors/description (optional)
+    """
+    d = df.copy()
+
+    # If already present, normalise to 0/1 and return
+    if "investigation_required" in d.columns:
+        d["investigation_required"] = (
+            pd.to_numeric(d["investigation_required"], errors="coerce")
+            .fillna(
+                d["investigation_required"].astype(str).str.lower()
+                .isin(["1","true","yes","y","t"])
+            ).astype(int)
+        )
+        return d
+
+    # Severity → numeric
+    sev_num = None
+    if "severity_numeric" in d.columns:
+        sev_num = pd.to_numeric(d["severity_numeric"], errors="coerce")
+    elif "severity" in d.columns:
+        sev_map = {"low":1, "medium":2, "high":3, "critical":4}
+        sev_num = d["severity"].astype(str).str.lower().map(sev_map)
+    else:
+        sev_num = pd.Series(2, index=d.index)  # default Medium
+
+    # Medical flag to 0/1
+    if "medical_attention_required" in d.columns:
+        med = d["medical_attention_required"]
+        if med.dtype.kind in "biu":
+            med_bin = (med > 0).astype(int)
+        else:
+            med_bin = med.astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
+    elif "medical_attention_required_bin" in d.columns:
+        med_bin = pd.to_numeric(d["medical_attention_required_bin"], errors="coerce").fillna(0).clip(0,1).astype(int)
+    else:
+        med_bin = pd.Series(0, index=d.index)
+
+    # Repeat flag if present
+    rep = pd.to_numeric(d.get("repeat_30d", 0), errors="coerce").fillna(0).clip(0,1).astype(int)
+
+    # Optional text signals
+    text_cols = []
+    if "contributing_factors" in d.columns: text_cols.append("contributing_factors")
+    if "description" in d.columns:          text_cols.append("description")
+    risky = pd.Series(False, index=d.index)
+    if text_cols:
+        pat = re.compile(r"\b(assault|abuse|allegation|injur|fracture|police|violence|unsafe|neglect)\b", re.I)
+        risky = d[text_cols].astype(str).apply(lambda s: any(bool(pat.search(x)) for x in s), axis=1)
+
+    inv = (
+        (sev_num.fillna(2) >= 3) |     # High/Critical
+        (med_bin == 1) |
+        (rep == 1) |
+        (risky)
+    ).astype(int)
+
+    d["investigation_required"] = inv
+    return d
+
