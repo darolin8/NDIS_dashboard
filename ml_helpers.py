@@ -1411,9 +1411,17 @@ def create_predictive_risk_scoring(
         }
 
         # Prefer a named row (DataFrame) so pipeline steps can select by column name
-        if expected_cols:
-            row = {col: float(mapping.get(col, 0.0)) for col in expected_cols}
-            X_one = pd.DataFrame([row], columns=expected_cols)
+           # If we only know the count, synthesize placeholder names so we can build a DF
+    if expected_n is not None and not expected_cols:
+        expected_cols = [f"f_{i}" for i in range(int(expected_n))]
+
+    # If we still have nothing, return a safe no-op scorer
+    if not expected_cols and (expected_n is None or expected_n == 0):
+        def _noop(_scenario):
+            return {"risk_score": 0.0, "risk_level": "LOW", "confidence": 0.0, "model_used": best_key}
+        return _noop
+
+    ...
         else:
             # Width-only fallback
             n = int(expected_n) if expected_n is not None else len(feature_names)
