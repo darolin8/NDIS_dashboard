@@ -63,6 +63,8 @@ except Exception as e1:
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
+from ml_helpers import apply_investigation_rules
+
 
 # ----- CONFIG -----
 st.set_page_config(
