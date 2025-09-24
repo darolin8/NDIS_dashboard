@@ -391,6 +391,137 @@ def main():
             with st.expander("Show kept features"):
                 st.write(blob.get("feature_names", []))
 
+    # === Executive Summary (drop-in) ===
+def display_executive_summary_section(df):
+    """
+    Render an executive summary for the current (filtered) dataframe.
+    Safe with missing columns. Uses Streamlit metrics & simple charts.
+    """
+    import streamlit as st
+    import pandas as pd
+    import numpy as np
+
+    if df is None or len(df) == 0:
+        st.info("No data to summarise.")
+        return df
+
+    d = df.copy()
+
+    # ---------- Dates ----------
+    # Prefer incident_datetime, else incident_date
+    if "incident_datetime" in d.columns:
+        dt = pd.to_datetime(d["incident_datetime"], errors="coerce")
+    else:
+        dt = pd.to_datetime(d.get("incident_date", pd.NaT), errors="coerce")
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    last_30_start = now - pd.Timedelta(days=30)
+    prev_30_start = now - pd.Timedelta(days=60)
+
+    # Masks (handle NaT gracefully)
+    m_last30 = dt >= last_30_start
+    m_prev30 = (dt >= prev_30_start) & (dt < last_30_start)
+
+    # ---------- Totals & deltas ----------
+    total_incidents = int(len(d))
+    incidents_last_30 = int(m_last30.fillna(False).sum())
+    incidents_prev_30 = int(m_prev30.fillna(False).sum())
+    delta_30 = incidents_last_30 - incidents_prev_30
+
+    # ---------- Investigations ----------
+    # We respect your new column; if absent we compute a cautious default = 0
+    inv_col = d.get("investigation_required", None)
+    if inv_col is not None:
+        inv_flag = (
+            inv_col.astype(str).str.strip().str.lower()
+            .isin({"1", "true", "yes", "y", "t"})
+            if inv_col.dtype.kind not in "biu"
+            else inv_col.astype(bool)
+        )
+        inv_rate = float(inv_flag.mean()) if len(inv_flag) else 0.0
+    else:
+        inv_rate = 0.0
+
+    # ---------- Medical attention ----------
+    if "medical_attention_required_bin" in d.columns:
+        med_rate = float(pd.to_numeric(d["medical_attention_required_bin"], errors="coerce").fillna(0).clip(0,1).mean())
+    elif "medical_attention_required" in d.columns:
+        med_rate = float(
+            d["medical_attention_required"].astype(str).str.strip().str.lower()
+            .isin({"1", "true", "yes", "y", "t"}).mean()
+        )
+    else:
+        med_rate = 0.0
+
+    # ---------- Severity ----------
+    if "severity" in d.columns:
+        sev_series = d["severity"].astype(str).str.title()
+    elif "severity_numeric" in d.columns:
+        m = {1:"Low", 2:"Medium", 3:"High", 4:"Critical"}
+        sev_series = d["severity_numeric"].map(m).fillna("Medium").astype(str)
+    else:
+        sev_series = pd.Series(["Unknown"]*len(d))
+    sev_counts = sev_series.value_counts(dropna=False)
+
+    # ---------- Incident types ----------
+    itype = d.get("incident_type")
+    if itype is not None:
+        top_types = itype.astype(str).str.strip().replace({"": "Unknown"}).value_counts().head(7)
+    else:
+        top_types = pd.Series(dtype=int)
+
+    # ---------- Layout ----------
+    st.markdown("## Executive Summary")
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.metric("Total incidents", f"{total_incidents:,}")
+    with k2:
+        st.metric("Last 30 days", f"{incidents_last_30:,}", delta=f"{delta_30:+,}")
+    with k3:
+        st.metric("Investigation rate", f"{inv_rate:.1%}")
+    with k4:
+        st.metric("Medical attention rate", f"{med_rate:.1%}")
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("#### Incident types (Top)")
+        if len(top_types):
+            st.bar_chart(top_types.sort_values(ascending=True))
+        else:
+            st.caption("No `incident_type` column found.")
+
+    with c2:
+        st.markdown("#### Severity mix")
+        if len(sev_counts):
+            # Streamlit has no native pie; use Plotly if available
+            try:
+                import plotly.express as px
+                fig = px.pie(sev_counts.reset_index(), names="index", values="severity",
+                             title=None)
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                st.bar_chart(sev_counts.sort_values(ascending=True))
+        else:
+            st.caption("No severity data found.")
+
+    # Optional: show investigations by reason if present
+    if "investigation_reason" in d.columns:
+        with st.expander("Investigation reasons (sample)"):
+            sample = (
+                d.loc[d.get("investigation_required", False) == True, ["investigation_reason"]]
+                .dropna()
+                .head(25)
+            )
+            if len(sample):
+                st.dataframe(sample, use_container_width=True)
+            else:
+                st.caption("No investigation reasons available.")
+
+    return df
+
+
     # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
         display_executive_summary_section(filtered_df)
