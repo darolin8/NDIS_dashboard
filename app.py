@@ -95,6 +95,16 @@ def main():
     # === ML: standardise & feature-ready ===
     df = prepare_ndis_data(df)  # adds severity_numeric, reportable_bin, histories, location_risk, etc.
 
+    # 🔒 Build post-notify, intake-only targets (constructed from info available at/after notification timestamps,
+    # but trained with only intake-time features). This function is defined in ml_helpers.py.
+    try:
+        df = ML.build_labels_post_notify(df)
+    except AttributeError:
+        st.warning(
+            "build_labels_post_notify() not found in ml_helpers; "
+            "continuing without post-notify targets."
+        )
+
     # Keep in session for other pages
     st.session_state.df = df
 
@@ -275,6 +285,89 @@ def main():
     except Exception:
         st.session_state.features_df_filtered = None
         st.session_state.feature_names_filtered = None
+
+    # =========================
+    # 🤖 Intake-only modeling
+    # =========================
+    st.sidebar.markdown("---")
+    st.sidebar.header("🤖 Intake-only modeling (post-notify targets)")
+
+    TARGETS = {
+        "Medical attention (≤72h or final flag)": "medical_attention_required",
+        "Investigation opened (≤7 days)": "investigation_required",
+        "Notify delay > 24 hours": "delay_over_24h",
+    }
+    target_label = st.sidebar.selectbox("Target", list(TARGETS.keys()))
+    target_col = TARGETS[target_label]
+
+    test_size_pct = st.sidebar.slider("Test size (latest % of time)", 10, 40, 20, step=5)
+    leak_corr_threshold = st.sidebar.slider("Leak correlation threshold", 0.60, 0.95, 0.80, 0.01)
+    run_training = st.sidebar.button("▶️ Train intake-only models")
+
+    if run_training:
+        with st.spinner(f"Training models for **{target_label}**…"):
+            try:
+                results = ML.predictive_models_comparison(
+                    df=df,                         # use full (pre-filter) to keep time ordering intact
+                    target=target_col,
+                    test_size=test_size_pct / 100.0,
+                    split_strategy="time_grouped",      # custom: time split + identity guard
+                    time_col="incident_datetime",
+                    group_cols=["participant_id", "carer_id"],
+                    intake_only=True,                   # hard-ban leaky / post-outcome features
+                    leak_corr_threshold=leak_corr_threshold,
+                )
+                st.session_state.trained_models = results
+                st.success("Models trained and stored in session.")
+            except TypeError:
+                # Fallback if your ml_helpers doesn't yet expose time_grouped/intake_only kwargs
+                results = ML.predictive_models_comparison(
+                    df=df,
+                    target=target_col,
+                    test_size=test_size_pct / 100.0,
+                    split_strategy="time",
+                    time_col="incident_datetime",
+                    leak_corr_threshold=leak_corr_threshold,
+                )
+                st.session_state.trained_models = results
+                st.info(
+                    "Trained with basic time split (fallback). "
+                    "Update ml_helpers.predictive_models_comparison to use time_grouped + intake_only."
+                )
+            except Exception as e:
+                st.error("Training failed:")
+                st.exception(e)
+
+        # Inline preview of the selected model’s performance
+        if st.session_state.trained_models:
+            st.subheader("Intake-only model results (preview)")
+            names = list(st.session_state.trained_models.keys())
+            chosen = st.selectbox("Select model", names, index=0)
+            blob = st.session_state.trained_models[chosen]
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Test accuracy", f"{blob['accuracy']:.3f}")
+            if blob.get("cv_scores"):
+                cv_mean = sum(blob["cv_scores"]) / len(blob["cv_scores"])
+                c2.metric("Train CV accuracy (mean)", f"{cv_mean:.3f}")
+            c3.metric("Features used", len(blob.get("feature_names", [])))
+
+            # Try to render the enhanced confusion matrix from ml_helpers
+            try:
+                fig = ML.enhanced_confusion_matrix_analysis(
+                    y_test=blob["y_test"],
+                    y_pred=blob["predictions"],
+                    y_proba=blob["probabilities"],
+                    target_names=(["No", "Yes"] if pd.Series(blob["y_test"]).nunique() == 2
+                                  else [str(c) for c in sorted(pd.Series(blob["y_test"]).unique())]),
+                    model_name=chosen,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Could not render confusion matrix: {e}")
+
+            with st.expander("Show kept features"):
+                st.write(blob.get("feature_names", []))
 
     # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
