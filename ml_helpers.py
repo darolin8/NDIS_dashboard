@@ -1780,3 +1780,75 @@ def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
     d["investigation_required"] = inv
     return d
 
+# -------------------------------
+# Leak-safe post-notify targets
+# -------------------------------
+def _to_dt(s):
+    import pandas as pd
+    return pd.to_datetime(s, errors="coerce")
+
+def build_labels_post_notify(
+    df: pd.DataFrame,
+    *,
+    t_notify_col: str = "incident_datetime",
+    t_occurrence_col: str = "incident_occurrence_datetime",
+    medical_event_time_col: str = "medical_event_datetime",
+    medical_flag_col: str = "medical_attention_required",
+    investigation_opened_time_col: str = "investigation_opened_datetime",
+    repeat_window_days: int = 30
+) -> pd.DataFrame:
+    d = df.copy()
+
+    # ensure notify time
+    if "incident_datetime" not in d.columns:
+        if "incident_date" in d.columns:
+            d["incident_datetime"] = pd.to_datetime(d["incident_date"], errors="coerce")
+        else:
+            d["incident_datetime"] = pd.NaT
+    d["_t_notify"] = _to_dt(d.get(t_notify_col, d.get("incident_datetime")))
+
+    # optional timestamps
+    d["_t_occ"] = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
+    d["_t_med"] = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
+    d["_t_inv"] = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
+
+    # 1) >24h delay (occurrence → notify)
+    if d["_t_occ"].notna().any():
+        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
+        d["delay_over_24h"] = (delta_h > 24).astype(int)
+    else:
+        d["delay_over_24h"] = 0
+
+    # 2) Medical attention within 72h OR final yes-flag
+    med_flag = d.get(medical_flag_col, 0)
+    med_flag = pd.Series(med_flag).astype(str).str.lower().isin(["1","true","yes","y","t"]).astype(int)
+    has_med_time = d["_t_med"].notna()
+    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
+    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
+
+    # 3) Investigation opened within 7 days
+    if d["_t_inv"].notna().any():
+        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
+        d["investigation_required"] = within_7d.astype(int)
+    else:
+        if "investigation_required" not in d.columns:
+            d["investigation_required"] = 0  # don’t guess here if we have no time
+
+    # 4) Repeat within 30 days for same participant
+    if "participant_id" in d.columns:
+        d = d.sort_values(["participant_id", "_t_notify"])
+        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
+        d["repeat_30d"] = (
+            next_time.notna() &
+            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
+        ).astype(int)
+        d = d.sort_index()
+    else:
+        d["repeat_30d"] = 0
+
+    # severity_numeric helper if missing
+    if "severity_numeric" not in d.columns and "severity" in d.columns:
+        sev_map = {"Low":1, "Medium":2, "High":3, "Critical":4}
+        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
+
+    return d
