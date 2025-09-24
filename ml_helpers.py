@@ -1,4 +1,3 @@
-
 # ml_helpers.py
 # Utilities and analytics helpers for the NDIS dashboard.
 # - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
@@ -19,10 +18,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from statsmodels.tsa.stattools import adfuller
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -48,143 +43,6 @@ def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
     if _prepare_ndis_data is not None:
         return _prepare_ndis_data(df)
     return df.copy()
-
-
-# ---------------------------------------
-# Intake-only guards & post-notify label builders
-# ---------------------------------------
-INTAKE_FORBIDDEN_PATTERNS = [
-    # post-outcome / post-processing
-    "reportable", "report_", "reported_", "notify", "notified", "notification_delay",
-    "investigat", "outcome", "closed", "closure", "completed", "completion",
-    "action_", "follow", "resolution", "status", "sla", "breach", "escalat",
-    "medical", "hospital", "clinic", "treatment",
-    # direct target proxies
-    "severity", "high_crit", "target", "label",
-    # future-derived durations
-    "time_to_", "days_to_", "hours_to_", "minutes_to_",
-]
-
-def _is_forbidden(name: str) -> bool:
-    n = str(name).lower()
-    return any(pat in n for pat in INTAKE_FORBIDDEN_PATTERNS)
-
-def enforce_intake_only(features_df: pd.DataFrame) -> pd.DataFrame:
-    """Drop columns that cannot be known at notification time and keep numeric, clean values."""
-    keep = [c for c in features_df.columns if not _is_forbidden(c)]
-    dropped = sorted(set(features_df.columns) - set(keep))
-    if dropped:
-        print(f"Intake-only guard: dropped {len(dropped)} post-outcome/forbidden columns")
-    X = (
-        features_df[keep]
-        .select_dtypes(include=[np.number])
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-    )
-    return X
-
-def _to_dt(s):
-    return pd.to_datetime(s, errors="coerce")
-
-def build_labels_post_notify(
-    df: pd.DataFrame,
-    *,
-    t_notify_col: str = "incident_datetime",
-    t_occurrence_col: str = "incident_occurrence_datetime",
-    medical_event_time_col: str = "medical_event_datetime",
-    medical_flag_col: str = "medical_attention_required",
-    investigation_opened_time_col: str = "investigation_opened_datetime",
-    repeat_window_days: int = 30
-) -> pd.DataFrame:
-    """
-    Adds post-notify, leakage-safe targets:
-      - delay_over_24h
-      - medical_attention_required (within 72h or final flag)
-      - investigation_required (opened within 7d)
-      - repeat_30d (same participant within 30d)
-    """
-    d = df.copy()
-    d["_t_notify"] = _to_dt(d.get(t_notify_col))
-    d["_t_occ"]    = _to_dt(d.get(t_occurrence_col)) if t_occurrence_col in d.columns else pd.NaT
-    d["_t_med"]    = _to_dt(d.get(medical_event_time_col)) if medical_event_time_col in d.columns else pd.NaT
-    d["_t_inv"]    = _to_dt(d.get(investigation_opened_time_col)) if investigation_opened_time_col in d.columns else pd.NaT
-
-    # 1) Delay >24h (occurrence -> notify)
-    if d["_t_occ"].notna().any():
-        delta_h = (d["_t_notify"] - d["_t_occ"]).dt.total_seconds() / 3600.0
-        d["delay_over_24h"] = (delta_h > 24).astype(int)
-    else:
-        d["delay_over_24h"] = 0
-
-    # 2) Medical attention within 72h of notify (or final flag)
-    has_med_time = d["_t_med"].notna()
-    within_72h = (d["_t_med"] - d["_t_notify"]).dt.total_seconds().between(0, 72*3600, inclusive="both")
-    med_flag = d.get(medical_flag_col, 0)
-    med_flag = med_flag.astype(str).str.lower().isin(["yes","true","1"]).astype(int)
-    d["medical_attention_required"] = ((has_med_time & within_72h) | (med_flag == 1)).astype(int)
-
-    # 3) Investigation required within 7 days
-    if d["_t_inv"].notna().any():
-        within_7d = (d["_t_inv"] - d["_t_notify"]).dt.total_seconds().between(0, 7*24*3600, inclusive="both")
-        d["investigation_required"] = within_7d.astype(int)
-    else:
-        d["investigation_required"] = 0
-
-    # 4) Repeat in 30 days for the same participant
-    if "participant_id" in d.columns:
-        d = d.sort_values(["participant_id", "_t_notify"])
-        next_time = d.groupby("participant_id")["_t_notify"].shift(-1)
-        d["repeat_30d"] = (
-            next_time.notna() &
-            ((next_time - d["_t_notify"]).dt.total_seconds().between(0, repeat_window_days*24*3600, inclusive="right"))
-        ).astype(int)
-        d = d.sort_index()
-    else:
-        d["repeat_30d"] = 0
-
-    # Optional numeric severity for fallback target only (do not use as features)
-    if "severity_numeric" not in d.columns and "severity" in d.columns:
-        sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
-        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
-
-    return d
-
-
-# ---------------------------------------
-# Keep your original function name
-# ---------------------------------------
-def apply_investigation_rules(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure an 'investigation_required' column exists in a leakage-safe way.
-
-    Priority:
-      1) If timing columns exist, derive labels via build_labels_post_notify() (safe post-notify).
-      2) Otherwise, intake-time fallback: investigation if severity is High/Critical OR
-         medical_attention_required is True. (Does not use future info.)
-    """
-    d = df.copy()
-
-    # If already present, keep what the dataset has.
-    if "investigation_required" in d.columns:
-        return d
-
-    # Prefer safe post-notify derivation if timing fields exist.
-    if ("investigation_opened_datetime" in d.columns) or ("medical_event_datetime" in d.columns):
-        d = build_labels_post_notify(d)
-        return d
-
-    # Intake-time fallback (no future fields):
-    if "severity_numeric" not in d.columns and "severity" in d.columns:
-        sev_map = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
-        d["severity_numeric"] = d["severity"].map(sev_map).fillna(2).astype(int)
-
-    med = d.get("medical_attention_required", 0)
-    med_bin = pd.Series(med, index=d.index).astype(str).str.lower().isin(["yes", "true", "1"]).astype(int)
-
-    sev_num = d.get("severity_numeric", pd.Series([2] * len(d), index=d.index)).astype(int)
-
-    d["investigation_required"] = ((sev_num >= 3) | (med_bin == 1)).astype(int)
-    return d
 
 
 # ---------------------------------------
@@ -359,12 +217,12 @@ def incident_volume_forecasting(
             "lower": np.maximum(0, forecast.values - 1.96 * std_val),
             "upper": forecast.values + 1.96 * std_val,
         }, index=idx)
-
+        
         out = pd.DataFrame({"actual": y})
         fc_df = pd.concat([forecast, conf_int], axis=1)
         merged = out.join(fc_df, how="outer")
         merged.index.name = "date"
-
+        
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines+markers", name="Actual"))
         fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, mode="lines+markers", name="Forecast"))
@@ -382,11 +240,11 @@ def incident_volume_forecasting(
 
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX
-
+        
         # Apply log transformation to prevent negative predictions
         y_positive = np.maximum(y, 0.1)  # Ensure positive values
         y_log = np.log1p(y_positive)  # log1p handles near-zero values better
-
+        
         # More conservative seasonal parameters
         if len(y) >= 2 * season_length:
             # Full seasonal model only with sufficient data
@@ -400,50 +258,50 @@ def incident_volume_forecasting(
             # No seasonality
             seasonal_order = (0, 0, 0, 0)
             order = (1, 1, 1)
-
+        
         # Fit model with conservative settings
         model = SARIMAX(
-            y_log,
-            order=order,
+            y_log, 
+            order=order, 
             seasonal_order=seasonal_order,
             enforce_stationarity=True,
             enforce_invertibility=True,
             concentrate_scale=True  # Better numerical stability
         )
-
+        
         # Fit with better optimization settings
         res = model.fit(
-            disp=False,
+            disp=False, 
             maxiter=200,
             method='lbfgs',  # More stable than default
             optim_score='harvey'  # Alternative scoring
         )
-
+        
         # Get forecast in log space
         fc = res.get_forecast(steps=H)
         forecast_log = fc.predicted_mean
         conf_log = fc.conf_int(alpha=0.05)  # 95% interval
-
+        
         # Transform back to original space
         forecast = np.expm1(forecast_log).rename("forecast")
         conf_int = pd.DataFrame({
             "lower": np.maximum(0, np.expm1(conf_log.iloc[:, 0]).values),  # Ensure non-negative
             "upper": np.expm1(conf_log.iloc[:, 1]).values
         }, index=forecast.index)
-
+        
         # Additional sanity checks
         max_historical = y.max()
         forecast = np.minimum(forecast, max_historical * 3)  # Cap extreme forecasts
         conf_int["upper"] = np.minimum(conf_int["upper"], max_historical * 4)
-
+        
         use_sarimax = True
-
+        
     except Exception as e:
         print(f"SARIMAX failed: {e}")
         # Enhanced seasonal naive fallback
         try:
             idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
-
+            
             if len(y) >= season_length:
                 # Use seasonal pattern with trend adjustment
                 last_season = y[-season_length:].values
@@ -454,7 +312,7 @@ def incident_volume_forecasting(
                     trend = max(-0.1, min(0.1, (recent_avg - older_avg) / older_avg))  # Cap trend
                 else:
                     trend = 0
-
+                
                 # Apply trend to seasonal pattern
                 base_vals = last_season * (1 + trend)
                 vals = np.tile(base_vals, int(np.ceil(H / season_length)))[:H]
@@ -466,18 +324,18 @@ def incident_volume_forecasting(
                 else:
                     trend = 0
                 vals = [max(0.1, y.iloc[-1] + trend * i) for i in range(1, H + 1)]
-
+            
             forecast = pd.Series(vals, index=idx, name="forecast")
-
+            
             # Confidence intervals based on historical volatility
             historical_std = y.std()
             expanding_std = np.array([historical_std * np.sqrt(i) for i in range(1, H + 1)])
-
+            
             conf_int = pd.DataFrame({
                 "lower": np.maximum(0, forecast.values - 1.96 * expanding_std),
                 "upper": forecast.values + 1.96 * expanding_std,
             }, index=idx)
-
+            
         except Exception:
             # Ultimate fallback: flat forecast
             idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=H, freq="MS")
@@ -497,46 +355,46 @@ def incident_volume_forecasting(
 
     # Enhanced figure with better styling
     fig = go.Figure()
-
+    
     # Historical data
     fig.add_trace(go.Scatter(
-        x=y.index, y=y.values,
-        mode="lines+markers",
+        x=y.index, y=y.values, 
+        mode="lines+markers", 
         name="Actual",
         line=dict(color='steelblue', width=2),
         marker=dict(size=4)
     ))
-
+    
     # Forecast
     fig.add_trace(go.Scatter(
-        x=forecast.index, y=forecast.values,
-        mode="lines+markers",
+        x=forecast.index, y=forecast.values, 
+        mode="lines+markers", 
         name="Forecast",
         line=dict(color='orange', width=2, dash='dash'),
         marker=dict(size=4)
     ))
-
+    
     # Confidence interval
     fig.add_trace(go.Scatter(
         x=list(conf_int.index) + list(conf_int.index[::-1]),
         y=list(conf_int["upper"].values) + list(conf_int["lower"].values[::-1]),
-        fill="toself",
-        opacity=0.2,
-        line=dict(width=0),
+        fill="toself", 
+        opacity=0.2, 
+        line=dict(width=0), 
         name="95% interval",
         fillcolor='orange'
     ))
-
+    
     model_type = 'SARIMAX (Log-transformed)' if use_sarimax else 'Enhanced Seasonal Naive'
     fig.update_layout(
         title=f"Monthly Incident Forecast ({model_type})",
-        xaxis_title="Month",
-        yaxis_title="Incidents",
+        xaxis_title="Month", 
+        yaxis_title="Incidents", 
         hovermode="x unified",
         showlegend=True,
         yaxis=dict(rangemode='tozero')  # Ensure y-axis starts at 0
     )
-
+    
     return fig, merged
 
 
@@ -756,15 +614,15 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
     def __init__(self, columns_out=None, drop_patterns=None, corr_threshold=None):
         # Match your existing interface
         self.columns_out_ = list(columns_out) if columns_out is not None else []
-
+        
         # Enhanced leakage detection parameters
         self.drop_patterns = [p.lower() for p in (drop_patterns or [])]
         self.corr_threshold = corr_threshold or 0.85
-
+        
         # Additional leakage detection
         self.variance_threshold = 0.01
         self.max_unique_ratio = 0.95
-
+        
         # For reporting
         self.leakage_report_ = {}
 
@@ -775,9 +633,9 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
         else:
             df = pd.DataFrame(X)
             df.columns = [f"feature_{i}" for i in range(df.shape[1])]
-
+        
         df.columns = [str(c) for c in df.columns]
-
+        
         # Initialize leakage tracking
         drops = set()
         self.leakage_report_ = {
@@ -787,16 +645,16 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
             'unique_ratio_drops': [],
             'explicit_leaky_features': []
         }
-
+        
         # 1. If columns_out_ was provided, use those (existing behavior)
         if self.columns_out_:
             # Keep existing behavior but add leakage checks
             available = [c for c in self.columns_out_ if c in df.columns]
-
+            
             # Check these columns for leakage patterns
             for c in available:
                 c_lower = c.lower()
-
+                
                 # Check for leaky patterns
                 leaky_patterns = [
                     'report', 'reportable', 'notify', 'notified',
@@ -804,34 +662,34 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                     'resolution', 'timeframe', 'delay', 'compliance',
                     'follow', 'action', 'result', 'status', 'closed'
                 ]
-
+                
                 for pattern in leaky_patterns:
                     if pattern in c_lower:
                         drops.add(c)
                         self.leakage_report_['explicit_leaky_features'].append((c, pattern))
                         break
-
+            
             # Remove detected leaky features
             self.columns_out_ = [c for c in available if c not in drops]
-
+        
         else:
             # Auto-select numeric columns with leakage detection (existing fallback behavior)
             numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
+            
             # Apply enhanced leakage detection
             for c in numeric_cols:
                 c_lower = c.lower()
-
+                
                 # 1. Pattern-based detection
                 for pattern in self.drop_patterns:
                     if pattern in c_lower:
                         drops.add(c)
                         self.leakage_report_['pattern_drops'].append((c, pattern))
                         break
-
+                
                 if c in drops:
                     continue
-
+                
                 # 2. High correlation with target
                 if y is not None:
                     try:
@@ -839,23 +697,23 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                         if s.isna().all():
                             drops.add(c)
                             continue
-
+                        
                         # Remove near-constant features
                         if s.std(ddof=0) <= self.variance_threshold:
                             drops.add(c)
                             self.leakage_report_['variance_drops'].append(c)
                             continue
-
+                        
                         # Check correlation with target
                         y_series = pd.Series(y).astype(float)
                         corr = abs(s.corr(y_series))
                         if np.isfinite(corr) and corr >= self.corr_threshold:
                             drops.add(c)
                             self.leakage_report_['correlation_drops'].append((c, corr))
-
+                            
                     except Exception:
                         drops.add(c)
-
+                
                 # 3. Features with too many unique values (potential IDs)
                 try:
                     unique_ratio = df[c].nunique() / len(df)
@@ -864,10 +722,10 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                         self.leakage_report_['unique_ratio_drops'].append((c, unique_ratio))
                 except Exception:
                     pass
-
+            
             # Set final columns
             self.columns_out_ = [c for c in numeric_cols if c not in drops]
-
+        
         # Ensure we have at least some features
         if len(self.columns_out_) == 0:
             print("WARNING: All features were dropped by leakage guard. Keeping one safe feature.")
@@ -888,7 +746,7 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
                     self.columns_out_ = [safest]
                 else:
                     self.columns_out_ = [numeric_cols[0]]
-
+        
         return self
 
     def transform(self, X):
@@ -907,19 +765,19 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
         # Fallback: return empty array (existing behavior)
         if len(self.columns_out_) == 0:
             return np.ones((arr.shape[0], 1), dtype=float)  # Emergency fallback
-
+        
         return np.empty((arr.shape[0], 0), dtype=float)
 
     def get_feature_names_out(self, input_features=None):
         return np.array(self.columns_out_, dtype=object)
-
+    
     def print_leakage_report(self):
         """Print what was detected and dropped."""
         print("=== LEAKAGE DETECTION REPORT ===")
         total_drops = sum(len(items) for items in self.leakage_report_.values())
         print(f"Features kept: {len(self.columns_out_)}")
         print(f"Potential leakage features detected: {total_drops}")
-
+        
         for category, items in self.leakage_report_.items():
             if items:
                 print(f"\n{category.replace('_', ' ').title()}:")
@@ -934,158 +792,158 @@ class LeakageGuard(BaseEstimator, TransformerMixin):
 
 def predictive_models_comparison(
     df: pd.DataFrame,
-    target: str = "high_severity",
-    test_size: float = 0.20,
+    target: str = "high_severity",  # default now predicts High/Critical severity
+    test_size: float = 0.25,
     random_state: int = 42,
-    split_strategy: str = "time_grouped",   # changed default
+    extra_leaky_features: Optional[List[str]] = None,
+    split_strategy: str = "time",
     time_col: Optional[str] = "incident_datetime",
-    group_cols: Optional[List[str]] = None, # ['participant_id','carer_id'] if present
-    leak_corr_threshold: float = 0.80,
+    group_col: Optional[str] = None,
+    leak_corr_threshold: float = 0.80,  # Lowered from 0.90
     leak_name_patterns: Optional[List[str]] = None,
-    intake_only: bool = True,               # NEW: enforce intake-only features
 ) -> Dict[str, Any]:
     """
-    Leakage-resilient training/evaluation:
-      - Intake-only feature filter (name-based hard ban)
-      - Temporal split (old -> train, newest -> test)
-      - Identity guarding: any participant/carer in test is removed from train
+    Enhanced version with better leakage detection and validation.
     """
-    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.model_selection import train_test_split, GroupShuffleSplit, cross_val_score, StratifiedKFold
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-    import numpy as np
-    import pandas as pd
+    
+    # 1) Create features (using your existing function)
+    out = create_comprehensive_features(df)
+    if isinstance(out, tuple) and len(out) == 3:
+        _, _, features_df = out
+    elif isinstance(out, pd.DataFrame):
+        features_df = out
+    else:
+        features_df = pd.DataFrame(out)
+    features_df = features_df.copy()
 
-    # 0) Resolve datetime & groups
+    # 2) Target preparation
+    if target in df.columns:
+        y = df.loc[features_df.index, target].copy()
+    else:
+        y = (df.get("severity_numeric", pd.Series([2]*len(df))).loc[features_df.index] >= 3).astype(int)
+
+    print(f"Dataset size: {len(features_df)} samples, {len(features_df.columns)} features")
+    print(f"Target distribution: {y.value_counts().to_dict()}")
+
+    # 3) Data splitting (keeping your existing logic)
     df_dt = ensure_incident_datetime(df)
     if time_col not in df_dt.columns:
-        time_col = "incident_date" if "incident_date" in df_dt.columns else "incident_datetime"
-    dt = pd.to_datetime(df_dt[time_col], errors="coerce")
+        time_col = "incident_date" if "incident_date" in df_dt.columns else None
 
-    if group_cols is None:
-        group_cols = [c for c in ["participant_id", "carer_id"] if c in df_dt.columns]
-    if group_cols:
-        df_dt["_groupkey"] = df_dt[group_cols].astype(str).agg("|".join, axis=1)
+    if split_strategy == "time" and time_col:
+        dt = pd.to_datetime(df_dt.loc[features_df.index, time_col], errors="coerce")
+        cutoff = dt.quantile(0.75)  # Use more data for training
+        mask_train = dt <= cutoff
+        mask_test = dt > cutoff
+        X_train_df, X_test_df = features_df[mask_train], features_df[mask_test]
+        y_train, y_test = y[mask_train], y[mask_test]
+    elif split_strategy == "group" and group_col and group_col in df.columns:
+        from sklearn.model_selection import GroupShuffleSplit
+        groups = df.loc[features_df.index, group_col].astype(str).fillna("NA")
+        gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+        train_idx, test_idx = next(gss.split(features_df, y, groups))
+        X_train_df, X_test_df = features_df.iloc[train_idx], features_df.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     else:
-        df_dt["_groupkey"] = "NA"
-
-    # 1) Build features
-    out = create_comprehensive_features(df_dt)
-    if isinstance(out, tuple) and len(out) == 3:
-        _, feature_names, features_df = out
-    elif isinstance(out, pd.DataFrame):
-        features_df = out.copy()
-        feature_names = list(features_df.columns)
-    else:
-        features_df = pd.DataFrame(out).copy()
-        feature_names = list(features_df.columns)
-
-    # Align indices
-    idx = features_df.index.intersection(df_dt.index)
-    features_df, df_dt, dt = features_df.loc[idx], df_dt.loc[idx], dt.loc[idx]
-
-    # 2) Target
-    if target in df_dt.columns:
-        y = df_dt[target].astype(int)
-    else:
-        if "severity_numeric" in df_dt.columns:
-            y = (df_dt["severity_numeric"] >= 3).astype(int)
-            print("Target not found; falling back to high/critical from severity_numeric (⚠ consider a decision-relevant target).")
-        else:
-            raise ValueError(f"Target '{target}' not found and no severity_numeric to fallback.")
-    if any(k in target.lower() for k in ["severity", "reportable"]):
-        print("⚠ WARNING: Target appears definition-linked (severity/reportable). Prefer a pre-outcome decision target (e.g., investigation_required).")
-
-    # 3) Intake-only feature enforcement
-    if intake_only:
-        features_df = enforce_intake_only(features_df)
-
-    # 4) Temporal split → newest test_size to test
-    order = dt.sort_values(kind="mergesort")
-    if len(order) == 0:
-        raise ValueError("No valid timestamps for temporal split.")
-    cutoff_time = order.iloc[int(np.floor((1 - test_size) * len(order)))]
-    test_mask = dt > cutoff_time
-    train_mask = ~test_mask
-
-    X_train_df, X_test_df = features_df[train_mask], features_df[test_mask]
-    y_train, y_test = y[train_mask], y[test_mask]
-
-    # 4b) Identity guard: drop groups overlapping between splits
-    gkey = df_dt["_groupkey"]
-    overlap = set(gkey[train_mask]) & set(gkey[test_mask])
-    if overlap and any(k != "NA" for k in overlap):
-        drop_mask = gkey.isin(overlap) & train_mask
-        X_train_df, y_train = X_train_df[~drop_mask], y_train[~drop_mask]
-        print(f"Identity guard: removed {int(drop_mask.sum())} train rows sharing identities with test.")
+        from sklearn.model_selection import train_test_split
+        strat = y if getattr(y, "nunique", lambda: 2)() > 1 else None
+        X_train_df, X_test_df, y_train, y_test = train_test_split(
+            features_df, y, test_size=test_size, random_state=random_state, stratify=strat
+        )
 
     print(f"Training set: {len(X_train_df)}, Test set: {len(X_test_df)}")
 
-    # 5) Guard patterns merged with defaults
-    enhanced_patterns = (leak_name_patterns or []) + [
+    # 4) Enhanced leakage detection patterns
+    enhanced_patterns = (leak_name_patterns or [
         "report", "reportable", "notify", "notified",
         "investigat", "severity", "medical", "outcome",
         "resolution", "timeframe", "delay", "compliance",
-        "follow", "action", "result", "status", "closed", "sla", "breach",
-        "hospital", "clinic", "treatment"
-    ]
+        "follow", "action", "result", "status", "closed"
+    ])
 
+    # 6) Models with conservative settings
     rf_pipe = Pipeline([
-        ("guard", LeakageGuard(columns_out=None, drop_patterns=enhanced_patterns, corr_threshold=leak_corr_threshold)),
+        ("guard", LeakageGuard(
+            columns_out=None,
+            drop_patterns=enhanced_patterns,
+            corr_threshold=leak_corr_threshold
+        )),
         ("model", RandomForestClassifier(
-            n_e
-            stimators=80, max_depth=5, min_samples_split=15, min_samples_leaf=6,
-            random_state=random_state, class_weight="balanced_subsample"
+            n_estimators=50,
+            max_depth=4,
+            min_samples_split=10,
+            min_samples_leaf=5,
+            random_state=random_state,
+            class_weight='balanced'
         )),
     ])
 
     lr_pipe = Pipeline([
-        ("guard", LeakageGuard(columns_out=None, drop_patterns=enhanced_patterns, corr_threshold=leak_corr_threshold)),
+        ("guard", LeakageGuard(
+            columns_out=None,
+            drop_patterns=enhanced_patterns,
+            corr_threshold=leak_corr_threshold
+        )),
         ("scaler", StandardScaler(with_mean=True)),
         ("model", LogisticRegression(
-            max_iter=1000, solver="liblinear", C=0.15, random_state=random_state, class_weight="balanced"
+            max_iter=1000, 
+            solver="liblinear",
+            C=0.1,
+            random_state=random_state,
+            class_weight='balanced'
         )),
     ])
 
     results: Dict[str, Any] = {}
+
+    # 7) Train and evaluate models
     for name, pipe in [("RandomForest", rf_pipe), ("LogisticRegression", lr_pipe)]:
-        print(f"\n=== Training {name} (intake-only={intake_only}, time_grouped) ===")
+        print(f"\n=== Training {name} ===")
+        
+        # Fit model
         pipe.fit(X_train_df, y_train)
+        
+        # Show leakage detection results
         pipe.named_steps["guard"].print_leakage_report()
-
-        pred  = pipe.predict(X_test_df)
+        
+        # Predictions
+        pred = pipe.predict(X_test_df)
         proba = pipe.predict_proba(X_test_df) if hasattr(pipe, "predict_proba") else None
-        acc   = float((pred == y_test).mean())
-
+        test_accuracy = (pred == y_test).mean()
+        
+        # Cross-validation on training set
         cv_scores = None
-        if len(X_train_df) >= 60:
+        if len(X_train_df) > 10:
             try:
-                cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_state)
-                cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring="roc_auc")
-                print(f"Train CV ROC AUC: {cv_scores.mean():.3f} (+/- {cv_scores.std()*2:.3f})")
+                cv = StratifiedKFold(n_splits=min(3, max(2, len(X_train_df)//10)), shuffle=True, random_state=random_state)
+                cv_scores = cross_val_score(pipe, X_train_df, y_train, cv=cv, scoring='accuracy')
+                print(f"Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
             except Exception as e:
-                print(f"CV failed: {e}")
-
-        kept = list(pipe.named_steps["guard"].get_feature_names_out())
+                print(f"Cross-validation failed: {e}")
+        
+        feature_names = list(pipe.named_steps["guard"].get_feature_names_out())
+        
         results[name] = {
             "model": pipe,
-            "accuracy": acc,
+            "accuracy": float(test_accuracy),
             "cv_scores": cv_scores.tolist() if cv_scores is not None else None,
             "y_test": y_test,
             "predictions": pred,
             "probabilities": proba,
-            "feature_names": kept,
+            "feature_names": feature_names,
         }
-        print(f"Test accuracy: {acc:.3f}")
-        print(f"Features used: {len(kept)}")
-
-        if acc >= 0.98:
+        
+        print(f"Test accuracy: {test_accuracy:.3f}")
+        print(f"Features used: {len(feature_names)}")
+        
+        if test_accuracy >= 0.98:
             print("⚠️  WARNING: Very high accuracy detected — re-check leakage/targets.")
 
     return results
-
 
 # ---------------------------------------
 # 8) Incident type risk profiling
@@ -1335,12 +1193,14 @@ def create_predictive_risk_scoring(
 
     # If it's a Pipeline, try to get names from a step
     try:
-        from sklearn.pipeline import Pipeline
-        if isinstance(model, Pipeline):
+        from sklearn.pipeline import Pipeline as _PL
+        if isinstance(model, _PL):
             for name, step in model.steps:
+                # custom selector / guard
                 if hasattr(step, "columns_out_") and isinstance(step.columns_out_, (list, tuple)):
                     expected_cols = list(step.columns_out_)
                     break
+                # many sklearn transformers expose feature names
                 if hasattr(step, "get_feature_names_out"):
                     try:
                         expected_cols = list(step.get_feature_names_out())
@@ -1360,6 +1220,7 @@ def create_predictive_risk_scoring(
     except Exception:
         expected_n = None
     if expected_n is None and hasattr(model, "steps"):
+        # last step might have it
         try:
             expected_n = getattr(model.steps[-1][1], "n_features_in_", None)
         except Exception:
@@ -1411,17 +1272,9 @@ def create_predictive_risk_scoring(
         }
 
         # Prefer a named row (DataFrame) so pipeline steps can select by column name
-           # If we only know the count, synthesize placeholder names so we can build a DF
-    if expected_n is not None and not expected_cols:
-        expected_cols = [f"f_{i}" for i in range(int(expected_n))]
-
-    # If we still have nothing, return a safe no-op scorer
-    if not expected_cols and (expected_n is None or expected_n == 0):
-        def _noop(_scenario):
-            return {"risk_score": 0.0, "risk_level": "LOW", "confidence": 0.0, "model_used": best_key}
-        return _noop
-
-    ...
+        if expected_cols:
+            row = {col: float(mapping.get(col, 0.0)) for col in expected_cols}
+            X_one = pd.DataFrame([row], columns=expected_cols)
         else:
             # Width-only fallback
             n = int(expected_n) if expected_n is not None else len(feature_names)
@@ -1669,31 +1522,3 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
-
-
-# ---------------------------------------
-# (Optional) Quick helper to train three intake-only, post-notify targets
-# ---------------------------------------
-def train_intake_only_examples(df_raw: pd.DataFrame):
-    """
-    Example: trains three intake-only models with leakage-safe labels.
-    Returns a dict of results keyed by target name.
-    """
-    df_lab = build_labels_post_notify(df_raw)
-
-    results = {}
-    for target in ["medical_attention_required", "investigation_required", "delay_over_24h"]:
-        try:
-            res = predictive_models_comparison(
-                df=df_lab,
-                target=target,
-                split_strategy="time_grouped",          # newest 20% as test, identity-guarded
-                time_col="incident_datetime",
-                group_cols=["participant_id","carer_id"],
-                intake_only=True,                       # hard-ban post-outcome columns as features
-                leak_corr_threshold=0.80
-            )
-            results[target] = res
-        except Exception as e:
-            print(f"Skipping {target}: {e}")
-    return results
