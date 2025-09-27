@@ -3,6 +3,7 @@
 # - Re-exports feature builders from utils.ndis_enhanced_prep (if present)
 # - Baseline visuals + models
 # - Enhanced analytics (confusion matrix, carer network, participant journey, risk scorer, similarity, alerts)
+# (optional) shebang / encoding / comments
 from __future__ import annotations
 
 import warnings
@@ -10,10 +11,8 @@ warnings.filterwarnings("ignore")
 
 from typing import Tuple, Dict, Any, Optional, List, Callable
 import re
-
 import numpy as np
 import pandas as pd
-
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
