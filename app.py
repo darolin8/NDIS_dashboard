@@ -1,28 +1,27 @@
-# app.py
-# ---- BEGIN: robust import bootstrap (top of app.py) ----
+# ---- BEGIN: robust import bootstrap (VERY TOP of app.py) ----
 import os, sys
 import streamlit as st
 import pandas as pd
-import ml_helpers as ML
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if APP_DIR not in sys.path:
-    sys.path.insert(0, APP_DIR)
+PROJECT_ROOT = os.path.dirname(APP_DIR)
 
-UTILS_DIR = os.path.join(APP_DIR, "utils")
-if os.path.isdir(UTILS_DIR) and UTILS_DIR not in sys.path:
-    sys.path.insert(0, UTILS_DIR)
 
-# First: load ml_helpers directly and expose any real error
+for p in (PROJECT_ROOT, APP_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
 try:
-    import ml_helpers as ML
+    from ndis_dashboard import ml_helpers as ML
     st.info(f"ml_helpers loaded from: {getattr(ML, '__file__', 'unknown')}")
 except Exception as e:
     st.error("Failed to import ml_helpers. Details:")
     st.exception(e)
+    st.write("sys.path:", sys.path)
     st.stop()
 
-# Next: import dashboard_pages and expose any real error
+
 try:
     from dashboard_pages import (
         display_executive_summary_section,
@@ -35,11 +34,9 @@ try:
 except Exception as e:
     st.error("Failed to import dashboard_pages. Details:")
     st.exception(e)
-    import importlib.util
-    spec = importlib.util.find_spec("dashboard_pages")
-    st.caption(f"dashboard_pages spec: {spec}")
     st.stop()
 # ---- END: robust import bootstrap ----
+
 
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
