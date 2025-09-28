@@ -282,6 +282,8 @@ def main():
         render_incident_mapping(df, filtered_df)
 
 
+if __name__ == "__main__":
+    main()
  # === BELOW THE PAGE CONTENT ===
     st.markdown("---")
     st.markdown("## 🧠 AI Summary & Mitigations (beta)")
@@ -305,7 +307,3 @@ def main():
                 st.write(f"- {r}")
         else:
             st.info("No rows available to summarise. Clear filters if needed.")
-
-
-if __name__ == "__main__":
-    main()
