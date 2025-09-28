@@ -68,6 +68,9 @@ def prepare_ndis_data(df: pd.DataFrame) -> pd.DataFrame:
     return df.copy()
 
 
+
+
+
 # ---------------------------------------
 # Internal helpers (de-duplicated)
 # ---------------------------------------
@@ -3047,3 +3050,28 @@ def integrate_enhanced_features(existing_main_function):
             add_enhanced_features_to_dashboard(df, X, feature_names, trained_models)
 
     return enhanced_main
+
+    # === ML: filtered features (optional convenience for pages) ===
+    try:
+        X_filt, feature_names_filt, features_df_filt = create_comprehensive_features(filtered_df)
+        st.session_state.features_df_filtered = features_df_filt
+        st.session_state.feature_names_filtered = feature_names_filt
+    except Exception:
+        st.session_state.features_df_filtered = None
+        st.session_state.feature_names_filtered = None
+
+    # --- AI Summary & Mitigations (beta) ---  <<<<<< ADD HERE
+    with st.expander("🧠 AI Summary & Mitigations (beta)"):
+        if len(filtered_df) > 0:
+            idx = st.number_input("Row index", min_value=0, max_value=len(filtered_df)-1, value=0, step=1)
+            row = filtered_df.iloc[int(idx)]
+            narrative = str(row.get("narrative", "")) if hasattr(row, "get") else ""
+            summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
+            st.markdown("**Summary**"); st.write(summary)
+            st.markdown("**Mitigation Recommendations**")
+            for r in recs:
+                st.write(f"- {r}")
+        else:
+            st.info("No rows available to summarise.")
+    # ------ PAGE DISPATCH ------   # (leave your existing code below)
+
