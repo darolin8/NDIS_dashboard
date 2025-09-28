@@ -1558,27 +1558,77 @@ def integrate_enhanced_features(existing_main_function):
   
 
 
-    # === ML: filtered features (optional convenience for pages) ===
-    try:
-        X_filt, feature_names_filt, features_df_filt = create_comprehensive_features(filtered_df)
-        st.session_state.features_df_filtered = features_df_filt
-        st.session_state.feature_names_filtered = feature_names_filt
-    except Exception:
-        st.session_state.features_df_filtered = None
-        st.session_state.feature_names_filtered = None
+    # ---------- Generative helpers: summaries + mitigations (rule-based) ----------
 
-    # --- AI Summary & Mitigations (beta) ---  <<<<<< ADD HERE
-    with st.expander("🧠 AI Summary & Mitigations (beta)"):
-        if len(filtered_df) > 0:
-            idx = st.number_input("Row index", min_value=0, max_value=len(filtered_df)-1, value=0, step=1)
-            row = filtered_df.iloc[int(idx)]
-            narrative = str(row.get("narrative", "")) if hasattr(row, "get") else ""
-            summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
-            st.markdown("**Summary**"); st.write(summary)
-            st.markdown("**Mitigation Recommendations**")
-            for r in recs:
-                st.write(f"- {r}")
-        else:
-            st.info("No rows available to summarise.")
-    # ------ PAGE DISPATCH ------   # (leave your existing code below)
+from typing import Any, Dict, List, Tuple
+
+def _to_dict(row: Any) -> Dict[str, Any]:
+    try:
+        return row.to_dict()  # pandas Series
+    except Exception:
+        return dict(row) if isinstance(row, dict) else {}
+
+def _safe_int(x, default=None):
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+def summarize_incident_row(row_like: Any) -> str:
+    """1–2 sentence summary from available fields (no PHI)."""
+    row = _to_dict(row_like)
+    typ = str(row.get("incident_type", "incident")).strip().title() or "Incident"
+    sev = str(row.get("severity", "Unknown")).strip()
+    loc = str(row.get("location", "Unknown")).strip()
+    carer = f"Carer {row.get('carer_id')}" if row.get("carer_id") else "Carer"
+    date = str(row.get("incident_date", "")).split(" ")[0]
+    delay = _safe_int(row.get("notification_delay_days"), None)
+    delay_txt = f", notified after {delay} day(s)" if delay is not None else ""
+    return (
+        f"On {date} at {loc}, a {typ} occurred (severity: {sev}){delay_txt}. "
+        f"{carer} documented the incident; follow-up actions were recorded where applicable."
+    )
+
+def recommend_mitigations(row_like: Any) -> List[str]:
+    """Short prioritized mitigations from simple rules (no PHI)."""
+    row = _to_dict(row_like)
+    recs: List[str] = []
+    sev_raw = str(row.get("severity", "")).lower()
+    typ = str(row.get("incident_type", "")).lower()
+    delay = _safe_int(row.get("notification_delay_days"), None)
+    rep = _safe_int(row.get("reportable_bin"), 0)
+
+    if delay is not None and delay > 1:
+        recs.append("Reinforce 24-hour notification SOP and enable auto-reminders at 12 hours.")
+    if "self" in typ or "harm" in typ:
+        recs.append("Initiate immediate risk review and update the participant safety plan with a clinician.")
+    if "medication" in typ:
+        recs.append("Run a double-check protocol refresher and update the MAR audit checklist.")
+    if "fall" in typ:
+        recs.append("Conduct an environment assessment and install fall-prevention aids.")
+    if sev_raw in {"high", "critical", "4", "5"} or (rep == 1 and sev_raw in {"moderate", "3"}):
+        recs.append("Escalate to on-call senior and schedule a post-incident debrief within 48 hours.")
+
+    if not recs:
+        recs.append("Log incident, review care-plan triggers, and schedule targeted refresher training.")
+
+    # de-duplicate while preserving order
+    seen = set(); out: List[str] = []
+    for r in recs:
+        if r not in seen:
+            out.append(r); seen.add(r)
+    return out
+
+def generate_summary_and_mitigations(
+    row_like: Any,
+    narrative: str | None = None,
+    llm_call: None | callable = None,
+) -> Tuple[str, List[str]]:
+    """
+    Returns (summary, mitigations). If llm_call is provided (prompt -> text),
+    you can swap to model-generated text later; for now we return rule-based outputs.
+    """
+    # For now, ignore llm_call and narrative; keep deterministic outputs
+    return summarize_incident_row(row_like), recommend_mitigations(row_like)
+
 
