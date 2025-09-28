@@ -267,38 +267,6 @@ def main():
     st.session_state["APP_FILTERED_DF"] = filtered_df
     st.session_state["APP_GROUP_BY"] = group_by
 
-    # === ML: filtered features (optional convenience for pages) ===
-    try:
-        X_filt, feature_names_filt, features_df_filt = create_comprehensive_features(filtered_df)
-        st.session_state.features_df_filtered = features_df_filt
-        st.session_state.feature_names_filtered = feature_names_filt
-    except Exception:
-        st.session_state.features_df_filtered = None
-        st.session_state.feature_names_filtered = None
-
-        # === ML: filtered features (optional convenience for pages) ===
-    try:
-        X_filt, feature_names_filt, features_df_filt = create_comprehensive_features(filtered_df)
-        st.session_state.features_df_filtered = features_df_filt
-        st.session_state.feature_names_filtered = feature_names_filt
-    except Exception:
-        st.session_state.features_df_filtered = None
-        st.session_state.feature_names_filtered = None
-
-    # --- AI Summary & Mitigations (beta) ---   <-- PASTE HERE
-    st.markdown("## 🧠 AI Summary & Mitigations (beta)")
-    with st.expander("Show / hide", expanded=True):
-        st.caption(f"[debug] filtered_df rows: {len(filtered_df)}")
-        if len(filtered_df) > 0:
-            idx = st.number_input("Row index", 0, len(filtered_df)-1, 0, step=1, key="gen_idx")
-            row = filtered_df.iloc[int(idx)]
-            narrative = str(row["narrative"]) if "narrative" in filtered_df.columns else ""
-            summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
-            st.markdown("**Summary**"); st.write(summary)
-            st.markdown("**Mitigation Recommendations**")
-            for r in recs: st.write(f"- {r}")
-        else:
-            st.info("No rows available to summarise. Clear filters if needed.")
 
 
     # ------ PAGE DISPATCH ------
@@ -312,6 +280,31 @@ def main():
         display_ml_insights_section(filtered_df)
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
+
+
+ # === BELOW THE PAGE CONTENT ===
+    st.markdown("---")
+    st.markdown("## 🧠 AI Summary & Mitigations (beta)")
+    with st.expander("Show / hide", expanded=True):
+        st.caption(f"[debug] filtered_df rows: {len(filtered_df)}")
+        if len(filtered_df) > 0:
+            idx = st.number_input(
+                "Row index",
+                min_value=0,
+                max_value=len(filtered_df)-1,
+                value=0,
+                step=1,
+                key=f"gen_idx_{page}"  # unique per page to avoid widget clashes
+            )
+            row = filtered_df.iloc[int(idx)]
+            narrative = str(row["narrative"]) if "narrative" in filtered_df.columns else ""
+            summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
+            st.markdown("**Summary**"); st.write(summary)
+            st.markdown("**Mitigation Recommendations**")
+            for r in recs:
+                st.write(f"- {r}")
+        else:
+            st.info("No rows available to summarise. Clear filters if needed.")
 
 
 if __name__ == "__main__":
