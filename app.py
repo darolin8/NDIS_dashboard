@@ -281,10 +281,9 @@ def main():
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
 
+def render_ai_summary_section(filtered_df, page_key: str = "global"):
+   
 
-if __name__ == "__main__":
-    main()
- # === BELOW THE PAGE CONTENT ===
     st.markdown("---")
     st.markdown("## 🧠 AI Summary & Mitigations (beta)")
     with st.expander("Show / hide", expanded=True):
@@ -293,17 +292,24 @@ if __name__ == "__main__":
             idx = st.number_input(
                 "Row index",
                 min_value=0,
-                max_value=len(filtered_df)-1,
+                max_value=len(filtered_df) - 1,
                 value=0,
                 step=1,
-                key=f"gen_idx_{page}"  # unique per page to avoid widget clashes
+                key=f"gen_idx_{page_key}"   # unique per page
             )
             row = filtered_df.iloc[int(idx)]
             narrative = str(row["narrative"]) if "narrative" in filtered_df.columns else ""
             summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
-            st.markdown("**Summary**"); st.write(summary)
+            st.markdown("**Summary**")
+            st.write(summary)
             st.markdown("**Mitigation Recommendations**")
             for r in recs:
                 st.write(f"- {r}")
         else:
             st.info("No rows available to summarise. Clear filters if needed.")
+
+
+
+if __name__ == "__main__":
+    main()
+ 
