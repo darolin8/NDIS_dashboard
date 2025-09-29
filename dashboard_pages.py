@@ -1315,7 +1315,6 @@ def plot_contributing_factors_by_month(df, top_k=25):
 
 def display_compliance_investigation_section(df):
     st.header("Compliance & Investigation")
-    st.write("Compliance rates, delays, and investigation pipeline overview.")
     if df.empty:
         st.info("No data available.")
         return
