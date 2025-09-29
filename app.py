@@ -276,37 +276,31 @@ def main():
         display_operational_performance_section(filtered_df)
     elif page == "📋 Compliance & Investigation":
         display_compliance_investigation_section(filtered_df)
+        render_ai_summary_section(filtered_df, page_key="comp")
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
 
-def render_ai_summary_section(filtered_df, page_key: str = "global"):
-   
+def render_ai_summary_section(df, page_key: str):
+    import streamlit as st
+    from ndis_dashboard.utils.generative import generate_summary_and_mitigations
 
     st.markdown("---")
-    st.markdown("## 🧠 AI Summary & Mitigations (beta)")
+    st.subheader("🧠 AI Summary & Mitigations (beta)")
     with st.expander("Show / hide", expanded=True):
-        st.caption(f"[debug] filtered_df rows: {len(filtered_df)}")
-        if len(filtered_df) > 0:
-            idx = st.number_input(
-                "Row index",
-                min_value=0,
-                max_value=len(filtered_df) - 1,
-                value=0,
-                step=1,
-                key=f"gen_idx_{page_key}"   # unique per page
-            )
-            row = filtered_df.iloc[int(idx)]
-            narrative = str(row["narrative"]) if "narrative" in filtered_df.columns else ""
+        st.caption(f"[debug] rows available: {len(df)}")
+        if len(df) > 0:
+            idx = st.number_input("Row index", 0, len(df)-1, 0, step=1, key=f"gen_idx_{page_key}")
+            row = df.iloc[int(idx)]
+            narrative = str(row["narrative"]) if "narrative" in df.columns else ""
             summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
-            st.markdown("**Summary**")
-            st.write(summary)
+            st.markdown("**Summary**"); st.write(summary)
             st.markdown("**Mitigation Recommendations**")
-            for r in recs:
-                st.write(f"- {r}")
+            for r in recs: st.write(f"- {r}")
         else:
-            st.info("No rows available to summarise. Clear filters if needed.")
+            st.info("No rows available to summarise.")
+
 
 
 
