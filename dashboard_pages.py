@@ -15,6 +15,19 @@ except Exception:
         s = str(x)
         return (s.split(";")[0] or s)[:30]
 
+
+# Unified theme kit (from utils/theme.py next to this file)
+from utils.theme import (
+    css,
+    set_plotly_theme,
+    kpi_card,
+    section_title,
+    severity_color_map,
+    compliance_band_color_map,
+    divider,
+)
+
+
 # Import ml_helpers as a module and verify required symbols
 try:
     ML = importlib.import_module("ml_helpers")
