@@ -27,6 +27,14 @@ from utils.theme import (
     divider,
 )
 
+# Theme bootstrapping (run once per session)
+if "theme_bootstrapped" not in st.session_state:
+    try:
+        css()
+        set_plotly_theme()
+    finally:
+        st.session_state["theme_bootstrapped"] = True
+
 
 # Import ml_helpers as a module and verify required symbols
 try:
