@@ -1,9 +1,7 @@
-
-# app.py
+# ---- BEGIN: robust import bootstrap (VERY TOP of app.py) ----
 import os, sys
 import streamlit as st
 import pandas as pd
-
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)
@@ -43,9 +41,6 @@ except Exception as e:
 # ✅ Your modules
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
-from ndis_dashboard.utils.generative import generate_summary_and_mitigations
-
-
 
 # ----- CONFIG -----
 st.set_page_config(
@@ -270,7 +265,14 @@ def main():
     st.session_state["APP_FILTERED_DF"] = filtered_df
     st.session_state["APP_GROUP_BY"] = group_by
 
-
+    # === ML: filtered features (optional convenience for pages) ===
+    try:
+        X_filt, feature_names_filt, features_df_filt = create_comprehensive_features(filtered_df)
+        st.session_state.features_df_filtered = features_df_filt
+        st.session_state.feature_names_filtered = feature_names_filt
+    except Exception:
+        st.session_state.features_df_filtered = None
+        st.session_state.feature_names_filtered = None
 
     # ------ PAGE DISPATCH ------
     if page == "📊 Executive Summary":
@@ -279,34 +281,11 @@ def main():
         display_operational_performance_section(filtered_df)
     elif page == "📋 Compliance & Investigation":
         display_compliance_investigation_section(filtered_df)
-        render_ai_summary_section(filtered_df, page_key="comp")
     elif page == "🤖 ML Insights":
         display_ml_insights_section(filtered_df)
     elif page == "🗺️ Incident Map":
         render_incident_mapping(df, filtered_df)
 
-def render_ai_summary_section(df, page_key: str):
-    import streamlit as st
-    from ndis_dashboard.utils.generative import generate_summary_and_mitigations
-
-    st.markdown("---")
-    st.subheader("🧠 AI Summary & Mitigations (beta)")
-    with st.expander("Show / hide", expanded=True):
-        st.caption(f"[debug] rows available: {len(df)}")
-        if len(df) > 0:
-            idx = st.number_input("Row index", 0, len(df)-1, 0, step=1, key=f"gen_idx_{page_key}")
-            row = df.iloc[int(idx)]
-            narrative = str(row["narrative"]) if "narrative" in df.columns else ""
-            summary, recs = generate_summary_and_mitigations(row, narrative=narrative)
-            st.markdown("**Summary**"); st.write(summary)
-            st.markdown("**Mitigation Recommendations**")
-            for r in recs: st.write(f"- {r}")
-        else:
-            st.info("No rows available to summarise.")
-
-
-
 
 if __name__ == "__main__":
     main()
- 
