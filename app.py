@@ -42,6 +42,12 @@ except Exception as e:
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
 from ndis_dashboard.utils.generative import generate_summary_and_mitigations
+#
+from pages.dashboard_pages import run  
+
+if __name__ == "__main__":
+    run()
+
 
 
 # ----- CONFIG -----
