@@ -1,7 +1,39 @@
-# ---- BEGIN: robust import bootstrap (VERY TOP of app.py) ----
+
+# app.py
 import os, sys
 import streamlit as st
 import pandas as pd
+
+# Make project root importable (so "pages" and "utils" resolve)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+# Import the page registry and data loader from your dashboard module
+from pages.dashboard_pages import PAGE_ORDER, render_page, load_ndis_data
+from utils.theme import css, set_plotly_theme  # optional global theming
+
+def main():
+    st.set_page_config(page_title="NDIS Incident Dashboard", layout="wide")
+
+    # Apply theme (since you chose Option B and there is no run() wrapper here)
+    try:
+        css()
+        set_plotly_theme()
+    except Exception:
+        pass
+
+    # Load data once (cached is handled inside load_ndis_data if you added @st.cache_data there)
+    df = load_ndis_data()
+
+    # Sidebar nav
+    page = st.sidebar.selectbox("Go to page", PAGE_ORDER)
+    render_page(page, df)
+
+if __name__ == "__main__":
+    main()
+
+
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)
@@ -42,11 +74,6 @@ except Exception as e:
 from incident_mapping import render_incident_mapping
 from utils.ndis_enhanced_prep import prepare_ndis_data, create_comprehensive_features
 from ndis_dashboard.utils.generative import generate_summary_and_mitigations
-#
-from pages.dashboard_pages import run  
-
-if __name__ == "__main__":
-    run()
 
 
 
