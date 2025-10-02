@@ -15,8 +15,6 @@ except Exception:
         s = str(x)
         return (s.split(";")[0] or s)[:30]
 
-
-
 # Import ml_helpers as a module and verify required symbols
 try:
     ML = importlib.import_module("ml_helpers")
@@ -1317,6 +1315,7 @@ def plot_contributing_factors_by_month(df, top_k=25):
 
 def display_compliance_investigation_section(df):
     st.header("Compliance & Investigation")
+    st.write("Compliance rates, delays, and investigation pipeline overview.")
     if df.empty:
         st.info("No data available.")
         return
@@ -1695,7 +1694,6 @@ def render_page(page_name: str, df):
         st.error(f"Unknown page: {page_name}")
         return
     return fn(df)
-
 
 __all__ = [
     "display_executive_summary_section",
