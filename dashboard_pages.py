@@ -16,18 +16,6 @@ except Exception:
         return (s.split(";")[0] or s)[:30]
 
 
-# Unified theme kit (from utils/theme.py next to this file)
-from utils.theme import (
-    css,
-    set_plotly_theme,
-    kpi_card,
-    section_title,
-    severity_color_map,
-    compliance_band_color_map,
-    divider,
-)
-
-
 
 # Import ml_helpers as a module and verify required symbols
 try:
@@ -1707,19 +1695,6 @@ def render_page(page_name: str, df):
         st.error(f"Unknown page: {page_name}")
         return
     return fn(df)
-
-def run():
-    # Always set page config first
-    st.set_page_config(page_title="NDIS Incident Dashboard", layout="wide")
-
-    # Apply your UI kit
-    try:
-        css()              # inject global styles
-        set_plotly_theme() # set Plotly template
-    except Exception:
-        pass
-
-    # ...rest of your dashboard code...
 
 
 __all__ = [
