@@ -27,13 +27,6 @@ from utils.theme import (
     divider,
 )
 
-# Theme bootstrapping (run once per session)
-if "theme_bootstrapped" not in st.session_state:
-    try:
-        css()
-        set_plotly_theme()
-    finally:
-        st.session_state["theme_bootstrapped"] = True
 
 
 # Import ml_helpers as a module and verify required symbols
@@ -1714,6 +1707,20 @@ def render_page(page_name: str, df):
         st.error(f"Unknown page: {page_name}")
         return
     return fn(df)
+
+def run():
+    # Always set page config first
+    st.set_page_config(page_title="NDIS Incident Dashboard", layout="wide")
+
+    # Apply your UI kit
+    try:
+        css()              # inject global styles
+        set_plotly_theme() # set Plotly template
+    except Exception:
+        pass
+
+    # ...rest of your dashboard code...
+
 
 __all__ = [
     "display_executive_summary_section",
